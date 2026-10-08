@@ -1,0 +1,6 @@
+venv/
+.venv/
+*.db
+outbox.log
+__pycache__/
+.pytest_cache/

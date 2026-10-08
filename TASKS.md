@@ -10,7 +10,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 ## Fase 1 — Base
 
 ### T-01 — Esqueleto del proyecto
-- **Estado:** PENDIENTE
+- **Estado:** HECHA
 - **Depende de:** —
 - **Qué:** Si no existe, `git init` con `.gitignore` (venv, `*.db`, `outbox.log`, `__pycache__`). Crear `app/` con fábrica Flask, `requirements.txt`, `tests/conftest.py` con app de prueba y base temporal.
 - **Término:** `pytest` corre (aunque sea con una prueba trivial) y `flask --app app run` levanta una página de inicio.
