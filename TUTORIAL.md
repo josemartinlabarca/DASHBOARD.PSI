@@ -112,9 +112,23 @@ git conserva cada revisión aunque `REVIEW.md` se sobrescriba.
   1. **Los agentes inventan la hora.** Las horas de `PROGRESS.md` (`23:40`, `23:59`, `10:30`) no coincidían con los commits (`23:36`, `23:42`, `00:05`). Corregí los datos y añadí a `CLAUDE.md` las reglas 8–10: la hora se obtiene con `date`, se reporta solo lo realmente ejecutado y todo archivo no pedido se justifica.
   2. **Mi propio `pytest` falló** con `No module named 'flask'`. No era un defecto del proyecto: mi shell resolvía a una copia aislada de `uv` que no tiene Flask. Es exactamente el problema que evita un venv. Investigué antes de culpar al agente o al código.
 
+### Vuelta 5 — T-03 Registro de pacientes (primera tarea con seguridad)
+- **Implementador:** blueprint `auth` con `/registro`, CSRF propio y centralizado (`app/seguridad.py`, D-009), validaciones (D-010), hash `scrypt`, rol forzado a `paciente`, duplicados capturando `IntegrityError`. 62 pruebas (37 nuevas). Probó mutaciones: quitó CSRF, hash, rol… y comprobó que las pruebas fallaban.
+- **Mi verificación:** recorrido real con curl contra un servidor. Añadí un ataque que el implementador no probó: **usar el token CSRF de una sesión en otra** (da 400, correcto). La base quedó con 1 usuario, hash `scrypt` y rol `paciente`.
+- **Revisor (modo auditor de seguridad): APROBADO**, con 4 hallazgos medios reales:
+  1. **Windows sin `tzdata`:** `ZoneInfo("America/Santiago")` rompe incluso `init-db`. Lo simuló y falló.
+  2. **Normalización del correo:** `ana@…` en ancho completo, una «е» cirílica o un carácter de ancho cero se aceptan como cuentas distintas. La UNIQUE de SQLite distingue mayúsculas, así que la unicidad depende solo de esa función.
+  3. **Sin `MAX_CONTENT_LENGTH`:** el límite de 128 caracteres de la contraseña no protege el cuerpo de la petición.
+  4. **Sesión:** `SameSite` sin fijar y el token CSRF no rota al iniciar sesión (fijación de sesión).
+- **Hallazgo sobre las pruebas:** de 8 mutaciones que el revisor intentó, **4 dejaron las 62 pruebas en verde** (por ejemplo, CSRF solo para POST, o `|safe` en el correo). Que las pruebas pasen no significa que protejan.
+- **Mi decisión como orquestador:** los hallazgos 1–3 se agrupan en **T-03b**, que debe ir **antes** de T-04, porque el login reutilizará la normalización del correo. El hallazgo 4 se asigna a T-04, que es donde nace el login. El resto va al backlog con tarea asignada.
+- **Lección:** el orden de las tareas es una herramienta. Arreglar los cimientos de la autenticación antes de construir el login sale más barato que corregirlos después.
+
 ### Historial git resultante
 
 ```
+T-03 revisión: REVIEW.md aprobado, tarea T-03b y backlog
+T-03: registro de pacientes con CSRF propio y validación
 T-02d revisión y backlog, reglas 8–10 de CLAUDE.md
 T-02d: validar SECRET_KEY al servir peticiones, no en comandos CLI
 T-02b revisión: REVIEW.md aprobado y tarea de seguimiento T-02d
@@ -129,14 +143,15 @@ docs: documentación base del proyecto Agenda Psi
 
 ## 4. Estado actual y qué sigue
 
-- Hecho: **T-01, T-02, T-02b, T-02d** (25 pruebas pasando).
-- Pendiente de tu decisión: **T-02c** (refuerzos del esquema). Lee los hallazgos con `git log -p -- REVIEW.md`, decide cuáles aceptas, regístralos en `DECISIONS.md` como D-007 y actualiza `ARCHITECTURE.md`. Debe estar hecha antes de T-05, pero **no bloquea T-03 ni T-04**.
-- Siguiente sin decisión tuya: **T-03** (registro de pacientes).
-- Orden sugerido: T-03 → T-04 → T-02c → T-05 → ... (las dependencias en `TASKS.md` ya lo imponen).
+- Hecho: **T-01, T-02, T-02b, T-02d, T-03** (62 pruebas pasando).
+- Siguiente sin decisión tuya: **T-03b** (endurecer el registro: `tzdata`, normalización del correo, tamaño de petición, pruebas más fuertes). Bloquea T-04.
+- Pendiente de tu decisión: **T-02c** (refuerzos del esquema, más dos puntos nuevos: `COLLATE NOCASE` en el correo y añadir `seguridad.py` a `ARCHITECTURE.md`). Lee los hallazgos con `git log -p -- REVIEW.md`, decide cuáles aceptas y regístralos como D-007. Debe estar hecha antes de T-05, pero **no bloquea T-03b ni T-04**.
+- Orden sugerido: T-03b → T-04 → T-02c → T-05 → ... (las dependencias en `TASKS.md` ya lo imponen).
 
-**Tu primer ejercicio:** lanza tú mismo la vuelta de T-03 con el prompt del Paso B y
+**Tu primer ejercicio:** lanza tú mismo la vuelta de T-03b con el prompt del Paso B y
 revisa el resultado con la lista del Paso C. Antes de dar por buena cualquier tarea, haz
-una pregunta extra: *¿esto rompió algo que ya estaba documentado?* Hazlo antes de pensar en automatizar.
+dos preguntas extra: *¿esto rompió algo que ya estaba documentado?* y *¿estas pruebas fallarían si quitara la protección?*
+Hazlo antes de pensar en automatizar.
 
 ## 5. Consejos profesionales (lo que hace la diferencia)
 
@@ -156,6 +171,10 @@ una pregunta extra: *¿esto rompió algo que ya estaba documentado?* Hazlo antes
 14. **Exige el recorrido literal.** El mejor criterio de término para algo documentado es ejecutar la documentación tal cual, en un entorno limpio. Encontró un defecto que 14 pruebas verdes no veían.
 15. **Reproduce antes de crear una tarea.** Un hallazgo del revisor es una hipótesis hasta que lo reproduces.
 16. **Cuando tu verificación contradice al agente, investiga la causa.** Puede ser tu entorno, el agente o el código; las tres cosas pasaron en esta sesión.
+17. **"Todas las pruebas pasan" no es "está protegido".** Rompe el código a propósito (mutación) y comprueba que alguna prueba falla. En T-03, 4 de 8 mutaciones dejaron la suite en verde.
+18. **No escribas tu propia seguridad sin motivo, y si lo haces, que te la ataquen.** El CSRF propio fue una decisión consciente (sin dependencias, D-009), pero por eso se revisó con mentalidad de auditor. Los fallos reales salieron de los casos límite: Unicode, Windows, tamaño de la petición.
+19. **Prueba como un atacante, no solo como un usuario.** Reutilizar el token de otra sesión, enviar `rol=profesional`, mandar un correo en ancho completo: ninguno es un uso normal y todos son los que importan.
+20. **El orden de las tareas es una herramienta de gestión.** Mover un arreglo antes de una tarea que lo reutiliza evita deuda sobre los cimientos.
 
 ## 6. Trampas de principiante que ya viste en acción
 
