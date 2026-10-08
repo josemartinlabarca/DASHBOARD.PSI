@@ -126,9 +126,16 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Nota (revisión de T-02e, R-04):** el esquema acepta en `duracion_min` valores no enteros (`'abc'`, `0.5`, `1e30`, BLOB) porque D-007 solo exige `> 0`; la aplicación debe validar que sea un entero positivo antes de insertar. Añadir `typeof(duracion_min) = 'integer'` al CHECK sería decisión humana (nueva D-0xx) y no se propone todavía.
 - **Término:** Pruebas: crear hora válida, rechazar pasado, rechazar solape, no eliminar reservada.
 
-### T-06 — Paciente ve horas libres
+### T-05b — Cerrar hallazgos de la revisión de T-05 (sin decisiones humanas)
 - **Estado:** PENDIENTE
 - **Depende de:** T-05
+- **Qué:** (1) **R-01 (media):** tope superior de fecha futura (máximo 2 años desde hoy, documentado en una decisión nueva de la aplicación, no del esquema) con mensaje en español; hoy `9999-12-31 23:59` se acepta y un solape posterior da 500 por `OverflowError` en `_describir`. Además `_describir`/`mostrar_inicio` no deben poder lanzar excepción con ninguna fila válida del esquema. Pruebas con 2500-01-01, 9999-12-31 y el límite exacto. (2) **R-03 (baja):** el solape se calcula en "reloj de pared" y falla en las dos noches de cambio de horario (50 min a las 23:30 la noche de septiembre pisa las 01:00 y no se detecta; 120 min en abril da falso solape). Calcular inicio y fin como **instantes absolutos** (datetimes con zona, convertidos a UTC) y comparar en Python las horas del mismo profesional; pruebas con ambas noches. Actualizar D-025 (5) con lo que quede. (3) **R-05 (baja):** el botón «Eliminar» del panel lleva token CSRF, y una prueba lo exige (quitarlo hoy no rompe nada); revisar las otras mutaciones que sobreviven (PROGRESS nombra 4; el revisor halló 3 distintas). (4) **R-04 (baja):** doble envío de «Agregar» muestra «se solapa» aunque la hora sí se creó: si la hora solapada es exactamente la misma (mismo inicio y duración, mismo profesional), el mensaje debe decir «Esa hora ya está publicada». Pruebas.
+- **Término:** Las mutaciones "sin tope superior", "solape en reloj de pared" y "quitar CSRF del botón Eliminar" hacen fallar al menos una prueba; `python3 -m pytest` pasa. Debe quedar HECHA **antes** de T-06.
+- **Origen:** REVIEW de T-05 (R-01, R-03, R-04, R-05).
+
+### T-06 — Paciente ve horas libres
+- **Estado:** PENDIENTE
+- **Depende de:** T-05, T-05b
 - **Qué:** `/paciente/horas` con horas libres futuras ordenadas (US-7).
 - **Término:** Prueba: solo aparecen horas libres y futuras.
 
@@ -227,6 +234,11 @@ en qué tarea conviene absorberlo.
 | T-04b R-06 | Pasan nombres visualmente vacíos (U+3164, U+2800, combinante suelto) y «zalgo» de hasta 100 caracteres | junto a D-020 |
 | T-04b R-08 | Suite de ~25 s: fijar un umbral de ~60 s antes de abrir tarea de velocidad | cuando supere 60 s |
 | T-04b R-04 | El botón «atrás» con bfcache en navegadores con interfaz/Firefox/Safari no está comprobado | T-14 |
+| T-05 R-02 | Si otro escritor retiene el bloqueo de SQLite más de 5 s, agregar y eliminar horas dan 500 ("database is locked"); sin transacción abierta. Manejar con mensaje en español y reintento | T-08 / T-14 |
+| T-05 R-04 | Doble envío de «Eliminar» da 404 en inglés | T-13 (páginas 404 en español) |
+| T-05 R-06 | Werkzeug acepta dígitos Unicode en la URL (`%D9%A1` borró la hora 1): inocuo, pero ids de ruta deberían ser solo ASCII si se endurece | T-14 |
+| T-05 R-07 | El panel oculta las horas ya iniciadas pero aún no terminadas; decidir si se muestran | T-06/T-08 |
+| T-05 R-12 | La suite supera 35 s; el umbral de acción es 60 s | cuando supere 60 s |
 | T-02c #9 | En `tests/test_esquema.py` la cobertura de NOT NULL y FK es triplemente redundante y la rama `usuarios` de `test_not_null_rechaza_null` es poco legible | cuando se toque ese archivo |
 
 ---
