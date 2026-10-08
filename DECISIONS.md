@@ -203,6 +203,18 @@ Autorizas a que se modifique `ARCHITECTURE.md` (que `CLAUDE.md` reserva al human
 - **Implementada:** T-02f, 2026-10-08 01:09
 
 
+## D-018 — Cerrar el hueco del carácter nulo en `horas.inicio` (T-02g) — **APROBADA por el humano (2026-10-08 01:16)**
+- **Fecha:** 2026-10-08
+- **Estado:** APROBADA el 2026-10-08 01:16 (hora de Chile): el humano eligió la opción recomendada. Origen: hallazgo 1 de la revisión de T-02f (reproducido por el orquestador y confirmado por el revisor).
+- **Problema:** el CHECK de D-017 usa `GLOB`, que trabaja sobre cadenas C: `2026-12-01T10:00:00` seguido de un NUL (`\x00`) y cualquier texto **pasa** el CHECK y es un valor distinto del canónico, de modo que también **elude la UNIQUE**. D-017 prometía que "la base rechaza cualquier otro formato". Con SQLite 3.45.1.
+- **Decisión:** añadir `AND instr(inicio, char(0)) = 0` al CHECK de formato de `horas.inicio`, de modo que quede `CHECK (inicio GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]' AND instr(inicio, char(0)) = 0)`.
+- **Porqué:** es la corrección mínima y legible; el orquestador probó 4 candidatos y el revisor confirmó que esta cierra el hueco (rechaza NUL al final, solo, al inicio y en medio, y acepta el canónico).
+- **Alternativas descartadas:**
+  - `CHECK (length(inicio) = 19)`: **no funciona**; `length()` sobre TEXT se detiene en el primer NUL (comprobado). Fue la sugerencia inicial del implementador, que la afirmó sin ejecutarla.
+  - `length(CAST(inicio AS BLOB)) = 19`: funciona, pero fija la longitud y es menos obvio de leer.
+  - No cambiar el esquema y confiar en la aplicación: descartada por el humano.
+- **Implementación:** T-02g. Autorizada a modificar `app/schema.sql` y la línea `inicio` del "Modelo de datos" de `ARCHITECTURE.md` **solo** para esto. Consecuencia ya conocida (D-006): borrar `agenda.db` y volver a ejecutar `init-db`.
+
 ## D-00X — Título
 - **Fecha:**
 - **Decisión:**

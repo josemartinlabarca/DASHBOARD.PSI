@@ -51,10 +51,18 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Término:** Pruebas nuevas fallan si se quita el `ON DELETE SET NULL` o el CHECK del formato; `python3 -m pytest` pasa.
 - **Origen:** D-016 y D-017 (revisión de T-02c, hallazgos 1 y 3).
 
+### T-02g — Cerrar el hueco del carácter nulo en `horas.inicio` (D-018, aprobada 2026-10-08 01:16)
+- **Estado:** PENDIENTE — decisión humana **APROBADA** (D-018). Autorizada a modificar `app/schema.sql` y la línea `inicio` de `ARCHITECTURE.md` **solo** para esto.
+- **Depende de:** T-02f
+- **Qué:** (1) Añadir `AND instr(inicio, char(0)) = 0` al CHECK de formato de `horas.inicio` (D-018) y reflejarlo en `ARCHITECTURE.md`. (2) **Reemplazar** la prueba `test_limitacion_conocida_nul_tras_el_prefijo_canonico_pasa_el_check` (que documenta el defecto aceptándolo y fallaría sin explicación al corregirlo) por pruebas que exijan el rechazo: NUL al final, NUL solo tras el prefijo, NUL con texto, NUL al inicio y NUL en medio; el canónico se acepta. (3) Cerrar los huecos de las mutaciones del GLOB que dejaban todo en verde (hallazgo 5 de la revisión de T-02f): una prueba **por posición** de carácter inválido (16 de los 19 caracteres no son separadores: sustituir cada dígito por una letra y cada separador por otro carácter), aceptar el espacio como separador (`2026-12-01 10:00:00`), y un comodín en el año. (4) En la prueba de control con claves foráneas apagadas, afirmar el estado del `PRAGMA` tras apagarlo (hallazgo 7).
+- **Término:** Las mutaciones "quitar `instr(...)`", "GLOB con `[T ]`", "comodín en el año" y "quitar el CHECK de `inicio`" hacen fallar al menos una prueba; `python3 -m pytest` pasa. Debe quedar HECHA **antes** de T-02e y de T-05.
+- **Origen:** D-018 (revisión de T-02f, hallazgos 1, 2, 5 y 7).
+
 ### T-02e — Fijar el conjunto exacto de valores del esquema en las pruebas (hallazgo de la revisión de T-02c)
 - **Estado:** PENDIENTE
-- **Depende de:** T-02c, T-02f
+- **Depende de:** T-02c, T-02f, T-02g
 - **Qué:** Las pruebas de T-02c no detectan una restricción **ampliada**: añadir `'otro'` al CHECK de `notificaciones.tipo`, `'cancelada'` al de `horas.estado`, comparar `rol` con `lower()` o añadir un tope superior a `duracion_min` deja las 187 pruebas en verde (comprobado por el orquestador y por el revisor). Hacer que las pruebas fijen el conjunto exacto: la técnica más simple es comparar el SQL de cada tabla de `sqlite_master` con el esperado (normalizando espacios), o probar valores vecinos inválidos. Si D-016 o D-017 cambian el esquema, la comparación debe reflejarlo.
+- **También (hallazgo 6 de la revisión de T-02f):** añadir `ON UPDATE CASCADE` a `notificaciones.hora_id` hoy pasa sin que ninguna prueba falle porque la prueba de `PRAGMA foreign_key_list` solo lee `on_delete`: que compare también `on_update` (y la columna entera de `foreign_key_list`).
 - **Término:** Las mutaciones "ampliar `tipo` con `'otro'`", "ampliar `estado` con `'cancelada'`", "`rol` con `lower()`" y "tope superior en `duracion_min`" hacen fallar al menos una prueba; `python3 -m pytest` pasa. Debe quedar HECHA **antes** de T-05.
 - **Origen:** REVIEW de T-02c, hallazgo 2.
 
@@ -102,9 +110,10 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 
 ### T-05 — Profesional agrega y elimina horas
 - **Estado:** PENDIENTE
-- **Depende de:** T-04, T-02c, T-02e, T-02f
+- **Depende de:** T-04, T-02c, T-02e, T-02f, T-02g
 - **Qué:** Formulario y rutas de US-4 y US-5 con reglas 2, 3 y 4.
 - **Requisitos que vienen de las revisiones de T-02c (resolver al implementar):** (a) **D-016 y D-017 ya están decididas** (T-02f las aplica al esquema): la aplicación debe guardar `inicio` siempre en formato canónico `YYYY-MM-DDTHH:MM:SS` hora local de Chile, validar que la fecha exista y no sea pasada, y poder eliminar una hora que fue reservada y cancelada; (b) la comprobación de solape (regla §4.3 y §4.5) debe hacerse dentro de una transacción `BEGIN IMMEDIATE`, porque el esquema solo impide inicios idénticos, no solapes parciales; (c) pruebas del flujo real: reservar → cancelar → eliminar la hora debe funcionar.
+- **Consecuencia de D-016 (revisión de T-02f, hallazgo 3):** `INSERT OR REPLACE` / `REPLACE INTO` sobre `horas` borra y reinserta la fila, lo que **dispara `ON DELETE SET NULL` y pierde el vínculo de las notificaciones sin avisar** (comprobado por el revisor). Prohibido en todo el código sobre `horas`: usar `INSERT`, `UPDATE` o `DELETE` explícitos (una prueba o una comprobación sobre el código fuente debe vigilarlo). `UPDATE` y `ON CONFLICT DO UPDATE` no lo disparan. Además `inicio` solo se guarda como resultado de formatear un `datetime` (nunca texto crudo del formulario).
 - **Término:** Pruebas: crear hora válida, rechazar pasado, rechazar solape, no eliminar reservada.
 
 ### T-06 — Paciente ve horas libres
@@ -131,12 +140,14 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Estado:** PENDIENTE
 - **Depende de:** T-08
 - **Qué:** `notificaciones.py`; crear registros y escribir `outbox.log` al reservar y cancelar (US-11, US-13).
+- **Nota de revisión de T-02f (`hora_id` puede ser NULL, D-016):** T-09: el mensaje de la notificación debe bastarse solo (fecha, hora y contraparte), porque `hora_id` queda NULL si la hora se elimina (D-016); prueba con la hora eliminada.
 - **Término:** Pruebas: se crean notificaciones para ambas partes y aparece la línea en el log.
 
 ### T-10 — Recordatorios 24 h antes
 - **Estado:** PENDIENTE
 - **Depende de:** T-09
 - **Qué:** Comando `send-reminders` (US-12); no repite recordatorios (`recordatorio_enviado`).
+- **Nota de revisión de T-02f (`hora_id` puede ser NULL, D-016):** T-10: el recordatorio depende de `horas.recordatorio_enviado`, no de las notificaciones; añadir una prueba con una hora eliminada que tuvo notificaciones.
 - **Término:** Pruebas con hora a <24 h: envía una sola vez aunque se ejecute dos veces.
 
 ## Fase 5 — Interfaz
@@ -145,12 +156,14 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Estado:** PENDIENTE
 - **Depende de:** T-09
 - **Qué:** `/paciente` con próxima sesión, historial y campana de notificaciones (US-10).
+- **Nota de revisión de T-02f (`hora_id` puede ser NULL, D-016):** T-11: listar notificaciones con `LEFT JOIN` a `horas` y mostrar el mensaje sin enlace cuando `hora_id` es NULL (D-016).
 - **Término:** Prueba de contenido por rol; revisión visual en navegador.
 
 ### T-12 — Dashboard del profesional
 - **Estado:** PENDIENTE
 - **Depende de:** T-09
 - **Qué:** `/profesional` con agenda, horas libres y notificaciones (US-6).
+- **Nota de revisión de T-02f (`hora_id` puede ser NULL, D-016):** T-12: igual que T-11: `LEFT JOIN` y mensaje sin enlace cuando `hora_id` es NULL (D-016).
 - **Término:** Prueba de contenido por rol; revisión visual en navegador.
 
 ### T-13 — Estilo y plantilla base amigable
@@ -187,6 +200,7 @@ en qué tarea conviene absorberlo.
 | T-03 #8 | El mensaje de duplicado casi confirma que el correo existe (aceptado en D-010) | T-14 (revisar de nuevo) |
 | T-03 #9 | Los límites de longitud cuentan caracteres, no bytes (inocuo) | — |
 | T-02c #4 | `init-db` sobre una base con esquema antiguo termina con éxito y sin aviso, dejando las tablas sin las restricciones nuevas; avisar con `PRAGMA user_version` o comparando `sqlite_master` con `schema.sql` | T-14 |
+| T-02f #9 | `README.md:39`: la nota sobre borrar `agenda.db` es exacta pero la línea quedó demasiado larga | cuando se toque el README |
 | T-02c #9 | En `tests/test_esquema.py` la cobertura de NOT NULL y FK es triplemente redundante y la rama `usuarios` de `test_not_null_rechaza_null` es poco legible | cuando se toque ese archivo |
 
 ---
