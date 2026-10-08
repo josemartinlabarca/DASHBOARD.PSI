@@ -5,7 +5,7 @@
   {% if horas %}
     <table>
       <thead>
-        <tr><th>Fecha y hora</th><th>Duración</th><th>Profesional</th></tr>
+        <tr><th>Fecha y hora</th><th>Duración</th><th>Profesional</th><th>Reservar</th></tr>
       </thead>
       <tbody>
         {% for hora in horas %}
@@ -13,6 +13,12 @@
             <td>{{ hora.inicio }}</td>
             <td>{{ hora.duracion_min }} min</td>
             <td>{{ hora.profesional }}</td>
+            <td>
+              <form method="post" action="{{ url_for('paciente.reservar', hora_id=hora.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit">Reservar</button>
+              </form>
+            </td>
           </tr>
         {% endfor %}
       </tbody>

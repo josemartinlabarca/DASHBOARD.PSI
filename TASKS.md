@@ -141,7 +141,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Término:** Prueba: solo aparecen horas libres y futuras.
 
 ### T-07 — Reservar hora
-- **Estado:** PENDIENTE
+- **Estado:** HECHA
 - **Depende de:** T-06
 - **Qué:** `POST /horas/<id>/reservar` con UPDATE atómico (D-003) y reglas 1 y 5.
 - **Nota (revisión de T-04b, R-10):** acotar el `id` de la ruta (`<int:id>`) a un máximo razonable (< 2**63) para que un id gigante dé 404 y no un 500; con prueba.

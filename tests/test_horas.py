@@ -822,6 +822,19 @@ def test_a_segundos_utc_acepta_horas_inexistentes_o_repetidas_y_fuera_de_rango()
     assert tiempo.a_segundos_utc(datetime(9999, 12, 31, 23, 59)) is None
 
 
+def test_a_segundos_utc_fija_fold_0_en_las_horas_repetidas_e_inexistentes():
+    """R-02 de T-06: la hora que se repite es la primera vez (UTC-3), la que no existe se
+    lee con el desfase de antes del salto (UTC-4). Con `fold=1` darían una hora más tarde
+    y una hora más temprano."""
+    utc = timezone.utc
+    assert tiempo.a_segundos_utc(datetime(2027, 4, 3, 23, 30)) == int(
+        datetime(2027, 4, 4, 2, 30, tzinfo=utc).timestamp()
+    )
+    assert tiempo.a_segundos_utc(datetime(2027, 9, 5, 0, 30)) == int(
+        datetime(2027, 9, 5, 4, 30, tzinfo=utc).timestamp()
+    )
+
+
 def test_septiembre_50_min_desde_las_2330_pisan_la_1_del_domingo(app, pro):
     """R-03: el sábado 2027-09-04 a las 24:00 el reloj salta a las 01:00. Una hora
     de 50 min desde las 23:30 termina a las 01:20 de reloj (00:20 «de pared»)."""

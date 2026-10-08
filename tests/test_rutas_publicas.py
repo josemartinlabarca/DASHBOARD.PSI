@@ -48,7 +48,8 @@ def test_solo_las_rutas_declaradas_son_publicas(app):
 def test_las_rutas_privadas_conocidas_estan_en_el_mapa(app):
     endpoints = {r.endpoint for r in app.url_map.iter_rules()}
     assert {
-        "auth.logout", "paciente.dashboard", "paciente.horas_libres", "profesional.dashboard",
+        "auth.logout", "paciente.dashboard", "paciente.horas_libres", "paciente.reservar",
+        "profesional.dashboard",
         "profesional.nueva_hora", "profesional.eliminar_hora",
     } <= endpoints
 

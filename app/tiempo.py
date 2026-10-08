@@ -35,3 +35,28 @@ def a_segundos_utc(local):
 def mostrar_inicio(texto):
     """`2026-12-01T10:00:00` -> `01-12-2026 10:00` (la forma la garantiza el CHECK)."""
     return f"{texto[8:10]}-{texto[5:7]}-{texto[0:4]} {texto[11:16]}"
+
+
+def _minutos_guardados(valor):
+    """Minutos de una fila si son un entero positivo, o `None` (texto, decimal, cero...)."""
+    if type(valor) is not int or valor <= 0:
+        return None
+    return valor
+
+
+def intervalo_guardado(fila):
+    """`(inicio_s, fin_s)` en segundos UTC de una fila de `horas`, o `None` si no sirve.
+
+    No sirve una fecha imposible que el CHECK deja pasar (2026-13-45T99:99:99),
+    una duración que no sea entero positivo o un año no representable. Usado por
+    el solape del profesional (regla 3) y por la reserva (reglas 1 y 5).
+    """
+    try:
+        local = datetime.strptime(fila["inicio"], FORMATO_GUARDADO)
+    except (ValueError, TypeError):
+        return None
+    minutos = _minutos_guardados(fila["duracion_min"])
+    inicio_s = a_segundos_utc(local)
+    if minutos is None or inicio_s is None:
+        return None
+    return inicio_s, inicio_s + minutos * 60

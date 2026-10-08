@@ -159,26 +159,6 @@ def formatear_inicio(inicio):
 # ----------------------------------------------------------------- horas ----
 
 
-def _minutos_guardados(valor):
-    """Minutos de una fila si son un entero positivo, o `None` (texto, decimal, cero...)."""
-    if type(valor) is not int or valor <= 0:
-        return None
-    return valor
-
-
-def _intervalo_guardado(fila):
-    """`(inicio_s, fin_s)` en segundos UTC de una fila, o `None` si la fila no sirve."""
-    try:
-        local = datetime.strptime(fila["inicio"], FORMATO_GUARDADO)
-    except (ValueError, TypeError):  # fecha imposible como 2026-13-45T99:99:99
-        return None
-    minutos = _minutos_guardados(fila["duracion_min"])
-    inicio_s = tiempo.a_segundos_utc(local)
-    if minutos is None or inicio_s is None:
-        return None
-    return inicio_s, inicio_s + minutos * 60
-
-
 def es_la_misma(fila, inicio, duracion):
     """La fila tiene exactamente el mismo inicio y la misma duración que la hora nueva."""
     try:
@@ -211,7 +191,7 @@ def buscar_solape(db, profesional_id, inicio, duracion):
         (profesional_id,),
     ).fetchall()
     for fila in filas:
-        intervalo = _intervalo_guardado(fila)
+        intervalo = tiempo.intervalo_guardado(fila)
         if intervalo is None or not (intervalo[0] < fin_s and inicio_s < intervalo[1]):
             continue
         if es_la_misma(fila, inicio, duracion):
@@ -260,7 +240,7 @@ def _describir(fila):
     """
     texto = str(fila["inicio"])
     try:
-        _, fin_s = _intervalo_guardado(fila)
+        _, fin_s = tiempo.intervalo_guardado(fila)
         fin = datetime.fromtimestamp(fin_s, zona_chile())
         return f"{mostrar_inicio(texto)} a {fin:%H:%M}"
     except (TypeError, ValueError, OverflowError, OSError):

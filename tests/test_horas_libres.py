@@ -105,11 +105,18 @@ def test_el_panel_del_paciente_enlaza_a_la_lista(paciente_cli):
     assert re.search(r'<a href="/paciente/horas">Ver horas disponibles</a>', r.text)
 
 
-def test_no_hay_boton_de_reservar_todavia(app, pro_id, paciente_cli):
-    insertar(app, pro_id, "2026-10-09T10:00:00")
-    r = paciente_cli.get("/paciente/horas")
-    assert "<form" not in r.text and "<button" not in r.text
-    assert "reservar" not in r.text.lower()
+def test_cada_hora_trae_su_formulario_de_reservar_con_token(app, pro_id, paciente_cli):
+    uno = insertar(app, pro_id, "2026-10-09T10:00:00")
+    dos = insertar(app, pro_id, "2026-10-09T12:00:00")
+    html = paciente_cli.get("/paciente/horas").text
+    assert html.count("<form") == 2
+    for hora_id in (uno, dos):
+        assert re.search(
+            rf'<form method="post" action="/horas/{hora_id}/reservar">\s*'
+            r'<input type="hidden" name="csrf_token" value="[0-9a-f]{64}">\s*'
+            r'<button type="submit">Reservar</button>',
+            html,
+        )
 
 
 def test_solo_acepta_get(paciente_cli):
