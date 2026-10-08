@@ -196,6 +196,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Qué:** `notificaciones.py`; crear registros y escribir `outbox.log` al reservar y cancelar (US-11, US-13).
 - **Nota de revisión de T-02f (`hora_id` puede ser NULL, D-016):** T-09: el mensaje de la notificación debe bastarse solo (fecha, hora y contraparte), porque `hora_id` queda NULL si la hora se elimina (D-016); prueba con la hora eliminada.
 - **Notas de la revisión de T-07 (R-09):** el `SELECT` de la hora en `reservar_hora` no trae `profesional_id` (añadirlo si hace falta); las notificaciones se insertan **dentro** de la transacción, antes del `commit`, para que reserva y aviso sean atómicos; en T-11/T-12 no ordenar por `reservada_en` (texto con offset: no ordena bien en la noche de cambio de hora).
+- **Notas de la revisión de T-08e (R-10):** el texto de confirmación debe decir hasta cuándo se puede cancelar (inicio − 24 h, hora local de Chile); las notificaciones se insertan dentro de la transacción de reservar y de cancelar (antes del `commit`).
 - **Término:** Pruebas: se crean notificaciones para ambas partes y aparece la línea en el log.
 
 ### T-10 — Recordatorios 24 h antes
@@ -203,6 +204,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Depende de:** T-09
 - **Qué:** Comando `send-reminders` (US-12); no repite recordatorios (`recordatorio_enviado`).
 - **Nota de revisión de T-02f (`hora_id` puede ser NULL, D-016):** T-10: el recordatorio depende de `horas.recordatorio_enviado`, no de las notificaciones; añadir una prueba con una hora eliminada que tuvo notificaciones.
+- **Notas de la revisión de T-08e (R-09):** el recordatorio se define como «falta ≤ 24 h y la hora no empezó», con instantes absolutos, y se prueba el instante exacto de las 24 h (donde aún se puede cancelar y debe recordarse); una reserva hecha entre 24 h y 24 h + el período del cron queda con el recordatorio vencido al confirmarse (aceptado: se envía en la siguiente ejecución); las pruebas de «hora a <24 h» insertan la reserva por SQL porque la aplicación ya no la permite; definir quién gana si cancelación y recordatorio coinciden.
 - **Término:** Pruebas con hora a <24 h: envía una sola vez aunque se ejecute dos veces.
 
 ## Fase 5 — Interfaz
@@ -219,6 +221,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Depende de:** T-09
 - **Qué:** `/profesional` con agenda, horas libres y notificaciones (US-6).
 - **Nota de revisión de T-02f (`hora_id` puede ser NULL, D-016):** T-12: igual que T-11: `LEFT JOIN` y mensaje sin enlace cuando `hora_id` es NULL (D-016).
+- **Nota (revisión de T-08e, R-10):** el profesional puede crear horas a menos de 24 h que ningún paciente podrá reservar: marcarlas en su agenda («no reservable») o avisarlo al crearlas.
 - **Término:** Prueba de contenido por rol; revisión visual en navegador.
 
 ### T-13 — Estilo y plantilla base amigable
@@ -287,6 +290,10 @@ en qué tarea conviene absorberlo.
 | T-08d R-02 | Con una base antigua (sin `sesion_version`) `init-db` dice «OK», crea el índice pero no la columna y luego `POST /login` da 500; con 2+ profesionales `init-db` revienta con traceback. Aviso claro o migración (`PRAGMA user_version`) | T-14 |
 | T-08d R-04 | Un login simultáneo a un logout en otro navegador puede nacer ya revocado | T-14 |
 | T-08d R-08 | T-09 debe notificar usando `horas.profesional_id`, no «el profesional» por rol; el futuro cambio de contraseña deberá incrementar `sesion_version` | T-09 / cuando exista |
+| T-08e R-02 | La suite tarda ~34 s (el criterio firme de D-031 es 31,5 s): dos recorridos de 1,1 M de puntos de código (≈3,7 s), la prueba de dos procesos (1,5 s) y cientos de pruebas que montan app y base; revisar cuando pase de 45 s | cuando pase de 45 s |
+| T-08e R-03 | Un POST forzado a una hora oculta distingue «libre» de «ocupada» (el estado se comprueba antes que la anticipación); ya pasaba con las horas pasadas | T-14 |
+| T-08e R-04/R-05 | Letras en blanco U+13441/U+13442 aceptadas; una cuenta guardada con un carácter hoy rechazado ya no puede iniciar sesión (sin migración); rechazados nuevos: punto medio catalán (`col·legi`) y fracciones | T-14 |
+| T-08e R-11 | Mensaje a las 24 h exactas dice «menos» (decir «no más de»); el mensaje de solape sugiere cancelar algo que a veces no se puede; README sin la regla 7 | T-13 |
 | T-02c #9 | En `tests/test_esquema.py` la cobertura de NOT NULL y FK es triplemente redundante y la rama `usuarios` de `test_not_null_rechaza_null` es poco legible | cuando se toque ese archivo |
 
 ---
