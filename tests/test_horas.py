@@ -1,8 +1,9 @@
 """T-05: el profesional agrega y elimina horas (US-4, US-5; SPEC §4.2, §4.3, §4.4)."""
 import re
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -241,8 +242,6 @@ def test_el_pasado_se_juzga_con_la_hora_de_chile_y_no_la_del_servidor(app, pro, 
 def test_el_reloj_de_verdad_da_la_hora_de_chile():
     """`ahora_chile` es el instante actual visto en America/Santiago (con su zona),
     no la hora del servidor ni UTC con otra etiqueta."""
-    from datetime import timedelta, timezone
-
     ahora = AHORA_REAL()
     assert ahora.tzinfo is auth.zona_chile()
     assert abs(ahora - datetime.now(timezone.utc)) < timedelta(seconds=5)
@@ -311,7 +310,6 @@ def con_base(app, pro):
         ("09:30", "50", "parcial: termina dentro de la existente"),
         ("10:49", "30", "empieza un minuto antes de que termine"),
         ("09:11", "50", "termina un minuto después de que empieza"),
-        ("10:00", "50", "idéntica"),
         ("10:00", "10", "mismo inicio, más corta"),
         ("10:00", "120", "mismo inicio, más larga"),
         ("10:10", "10", "contenida"),
@@ -685,3 +683,418 @@ def test_ningun_codigo_de_la_app_usa_replace_sobre_horas():
     assert len(archivos) > 5
     culpables = [a.name for a in archivos if PROHIBIDO.search(a.read_text(encoding="utf-8"))]
     assert culpables == []
+
+
+# ------------------------------------------- T-05b: tope de fecha (D-026) ----
+
+LIMITE = "08-10-2028"  # AHORA es 2026-10-08: el tope es hoy + 2 años
+
+
+@pytest.mark.parametrize("fecha", ["2028-10-09", "2028-12-31", "2029-01-01", "2100-01-01", "2500-01-01", "9999-12-31"])
+def test_fecha_posterior_al_tope_se_rechaza_en_el_campo_fecha(app, pro, fecha):
+    r = agregar(pro, fecha, "10:00")
+    assert r.status_code == 200
+    assert f"Elige una fecha hasta el {LIMITE}" in r.text
+    assert "máximo 2 años desde hoy" in r.text
+    # el mensaje sale bajo «Fecha», no bajo «Hora» (R-05, M12)
+    assert r.text.index("demasiado lejos") < r.text.index('id="hora"')
+    assert horas(app) == []
+
+
+@pytest.mark.parametrize("fecha, hora", [("2028-10-08", "00:00"), ("2028-10-08", "12:00"), ("2028-10-08", "23:59"), ("2028-10-07", "10:00")])
+def test_el_ultimo_dia_permitido_se_acepta_entero(app, pro, fecha, hora):
+    agregar(pro, fecha, hora)
+    assert horas(app) == [(f"{fecha}T{hora}:00", 50, "libre")]
+
+
+def test_el_tope_no_depende_de_la_hora_ni_de_la_duracion(app, pro):
+    r = agregar(pro, "2028-10-09", "00:00", "1")
+    assert "demasiado lejos" in r.text
+    r = agregar(pro, "2028-10-08", "23:59", "480")  # empieza el último día y termina después: vale
+    assert r.status_code == 302
+
+
+def test_fecha_lejana_y_hora_invalida_muestran_ambos_errores(app, pro):
+    r = agregar(pro, "9999-12-31", "25:00")
+    assert "demasiado lejos" in r.text and "Escribe una hora válida" in r.text
+
+
+def test_el_tope_se_mueve_con_el_dia_de_hoy(app, pro, monkeypatch):
+    con_reloj(monkeypatch, 2026, 12, 31)  # hoy + 2 años = 2028-12-31
+    agregar(pro, "2028-12-31", "10:00")
+    r = agregar(pro, "2029-01-01", "10:00")
+    assert "Elige una fecha hasta el 31-12-2028" in r.text
+    assert horas(app) == [("2028-12-31T10:00:00", 50, "libre")]
+
+
+def test_el_tope_si_hoy_es_29_de_febrero_es_el_28_de_febrero(app, pro, monkeypatch):
+    con_reloj(monkeypatch, 2028, 2, 29)  # 2030 no es bisiesto
+    agregar(pro, "2030-02-28", "10:00")
+    r = agregar(pro, "2030-03-01", "10:00")
+    assert "Elige una fecha hasta el 28-02-2030" in r.text
+    assert horas(app) == [("2030-02-28T10:00:00", 50, "libre")]
+
+
+def test_fecha_limite_directa():
+    from datetime import date
+
+    assert profesional.fecha_limite(date(2026, 10, 8)) == date(2028, 10, 8)
+    assert profesional.fecha_limite(date(2028, 2, 29)) == date(2030, 2, 28)
+    assert profesional.fecha_limite(date(2026, 12, 31)) == date(2028, 12, 31)
+
+
+def test_r01_no_hay_500_con_una_hora_en_el_anio_9999_ya_guardada(app, pro):
+    """Escenario del revisor: una fila 9999-12-31 23:59 (insertada por otro camino)
+    y luego un intento en esa fecha: ya no hay 500, se rechaza por el tope."""
+    insertar(app, "pro@example.cl", "9999-12-31T23:59:00")
+    r = agregar(pro, "9999-12-31", "23:58")
+    assert r.status_code == 200 and "demasiado lejos" in r.text
+    r = agregar(pro, "2027-03-01", "10:00")  # y una hora normal se agrega sin problema
+    assert r.status_code == 302
+
+
+FILAS_RARAS = [
+    ("9999-12-31T23:59:00", 50),
+    ("9999-12-31T00:00:00", 2**62),
+    ("0001-01-01T00:00:00", 50),
+    ("0000-00-00T00:00:00", 50),
+    ("2026-13-45T99:99:99", 50),
+    ("2027-02-30T10:00:00", 50),
+    ("2027-03-01T10:00:00", 10**18),
+    ("2027-03-01T10:00:00", 1e30),
+    ("2027-03-01T10:00:00", "abc"),
+    ("2027-03-01T10:00:00", 0.5),
+]
+
+
+@pytest.mark.parametrize("inicio, duracion", FILAS_RARAS)
+def test_describir_y_mostrar_nunca_lanzan_con_filas_que_el_esquema_acepta(app, pro, inicio, duracion):
+    insertar(app, "pro@example.cl", inicio, duracion)
+    with app.app_context():
+        db = get_db()
+        fila = db.execute("SELECT inicio, duracion_min FROM horas").fetchone()
+        assert isinstance(profesional._describir(fila), str)
+        assert isinstance(profesional.mostrar_inicio(fila["inicio"]), str)
+        # buscar_solape tampoco lanza, y una hora normal nueva se puede evaluar
+        profesional.buscar_solape(db, usuario_id(app, "pro@example.cl"), datetime(2027, 3, 1, 10, 25), 50)
+    r = agregar(pro, "2027-03-05", "10:00")
+    assert r.status_code in (200, 302)
+
+
+def test_describir_con_fin_calculable_da_inicio_y_fin(app, pro):
+    with app.app_context():
+        fila = {"inicio": "2027-03-01T10:00:00", "duracion_min": 50}
+        assert profesional._describir(fila) == "01-03-2027 10:00 a 10:50"
+        # solo el inicio cuando no se puede calcular el fin
+        fila = {"inicio": "2026-13-45T99:99:99", "duracion_min": 50}
+        assert profesional._describir(fila) == "45-13-2026 99:99"
+
+
+# ------------------------------- T-05b: solape con instantes absolutos (D-026) ----
+
+CHILE = ZoneInfo("America/Santiago")
+
+
+def segundos_utc_oraculo(local):
+    """Referencia independiente: epoch del reloj de Chile con la librería estándar."""
+    return int(local.replace(tzinfo=CHILE, fold=0).timestamp())
+
+
+def solapa(app, email, nueva, duracion):
+    with app.app_context():
+        return profesional.buscar_solape(get_db(), usuario_id(app, email), nueva, duracion) is not None
+
+
+def test_a_segundos_utc_usa_el_desfase_de_chile():
+    # verano (UTC-3) e invierno (UTC-4); un mutante "reloj de pared" (UTC) daría 10:00Z
+    assert profesional.a_segundos_utc(datetime(2027, 3, 1, 10, 0)) == int(
+        datetime(2027, 3, 1, 13, 0, tzinfo=timezone.utc).timestamp()
+    )
+    assert profesional.a_segundos_utc(datetime(2027, 7, 1, 10, 0)) == int(
+        datetime(2027, 7, 1, 14, 0, tzinfo=timezone.utc).timestamp()
+    )
+
+
+def test_a_segundos_utc_acepta_horas_inexistentes_o_repetidas_y_fuera_de_rango():
+    assert profesional.a_segundos_utc(datetime(2027, 9, 5, 0, 30)) is not None  # no existe
+    assert profesional.a_segundos_utc(datetime(2027, 4, 3, 23, 30)) is not None  # se repite
+    profesional.a_segundos_utc(datetime(1, 1, 1))  # no lanza (devuelve un valor o None)
+    assert profesional.a_segundos_utc(datetime(9999, 12, 31, 23, 59)) is None
+
+
+def test_septiembre_50_min_desde_las_2330_pisan_la_1_del_domingo(app, pro):
+    """R-03: el sábado 2027-09-04 a las 24:00 el reloj salta a las 01:00. Una hora
+    de 50 min desde las 23:30 termina a las 01:20 de reloj (00:20 «de pared»)."""
+    agregar_pro = lambda f, h, d="50": agregar(pro, f, h, d)  # noqa: E731
+    agregar_pro("2027-09-04", "23:30")
+    assert len(horas(app)) == 1
+    r = agregar_pro("2027-09-05", "01:00")
+    assert "se solapa con otra que ya publicaste" in r.text
+    assert "04-09-2027 23:30 a 01:20" in r.text  # el fin se muestra en hora de reloj real
+    r = agregar_pro("2027-09-05", "01:19", "10")
+    assert "se solapa" in r.text
+    assert len(horas(app)) == 1
+    agregar_pro("2027-09-05", "01:20")  # pegada: se acepta
+    assert len(horas(app)) == 2
+
+
+def test_septiembre_la_hora_nueva_anterior_tambien_choca_con_la_existente(app, pro):
+    insertar(app, "pro@example.cl", "2027-09-05T01:00:00", 50)
+    r = agregar(pro, "2027-09-04", "23:30")
+    assert "se solapa" in r.text
+    assert len(horas(app)) == 1
+    agregar(pro, "2027-09-04", "23:10")  # termina a las 01:00 de reloj: pegada
+    assert len(horas(app)) == 2
+
+
+def test_abril_120_min_desde_las_2230_no_pisan_las_00_del_domingo(app, pro):
+    """R-03: en abril el reloj se atrasa a las 24:00 -> 23:00. 120 min desde las
+    22:30 terminan a las 23:30 de reloj (segunda pasada); no hay solape con las 00:00."""
+    agregar(pro, "2027-04-03", "22:30", "120")
+    assert len(horas(app)) == 1
+    r = agregar(pro, "2027-04-04", "00:00")
+    assert r.status_code == 302
+    assert len(horas(app)) == 2
+
+
+def test_abril_la_hora_de_las_00_del_domingo_no_pisa_a_la_de_antes_en_orden_inverso(app, pro):
+    insertar(app, "pro@example.cl", "2027-04-04T00:00:00", 50)
+    r = agregar(pro, "2027-04-03", "22:30", "120")
+    assert r.status_code == 302
+    assert len(horas(app)) == 2
+
+
+def test_abril_120_min_desde_las_2230_si_pisan_una_hora_dentro_de_su_duracion_real(app, pro):
+    """[22:30, 23:30) de reloj real: una hora insertada a las 23:30 (fold=0, = 02:30Z)
+    queda dentro de [01:30Z, 03:30Z); una a las 00:00 del domingo (04:00Z) no la pisa."""
+    insertar(app, "pro@example.cl", "2027-04-03T22:30:00", 120)
+    assert solapa(app, "pro@example.cl", datetime(2027, 4, 3, 22, 45), 10) is True
+    assert solapa(app, "pro@example.cl", datetime(2027, 4, 3, 23, 30), 10) is True
+    assert solapa(app, "pro@example.cl", datetime(2027, 4, 4, 0, 0), 10) is False
+
+
+def test_septiembre_cierra_el_hueco_de_reloj_y_abril_cierra_el_falso_solape_con_el_oraculo(app, pro):
+    """Matriz: para cada inicio y duración de la noche del cambio, el resultado
+    coincide con comparar epochs calculados con `timestamp()` de la librería estándar."""
+    desajustes = []
+    for dia_existente, hora_existente in [(datetime(2027, 9, 4), "23:30"), (datetime(2027, 4, 3), "22:30")]:
+        existente = datetime.fromisoformat(f"{dia_existente:%Y-%m-%d}T{hora_existente}:00")
+        for duracion_existente in (50, 120):
+            with app.app_context():
+                db = get_db()
+                db.execute("DELETE FROM horas")
+                db.execute(
+                    "INSERT INTO horas (profesional_id, inicio, duracion_min) VALUES (?, ?, ?)",
+                    (usuario_id(app, "pro@example.cl"), existente.isoformat(), duracion_existente),
+                )
+                db.commit()
+            a, b = segundos_utc_oraculo(existente), segundos_utc_oraculo(existente) + duracion_existente * 60
+            for desplazamiento in range(-180, 300, 5):
+                nueva = existente + timedelta(minutes=desplazamiento)
+                if profesional.problema_de_horario(nueva, datetime(2027, 1, 1, tzinfo=CHILE)):
+                    continue  # horas inexistentes o repetidas: no se pueden publicar
+                for duracion in (10, 50, 120):
+                    c = segundos_utc_oraculo(nueva)
+                    esperado = a < c + duracion * 60 and c < b
+                    if solapa(app, "pro@example.cl", nueva, duracion) != esperado:
+                        desajustes.append((existente, duracion_existente, nueva, duracion))
+    assert desajustes == []
+
+
+@pytest.mark.parametrize(
+    "existente, dur_e, nueva, dur_n, solapan",
+    [
+        ("2027-03-01T10:00:00", 50, datetime(2027, 3, 1, 10, 49), 30, True),   # un minuto
+        ("2027-03-01T10:00:00", 50, datetime(2027, 3, 1, 10, 50), 30, False),  # pegada después
+        ("2027-03-01T10:00:00", 50, datetime(2027, 3, 1, 9, 10), 50, False),   # pegada antes
+        ("2027-03-01T10:00:00", 50, datetime(2027, 3, 1, 9, 11), 50, True),
+        ("2027-03-01T10:00:00", 50, datetime(2027, 3, 1, 10, 10), 10, True),   # contenida
+        ("2027-03-01T10:00:00", 50, datetime(2027, 3, 1, 9, 0), 180, True),    # contiene
+        ("2027-03-01T10:00:00", 50, datetime(2027, 3, 1, 10, 0), 50, True),    # idéntica
+        ("2027-03-01T23:30:00", 90, datetime(2027, 3, 2, 0, 30), 30, True),    # cruza medianoche
+        ("2027-03-01T23:30:00", 90, datetime(2027, 3, 2, 1, 0), 30, False),
+        ("2027-03-01T10:00:00", 50, datetime(2027, 3, 2, 10, 0), 50, False),   # otro día
+    ],
+)
+def test_buscar_solape_cubre_los_casos_clasicos(app, pro, existente, dur_e, nueva, dur_n, solapan):
+    insertar(app, "pro@example.cl", existente, dur_e)
+    assert solapa(app, "pro@example.cl", nueva, dur_n) is solapan
+
+
+def test_buscar_solape_ignora_a_otro_profesional(app, pro, pro2):
+    insertar(app, "pro2@example.cl", "2027-03-01T10:00:00")
+    assert solapa(app, "pro@example.cl", datetime(2027, 3, 1, 10, 0), 50) is False
+    assert solapa(app, "pro2@example.cl", datetime(2027, 3, 1, 10, 0), 50) is True
+
+
+def test_buscar_solape_devuelve_la_identica_si_hay_varias(app, pro):
+    insertar(app, "pro@example.cl", "2027-03-01T09:30:00", 60)  # también solapa, y va antes
+    insertar(app, "pro@example.cl", "2027-03-01T10:00:00", 50)
+    with app.app_context():
+        fila = profesional.buscar_solape(
+            get_db(), usuario_id(app, "pro@example.cl"), datetime(2027, 3, 1, 10, 0), 50
+        )
+        assert fila["inicio"] == "2027-03-01T10:00:00"
+        fila = profesional.buscar_solape(
+            get_db(), usuario_id(app, "pro@example.cl"), datetime(2027, 3, 1, 10, 0), 30
+        )
+        assert fila["inicio"] == "2027-03-01T09:30:00"  # ninguna idéntica: la primera
+
+
+def test_el_solape_se_calcula_en_python_dentro_del_bloqueo(app, pro):
+    """La comprobación sigue siendo una sola lectura entre BEGIN IMMEDIATE e INSERT."""
+    sentencias = []
+    with app.app_context():
+        db = get_db()
+        db.set_trace_callback(sentencias.append)
+        profesional.crear_hora(db, usuario_id(app, "pro@example.cl"), datetime(2027, 3, 1, 10, 0), 50)
+    assert [s.split()[0].upper() for s in sentencias] == ["BEGIN", "SELECT", "INSERT", "COMMIT"]
+    assert sentencias[0] == "BEGIN IMMEDIATE"
+    assert "strftime" not in sentencias[1]  # ya no se compara en SQL
+
+
+# ---------------------------------- T-05b: doble envío (R-04) ----------------
+
+
+def test_doble_envio_del_mismo_formulario_dice_ya_publicada(app, pro):
+    agregar(pro, "2027-03-01", "10:00", "50")
+    r = agregar(pro, "2027-03-01", "10:00", "50")
+    assert r.status_code == 200
+    assert "Esa hora ya está publicada." in r.text
+    assert "se solapa" not in r.text
+    assert horas(app) == [("2027-03-01T10:00:00", 50, "libre")]
+
+
+def test_mismo_inicio_con_otra_duracion_sigue_siendo_solape(app, pro):
+    agregar(pro, "2027-03-01", "10:00", "50")
+    r = agregar(pro, "2027-03-01", "10:00", "60")
+    assert "se solapa con otra que ya publicaste" in r.text
+    assert "ya está publicada" not in r.text
+
+
+def test_misma_duracion_con_otro_inicio_sigue_siendo_solape(app, pro):
+    agregar(pro, "2027-03-01", "10:00", "50")
+    r = agregar(pro, "2027-03-01", "10:10", "50")
+    assert "se solapa con otra que ya publicaste" in r.text
+    assert "ya está publicada" not in r.text
+
+
+def test_ya_publicada_tambien_si_otra_hora_anterior_solapa_y_va_primero(app, pro):
+    insertar(app, "pro@example.cl", "2027-03-01T09:30:00", 60)
+    insertar(app, "pro@example.cl", "2027-03-01T10:00:00", 50)
+    r = agregar(pro, "2027-03-01", "10:00", "50")
+    assert "Esa hora ya está publicada." in r.text
+
+
+def test_la_identica_de_otro_profesional_no_cuenta_como_ya_publicada(app, pro, pro2):
+    insertar(app, "pro2@example.cl", "2027-03-01T10:00:00", 50)
+    r = agregar(pro, "2027-03-01", "10:00", "50")
+    assert r.status_code == 302
+
+
+def test_ya_publicada_si_la_identica_esta_reservada(app, con_base):
+    crear(app, email="ana@example.cl")
+    with app.app_context():
+        db = get_db()
+        db.execute(
+            "UPDATE horas SET estado='reservada', paciente_id=?, reservada_en='2026-10-08T12:00:00'",
+            (usuario_id(app, "ana@example.cl"),),
+        )
+        db.commit()
+    r = agregar(con_base, *BASE, "50")
+    assert "Esa hora ya está publicada." in r.text
+
+
+# ------------------------- T-05b: calidad de pruebas (R-05, mutaciones) ----------
+
+
+def formulario_eliminar(html, hora_id):
+    m = re.search(
+        rf'<form[^>]*action="/profesional/horas/{hora_id}/eliminar"[^>]*>(.*?)</form>', html, re.S
+    )
+    assert m, "el panel no tiene el formulario de eliminar"
+    return m.group(1)
+
+
+def test_el_boton_eliminar_lleva_su_propio_token_csrf_y_con_el_funciona(app, pro):
+    """R-05 (M18): el token se lee DENTRO del formulario de eliminar, no del primero
+    de la página (el de cerrar sesión es el mismo token y ocultaba la falta)."""
+    hora_id = insertar(app, "pro@example.cl", "2027-03-01T10:00:00")
+    cuerpo = formulario_eliminar(pro.get("/profesional").text, hora_id)
+    assert '<input type="hidden" name="csrf_token"' in cuerpo
+    token = extraer_token(cuerpo)
+    r = pro.post(f"/profesional/horas/{hora_id}/eliminar", data={"csrf_token": token})
+    assert (r.status_code, r.headers["Location"]) == (302, "/profesional")
+    assert horas(app) == []
+
+
+def test_todo_formulario_post_del_panel_y_del_formulario_nuevo_trae_token(app, pro):
+    insertar(app, "pro@example.cl", "2027-03-01T10:00:00")
+    insertar(app, "pro@example.cl", "2027-03-02T10:00:00")
+    for url in ("/profesional", "/profesional/horas/nueva"):
+        html = pro.get(url).text
+        formularios = re.findall(r"<form[^>]*method=\"post\"[^>]*>(.*?)</form>", html, re.S)
+        assert formularios
+        for cuerpo in formularios:
+            assert 'name="csrf_token"' in cuerpo, url
+    assert len(re.findall(r"<form", pro.get("/profesional").text)) == 3  # 2 eliminar + cerrar sesión
+
+
+def test_si_el_formulario_de_eliminar_no_tuviera_token_la_peticion_daria_400(app, pro):
+    hora_id = insertar(app, "pro@example.cl", "2027-03-01T10:00:00")
+    assert eliminar(pro, hora_id, token=False).status_code == 400
+    assert horas(app) == [("2027-03-01T10:00:00", 50, "libre")]
+
+
+def test_un_error_inesperado_al_guardar_deja_la_base_sin_transaccion_abierta(app, pro, monkeypatch):
+    """R-05 (M21): si algo distinto de un IntegrityError falla tras BEGIN IMMEDIATE,
+    la transacción se deshace antes de relanzar (no se confía en que la conexión se cierre)."""
+    def falla(inicio):
+        raise RuntimeError("fallo inesperado")
+
+    monkeypatch.setattr(profesional, "formatear_inicio", falla)
+    with app.app_context():
+        db = get_db()
+        with pytest.raises(RuntimeError):
+            profesional.crear_hora(db, usuario_id(app, "pro@example.cl"), datetime(2027, 3, 1, 10, 0), 50)
+        assert db.in_transaction is False
+    assert horas(app) == []
+
+
+@pytest.mark.parametrize("campo, valor", [("fecha", "2020-01-01"), ("hora", "25:00"), ("duracion", "0")])
+def test_cada_error_aparece_bajo_su_propio_campo(app, pro, campo, valor):
+    """R-05 (M12): el mensaje de cada campo sale en el bloque de ese campo."""
+    datos = {"fecha": "2027-03-01", "hora": "10:00", "duracion": "50", campo: valor}
+    r = agregar(pro, datos["fecha"], datos["hora"], datos["duracion"])
+    html = r.text
+    orden = ["fecha", "hora", "duracion"]
+    inicio_bloque = html.index(f'id="{campo}"')
+    siguiente = orden.index(campo) + 1
+    fin_bloque = html.index(f'id="{orden[siguiente]}"') if siguiente < 3 else html.index("</form>")
+    assert 'role="alert"' in html[inicio_bloque:fin_bloque]
+    for otro in orden:
+        if otro != campo:
+            ini = html.index(f'id="{otro}"')
+            fin = html.index('id="', ini + 10) if otro != "duracion" else html.index("</form>")
+            assert 'role="alert"' not in html[ini:fin], otro
+
+
+@pytest.mark.parametrize("texto", ["-5", "+5", "5.0", "0.5", "1e2", "٥٠", "５０", "", " 5", "12345"])
+def test_formato_de_duracion_rechaza_lo_que_no_son_1_a_4_digitos_ascii(texto):
+    """Primera barrera de `interpretar_duracion`, sola y sin el rango (R-05: los
+    mutantes equivalentes de T-05 que cambiaban solo la expresión regular)."""
+    assert profesional.FORMATO_DURACION.fullmatch(texto) is None
+
+
+@pytest.mark.parametrize("texto", ["1", "50", "480", "0480", "9999"])
+def test_formato_de_duracion_acepta_1_a_4_digitos_ascii(texto):
+    assert profesional.FORMATO_DURACION.fullmatch(texto)
+
+
+def test_interpretar_duracion_directa():
+    assert profesional.interpretar_duracion("") == 50
+    assert profesional.interpretar_duracion("480") == 480
+    assert profesional.interpretar_duracion("481") is None
+    assert profesional.interpretar_duracion("0") is None
+    assert profesional.interpretar_duracion("-5") is None
+    assert profesional.interpretar_duracion("5.5") is None

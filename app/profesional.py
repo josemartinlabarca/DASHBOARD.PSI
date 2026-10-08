@@ -5,7 +5,7 @@ profesional no se solapan) y 4 (no se elimina una hora reservada).
 """
 import re
 import sqlite3
-from datetime import datetime, time, timedelta, timezone
+from datetime import datetime, time, timezone
 
 from flask import (
     Blueprint,
@@ -28,12 +28,18 @@ ID_MAX = 2**63 - 1  # mayor INTEGER de SQLite: un id mayor es 404, no 500 (R-10)
 FORMATO_FECHA = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")  # solo dígitos ASCII
 FORMATO_HORA = re.compile(r"[0-9]{2}:[0-9]{2}")
 FORMATO_DURACION = re.compile(r"[0-9]{1,4}")
-EPOCA = datetime(1970, 1, 1)
+ANIOS_MAX = 2  # tope de fecha futura: hoy + 2 años (D-026); límite de la aplicación
+EPOCA_UTC = datetime(1970, 1, 1, tzinfo=timezone.utc)
+FORMATO_GUARDADO = "%Y-%m-%dT%H:%M:%S"
 
 MENSAJE_FECHA = "Escribe una fecha válida, por ejemplo 2026-12-01."
 MENSAJE_HORA = "Escribe una hora válida, por ejemplo 10:00."
 MENSAJE_DURACION = (
     f"La duración debe ser un número entero de minutos entre 1 y {DURACION_MAX}."
+)
+MENSAJE_FECHA_LEJANA = (
+    "Esa fecha está demasiado lejos. Elige una fecha hasta el {limite} "
+    f"(máximo {ANIOS_MAX} años desde hoy)."
 )
 MENSAJE_PASADO = "Esa hora ya pasó. Elige una fecha y hora futuras."
 MENSAJE_HORA_INEXISTENTE = (
@@ -45,6 +51,7 @@ MENSAJE_HORA_AMBIGUA = (
     "se atrasa a las 23:00). Elige otra hora para evitar confusiones."
 )
 MENSAJE_SOLAPE = "Esa hora se solapa con otra que ya publicaste ({otra}). Elige otro horario."
+MENSAJE_YA_PUBLICADA = "Esa hora ya está publicada."
 MENSAJE_NO_GUARDADA = "No pudimos guardar la hora. Revisa los datos e inténtalo de nuevo."
 MENSAJE_RESERVADA = (
     "No se puede eliminar una hora reservada. Primero debe cancelarse la reserva."
@@ -115,6 +122,14 @@ def problema_de_horario(inicio, ahora):
     return None
 
 
+def fecha_limite(hoy):
+    """Último día que se puede publicar: `hoy` más `ANIOS_MAX` años (29-feb -> 28-feb)."""
+    try:
+        return hoy.replace(year=hoy.year + ANIOS_MAX)
+    except ValueError:
+        return hoy.replace(year=hoy.year + ANIOS_MAX, day=28)
+
+
 def validar_formulario(fecha_texto, hora_texto, duracion_texto, ahora):
     """Devuelve `(inicio, duracion, errores)`; `inicio` es un `datetime` ingenuo o `None`."""
     errores = {}
@@ -128,12 +143,16 @@ def validar_formulario(fecha_texto, hora_texto, duracion_texto, ahora):
     if duracion is None:
         errores["duracion"] = MENSAJE_DURACION
     inicio = None
-    if fecha is not None and hora is not None:
-        inicio = datetime.combine(fecha, hora)
-        problema = problema_de_horario(inicio, ahora)
-        if problema:
-            errores["fecha"] = problema
-            inicio = None
+    if fecha is not None:
+        limite = fecha_limite(ahora.date())
+        if fecha > limite:
+            errores["fecha"] = MENSAJE_FECHA_LEJANA.format(limite=f"{limite:%d-%m-%Y}")
+        elif hora is not None:
+            inicio = datetime.combine(fecha, hora)
+            problema = problema_de_horario(inicio, ahora)
+            if problema:
+                errores["fecha"] = problema
+                inicio = None
     return inicio, duracion, errores
 
 
@@ -150,25 +169,81 @@ def mostrar_inicio(texto):
 # ----------------------------------------------------------------- horas ----
 
 
+def a_segundos_utc(local):
+    """Segundos desde 1970 (UTC) del instante que es el `datetime` ingenuo `local` en Chile.
+
+    `None` si el instante no se puede representar (años cercanos a 1 o a 9999).
+    Una hora que no existe o se repite por el cambio de horario se interpreta
+    con `fold=0`; la aplicación no las deja guardar (D-025), esto solo evita
+    errores con filas insertadas por otro camino.
+    """
+    try:
+        instante = local.replace(tzinfo=zona_chile(), fold=0).astimezone(timezone.utc)
+        return int((instante - EPOCA_UTC).total_seconds())
+    except (OverflowError, ValueError):
+        return None
+
+
+def _minutos_guardados(valor):
+    """Minutos de una fila si son un entero positivo, o `None` (texto, decimal, cero...)."""
+    if type(valor) is not int or valor <= 0:
+        return None
+    return valor
+
+
+def _intervalo_guardado(fila):
+    """`(inicio_s, fin_s)` en segundos UTC de una fila, o `None` si la fila no sirve."""
+    try:
+        local = datetime.strptime(fila["inicio"], FORMATO_GUARDADO)
+    except (ValueError, TypeError):  # fecha imposible como 2026-13-45T99:99:99
+        return None
+    minutos = _minutos_guardados(fila["duracion_min"])
+    inicio_s = a_segundos_utc(local)
+    if minutos is None or inicio_s is None:
+        return None
+    return inicio_s, inicio_s + minutos * 60
+
+
+def es_la_misma(fila, inicio, duracion):
+    """La fila tiene exactamente el mismo inicio y la misma duración que la hora nueva."""
+    try:
+        return datetime.strptime(fila["inicio"], FORMATO_GUARDADO) == inicio and (
+            fila["duracion_min"] == duracion
+        )
+    except (ValueError, TypeError):
+        return False
+
+
 def buscar_solape(db, profesional_id, inicio, duracion):
     """Fila de una hora **del mismo profesional** que se solape con la nueva, o `None`.
 
+    Inicio y fin son instantes absolutos (hora de Chile convertida a UTC) y se
+    comparan en Python: así las dos noches de cambio de horario, en que la
+    duración real no coincide con la del reloj de pared, salen bien (D-026).
     Dos intervalos [a, b) y [c, d) se solapan si a < d y c < b: las horas
-    pegadas (una termina cuando empieza la otra) no se solapan. Se compara en
-    segundos de "reloj de pared" (SQLite lee el texto como si fuera UTC y aquí
-    se calcula igual), con enteros, para no depender de decimales. Las filas
-    cuyo `inicio` no sea una fecha real dan NULL y no se comparan.
+    pegadas (una termina cuando empieza la otra) no se solapan. Si hay varias
+    solapadas, devuelve la idéntica a la nueva (mismo inicio y duración) si
+    existe y si no la primera por fecha. Las filas que el esquema deja pasar
+    pero no son una fecha real o una duración entera positiva no se comparan.
     """
-    inicio_s = int((inicio - EPOCA).total_seconds())
+    inicio_s = a_segundos_utc(inicio)
+    if inicio_s is None:
+        raise ValueError("inicio fuera del rango representable")
     fin_s = inicio_s + duracion * 60
-    return db.execute(
-        "SELECT inicio, duracion_min FROM horas"
-        " WHERE profesional_id = ?"
-        "   AND CAST(strftime('%s', inicio) AS INTEGER) < ?"
-        "   AND CAST(strftime('%s', inicio) AS INTEGER) + duracion_min * 60 > ?"
-        " ORDER BY inicio LIMIT 1",
-        (profesional_id, fin_s, inicio_s),
-    ).fetchone()
+    primera = None
+    filas = db.execute(
+        "SELECT inicio, duracion_min FROM horas WHERE profesional_id = ? ORDER BY inicio",
+        (profesional_id,),
+    ).fetchall()
+    for fila in filas:
+        intervalo = _intervalo_guardado(fila)
+        if intervalo is None or not (intervalo[0] < fin_s and inicio_s < intervalo[1]):
+            continue
+        if es_la_misma(fila, inicio, duracion):
+            return fila
+        if primera is None:
+            primera = fila
+    return primera
 
 
 def crear_hora(db, profesional_id, inicio, duracion):
@@ -184,6 +259,8 @@ def crear_hora(db, profesional_id, inicio, duracion):
         otra = buscar_solape(db, profesional_id, inicio, duracion)
         if otra is not None:
             db.rollback()
+            if es_la_misma(otra, inicio, duracion):
+                return MENSAJE_YA_PUBLICADA  # doble envío del mismo formulario (R-04)
             return MENSAJE_SOLAPE.format(otra=_describir(otra))
         db.execute(
             "INSERT INTO horas (profesional_id, inicio, duracion_min) VALUES (?, ?, ?)",
@@ -200,10 +277,19 @@ def crear_hora(db, profesional_id, inicio, duracion):
 
 
 def _describir(fila):
-    """`01-12-2026 10:00 a 10:50` para el mensaje de solape."""
-    texto = fila["inicio"]
-    fin = datetime.fromisoformat(texto) + timedelta(minutes=fila["duracion_min"])
-    return f"{mostrar_inicio(texto)} a {fin:%H:%M}"
+    """`01-12-2026 10:00 a 10:50` para el mensaje de solape; nunca lanza excepción.
+
+    El fin es la hora de reloj de Chile del instante final. Si la fila no
+    permite calcularlo (fecha imposible, duración rara, año 9999) se muestra
+    solo el inicio.
+    """
+    texto = str(fila["inicio"])
+    try:
+        _, fin_s = _intervalo_guardado(fila)
+        fin = datetime.fromtimestamp(fin_s, zona_chile())
+        return f"{mostrar_inicio(texto)} a {fin:%H:%M}"
+    except (TypeError, ValueError, OverflowError, OSError):
+        return mostrar_inicio(texto)
 
 
 def listar_horas_futuras(db, profesional_id, ahora):
