@@ -194,6 +194,12 @@ Aquí el ciclo ya es rutina: implementador → mi verificación → revisor → 
 - **Lo que viene de tus decisiones:** D-020 (caracteres invisibles en el correo), D-022 (revocar cookie al cerrar sesión), D-023 (un solo profesional) y D-029 (reservar con menos de 24 h: hoy esa reserva no la puede deshacer nadie). Cuatro decisiones pendientes se acumulan: es un olor a que **decidir tarde cuesta**. Resuélvelas en lote.
 - **Lección general:** las revisiones empezaron en la sintaxis (T-01) y ahora encuentran errores de *diseño* (la reserva que nadie puede cancelar). Mientras más avanza el proyecto, más valioso es el revisor que cruza el cambio con las historias de usuario.
 
+### Vueltas 20 y 21 — T-08b y T-08c: cuidar la herramienta de verificación
+- **T-08b:** la suite había crecido a 66 s y la gente deja de ejecutar pruebas lentas. Se redujo a ~28 s (base SQLite copiada de una plantilla, cachés compartidas) **sin borrar ninguna aserción**: el revisor comparó los 1124 identificadores de antes y confirmó que siguen idénticos. Se comprobó con 13 + 24 mutaciones que las pruebas siguen protegiendo.
+- **T-08c:** el revisor encontró que el atajo `/dev/shm` se rompía con poco espacio (Docker trae 64 MB). Se resolvió con un umbral medido, una variable de entorno y un tmpfs real de 12 MB para reproducirlo. También arregló una prueba que **dependía del orden de ejecución**: se verificó en orden normal, inverso y aleatorio.
+- **Lección:** las pruebas son código y también necesitan revisión. Acelerarlas es peligroso porque *un atajo mal hecho hace que todas pasen por la razón equivocada*; por eso cada atajo trae una prueba de aislamiento y se re-ejecutan mutaciones de tareas anteriores.
+- **Nota de proceso:** T-08c lo verifiqué yo (diff, 3 entornos, orden aleatorio con otra semilla) pero **no** lancé un revisor aparte, porque solo toca la infraestructura de pruebas y el riesgo ya estaba acotado. Es una excepción consciente, no la norma.
+
 ### Historial git resultante
 
 ```
@@ -224,9 +230,9 @@ docs: documentación base del proyecto Agenda Psi
 
 ## 4. Estado actual y qué sigue
 
-- Hecho: **T-01, T-02, T-02b, T-02d, T-03, T-03b, T-02c, T-02f, T-02g, T-02e, T-03c, T-04, T-04b, T-05, T-05b, T-06, T-07, T-08** (1124 pruebas pasando).
+- Hecho: **T-01, T-02, T-02b, T-02d, T-03, T-03b, T-02c, T-02f, T-02g, T-02e, T-03c, T-04, T-04b, T-05, T-05b, T-06, T-07, T-08, T-08b, T-08c** (1157 pruebas pasando).
 - **Decisiones tuyas ya tomadas:** D-007 (esquema), D-015 (correo), D-016 (borrar horas), D-017 (formato de fecha), D-018 (carácter nulo). Pendientes: **D-020** (caracteres invisibles en el correo), **D-022** (revocar la cookie al cerrar sesión), **D-023** (un solo profesional) y **D-029** (reservar con menos de 24 h; conviene antes de T-09).
-- Siguiente: **T-08b** (acelerar la suite) → **T-09** (notificaciones) → T-10 …
+- Siguiente: **T-09** (notificaciones) → T-10 …
 - Pendiente solo tuyo: autorizar (o no) que `app/correo.py` figure en `ARCHITECTURE.md`; es una línea de documentación.
 
 **Tu primer ejercicio:** lanza tú mismo la vuelta de T-02e con el prompt del Paso B y revisa el resultado con la lista del Paso C. Antes de dar por buena cualquier tarea, haz cinco preguntas extra: *¿rompió algo documentado?*, *¿las pruebas fallarían si quitara la protección?*, *¿el reporte afirma algo que no ejecutó?*, *¿cómo interactúa esto con las tareas futuras?* y *¿el arreglo propuesto realmente funciona?*
