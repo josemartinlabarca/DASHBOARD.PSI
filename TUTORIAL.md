@@ -132,9 +132,25 @@ git conserva cada revisión aunque `REVIEW.md` se sobrescriba.
 - **Decisión pendiente nueva:** **D-015** (qué caracteres se aceptan en un correo). Tres opciones con su costo; la recomendada es aceptar solo ASCII.
 - **Lección:** el implementador no mintió con mala intención: razonó mal ("la segunda NFKC ya lo cubre") y lo dio por verificado sin ejecutarlo. Por eso existe la regla 9 de `CLAUDE.md` y por eso el revisor sigue siendo imprescindible.
 
+### Vuelta 7 — T-02c Reforzar el esquema (lo que tú aprobaste en D-007)
+- **Implementador:** `schema.sql` con exactamente las opciones A–E, `ARCHITECTURE.md` actualizado solo en lo autorizado, 78 pruebas nuevas (187 en total) y 15+ mutaciones ejecutadas y detectadas. Comprobó qué pasa con una base antigua: `init-db` termina con éxito **sin avisar** y deja las tablas sin las restricciones nuevas.
+- **Mi verificación:** comparé el esquema, `ARCHITECTURE.md` y D-007 contra lo aprobado (todo coincidía, nada de más) y apliqué 6 mutaciones propias; una **sobrevivió**: ampliar el CHECK de `tipo` con un cuarto valor dejaba las 187 pruebas en verde. Las pruebas comprobaban cuatro valores inválidos concretos, no que el conjunto fuera *exactamente* tres.
+- **Revisor: APROBADO**, con hallazgos que **solo se ven pensando en las tareas futuras**:
+  1. Una hora que se reservó y se canceló **no se puede eliminar**: tiene notificaciones que la apuntan y la clave foránea lo impide. Contradice US-5. Lo reproduje.
+  2. La UNIQUE sobre `inicio` compara **texto**: el mismo instante escrito de 5 formas distintas pasa 5 de 5 veces. Lo reproduje.
+  3. Ampliar otros CHECK (`estado`, `rol`) también sobrevive a las pruebas.
+- **Tus decisiones:** D-016 (`ON DELETE SET NULL`) y D-017 (formato canónico con CHECK en el esquema). Elegiste las recomendadas. Como cambian el esquema que ya habías aprobado, las apliqué como una tarea nueva (**T-02f**), no como un parche dentro de T-02c.
+- **Un error mío, corregido:** el revisor detectó que la fila de `seguridad.py` en `ARCHITECTURE.md` decía "ni acceso a la base de datos", algo que tú no habías aprobado en D-007. La frase la puse yo en las instrucciones al implementador. La eliminé y quedó exactamente lo aprobado.
+- **Lección:** un esquema puede estar perfecto y aun así chocar con una historia de usuario que todavía no se ha implementado. Preguntarle al revisor "¿cómo interactúa esto con las tareas futuras?" encontró más que revisar la tarea sola.
+
 ### Historial git resultante
 
 ```
+D-016 y D-017 aprobadas por el humano: nueva tarea T-02f
+T-02c revisión: REVIEW.md aprobado, tarea T-02e y propuestas D-016/D-017
+T-02c: reforzar integridad del esquema (D-007 A-F)
+D-015: quitar frase obsoleta de propuesta en una decisión ya aprobada
+D-015 aprobada por el humano: opción 2 (rechazar categorías de riesgo)
 T-03b revisión: REVIEW.md aprobado, tarea T-03c y propuesta D-015
 D-007 aprobada por el humano: T-02c desbloqueada y antes de T-04
 T-03b: endurecer el registro (tzdata, normalizar_email, límite de tamaño, pruebas)
@@ -155,16 +171,12 @@ docs: documentación base del proyecto Agenda Psi
 
 ## 4. Estado actual y qué sigue
 
-- Hecho: **T-01, T-02, T-02b, T-02d, T-03, T-03b** (109 pruebas pasando).
-- **Aprobada por ti:** D-007 (esquema). **T-02c** está desbloqueada y es la siguiente.
-- **Pendiente de tu decisión:** **D-015** (caracteres permitidos en el correo) → bloquea solo el punto 2 de T-03c.
-- Siguiente sin decisión tuya: **T-02c** (esquema) y **T-03c** (cerrar hallazgos, salvo el punto 2).
-- Orden: T-02c → T-03c → T-04 → T-05 → ... (las dependencias en `TASKS.md` ya lo imponen).
+- Hecho: **T-01, T-02, T-02b, T-02d, T-03, T-03b, T-02c** (187 pruebas pasando).
+- **Decisiones tuyas ya tomadas:** D-007 (esquema), D-015 (correo), D-016 (borrar horas), D-017 (formato de fecha). No hay ninguna pendiente.
+- Siguiente, todas sin decisión tuya: **T-02f** (aplicar D-016 y D-017 al esquema) → **T-02e** (pruebas con el conjunto exacto de valores) → **T-03c** (hallazgos de T-03b, incluye tu política de correo) → **T-04** (login) → **T-05**.
+- Orden: lo impone `TASKS.md` con las dependencias; T-04 no necesita a T-02f ni T-02e, pero T-05 sí.
 
-**Tu primer ejercicio:** lanza tú mismo la vuelta de T-02c con el prompt del Paso B y
-revisa el resultado con la lista del Paso C. Antes de dar por buena cualquier tarea, haz
-tres preguntas extra: *¿esto rompió algo que ya estaba documentado?*, *¿estas pruebas fallarían si quitara la protección?* y
-*¿el reporte del agente afirma algo que no ejecutó?* Hazlo antes de pensar en automatizar.
+**Tu primer ejercicio:** lanza tú mismo la vuelta de T-02f con el prompt del Paso B y revisa el resultado con la lista del Paso C. Antes de dar por buena cualquier tarea, haz cuatro preguntas extra: *¿esto rompió algo que ya estaba documentado?*, *¿estas pruebas fallarían si quitara la protección?*, *¿el reporte del agente afirma algo que no ejecutó?* y *¿cómo interactúa esto con las tareas que todavía no existen?*
 
 ## 5. Consejos profesionales (lo que hace la diferencia)
 
@@ -192,6 +204,10 @@ tres preguntas extra: *¿esto rompió algo que ya estaba documentado?*, *¿estas
 22. **Separa qué decide el humano y qué decide el agente.** Un cambio de esquema, de política o de dependencia es del humano; un agente propone con opciones, costo y recomendación, y tú respondes. Deja la respuesta escrita en el repositorio, no solo en el chat.
 23. **Prepara las decisiones para que sean fáciles de tomar.** Una propuesta con opciones marcables, SQL ya probado y el costo de cada una se resuelve en un mensaje. Una pregunta abierta, no.
 24. **Los agentes hacen un recorrido mental, no una ejecución.** Cuando algo "es obvio", pide una prueba o una mutación que lo demuestre.
+25. **Revisa también contra el futuro.** Pídele al revisor que cruce el cambio con las historias de usuario que aún no existen. Así aparecieron el borrado imposible y la UNIQUE sobre texto, que ninguna prueba presente podía ver.
+26. **Una prueba que acepta lo válido y rechaza lo inválido todavía no fija el conjunto.** Si el CHECK permite un cuarto valor, nada falla. Para restricciones cerradas, prueba el conjunto exacto.
+27. **Si un cambio toca algo ya aprobado, es una tarea nueva con su propia decisión.** No lo escondas dentro de otra tarea; deja la trazabilidad (qué decidiste, cuándo, qué cambió).
+28. **Revisa también tu propio trabajo de orquestador.** La frase no aprobada en `ARCHITECTURE.md` salió de mis instrucciones, no del agente. Cuando el revisor señala algo, comprueba de dónde viene.
 
 ## 6. Trampas de principiante que ya viste en acción
 
