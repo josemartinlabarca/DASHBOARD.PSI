@@ -136,12 +136,14 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Estado:** PENDIENTE
 - **Depende de:** T-06
 - **Qué:** `POST /horas/<id>/reservar` con UPDATE atómico (D-003) y reglas 1 y 5.
+- **Nota (revisión de T-04b, R-10):** acotar el `id` de la ruta (`<int:id>`) a un máximo razonable (< 2**63) para que un id gigante dé 404 y no un 500; con prueba.
 - **Término:** Pruebas: reserva exitosa; segunda reserva de la misma hora falla; paciente no puede tener dos a la misma hora.
 
 ### T-08 — Cancelar reserva
 - **Estado:** PENDIENTE
 - **Depende de:** T-07
 - **Qué:** `POST /horas/<id>/cancelar` con anticipación mínima de 24 h (US-9); la hora vuelve a `libre`.
+- **Nota (revisión de T-04b, R-10):** acotar el `id` de la ruta (`<int:id>`) a un máximo razonable (< 2**63) para que un id gigante dé 404 y no un 500; con prueba.
 - **Término:** Pruebas: cancelar con >24 h funciona, con <24 h se rechaza, la hora queda libre.
 
 ## Fase 4 — Notificaciones
@@ -220,6 +222,12 @@ en qué tarea conviene absorberlo.
 | T-04 R-08 | Con la clave de desarrollo pública (`FLASK_DEBUG=1`) cualquiera puede forjar una cookie y entrar al panel del profesional (ya anotado en T-02d #1) | T-14 |
 | T-04 R-12 | Prueba de lista blanca de rutas públicas: toda ruta nueva debe exigir sesión salvo las declaradas públicas | T-05 |
 | T-04 | Sin límite de intentos de login ni bloqueo | T-14 |
+| T-04b R-01 | Sobreviven 3 mutaciones del CSRF: aceptar un prefijo del token, eximir `/login` si el cuerpo es JSON y con cuerpo vacío | cuando se toque `tests/test_seguridad.py` |
+| T-04b R-02 | Las pruebas de `no-store` no cubren 405, 413, 500, HEAD ni OPTIONS (con servidor real sí llevan la cabecera); el hook sobrescribe `Cache-Control` y una vista no puede salirse | cuando se toque ese archivo |
+| T-04b R-05 | ZWJ/ZWNJ rechazados en el nombre: afecta a nombres persas y algunos devanagari, no a Chile; decisión humana de baja prioridad | junto a D-020 |
+| T-04b R-06 | Pasan nombres visualmente vacíos (U+3164, U+2800, combinante suelto) y «zalgo» de hasta 100 caracteres | junto a D-020 |
+| T-04b R-08 | Suite de ~25 s: fijar un umbral de ~60 s antes de abrir tarea de velocidad | cuando supere 60 s |
+| T-04b R-04 | El botón «atrás» con bfcache en navegadores con interfaz/Firefox/Safari no está comprobado | T-14 |
 | T-02c #9 | En `tests/test_esquema.py` la cobertura de NOT NULL y FK es triplemente redundante y la rama `usuarios` de `test_not_null_rechaza_null` es poco legible | cuando se toque ese archivo |
 
 ---

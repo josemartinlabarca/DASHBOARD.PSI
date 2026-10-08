@@ -173,6 +173,18 @@ git conserva cada revisión aunque `REVIEW.md` se sobrescriba.
 - **Revisor: APROBADA** (R-01…R-13). Dos cosas a tener en cuenta: el campo `type="email"` del navegador bloquearía `señor@…` y anula el motivo de elegir la opción 2 (pasa a T-04), y una **nueva decisión tuya, D-020**, sobre qué hacer con caracteres invisibles que D-015 no cubre (no bloquea nada).
 - **Lección:** que un agente reporte con claridad lo que *no* logró es más valioso que un "todo bien". Premia esa conducta en tus prompts: "reporta lo que no se cumplió".
 
+### Vuelta 12 — T-04 Login, logout y roles (la primera con seguridad "de verdad")
+- **Implementador:** `/login`, `POST /logout`, decoradores por rol, `create-professional` con contraseña sin eco, hash falso para igualar tiempos, sesión solo con el id. 597 pruebas, recorrido real con `flask run` + curl, Chromium con Playwright para el correo con `ñ`, 24 mutaciones.
+- **Corrigió al revisor del paso anterior:** el hallazgo "`type="email"` bloquea `señor@`" resultó ser parcialmente inexacto: el formulario ya tenía `novalidate`. Verificar en un navegador real evitó trabajo innecesario.
+- **Revisor: APROBADA**, con mentalidad de auditor (sesión, tiempos con scrypt real, 46 mutaciones). Hallazgos: ninguna prueba cubría el CSRF de `/login`; faltaba `Cache-Control: no-store`; la cookie firmada sigue valiendo tras el logout (**D-022**, tuya); `create-professional` permite varios profesionales (**D-023**, tuya).
+- **Lección:** el CSRF de `/login` estaba implementado pero sin prueba que lo protegiera: eximir esa ruta dejaba las 597 pruebas en verde. Una defensa sin prueba es una defensa que se perderá en la próxima refactorización.
+
+### Vuelta 13 — T-04b Cerrar los hallazgos de T-04
+- **Implementador:** pruebas del CSRF de login, `no-store` global (D-024), nombre sin caracteres de control, hash falso por app. 664 pruebas; 4 mutaciones del criterio y 14 propias.
+- **Honestidad útil otra vez:** reportó que su recorrido con Chromium dio el mismo resultado con y sin `no-store`, o sea que **ese experimento no demuestra nada**; lo que protege son las pruebas de cabeceras.
+- **Revisor: APROBADA.** Encontró que una frase de D-024 era falsa (Flask no deja `session.accessed` siempre en True): la corregí con una nota visible, como en otras ocasiones. Los hallazgos restantes son bajos y están en el backlog.
+- **Lección:** también los documentos de decisión contienen afirmaciones técnicas que hay que verificar, no solo el código.
+
 ### Historial git resultante
 
 ```
@@ -203,9 +215,9 @@ docs: documentación base del proyecto Agenda Psi
 
 ## 4. Estado actual y qué sigue
 
-- Hecho: **T-01, T-02, T-02b, T-02d, T-03, T-03b, T-02c, T-02f, T-02g, T-02e, T-03c** (470 pruebas pasando).
-- **Decisiones tuyas ya tomadas:** D-007 (esquema), D-015 (correo), D-016 (borrar horas), D-017 (formato de fecha), D-018 (carácter nulo). Pendiente (no bloquea): **D-020** (caracteres invisibles en el correo; ver DECISIONS.md).
-- Siguiente, todas sin decisión tuya: **T-04** (login) → **T-05**.
+- Hecho: **T-01, T-02, T-02b, T-02d, T-03, T-03b, T-02c, T-02f, T-02g, T-02e, T-03c, T-04, T-04b** (664 pruebas pasando).
+- **Decisiones tuyas ya tomadas:** D-007 (esquema), D-015 (correo), D-016 (borrar horas), D-017 (formato de fecha), D-018 (carácter nulo). Pendientes (no bloquean): **D-020** (caracteres invisibles en el correo), **D-022** (revocar la cookie al cerrar sesión) y **D-023** (un solo profesional; conviene antes de cerrar T-05).
+- Siguiente, todas sin decisión tuya: **T-05** (agregar y eliminar horas) → T-06 …
 - Pendiente solo tuyo: autorizar (o no) que `app/correo.py` figure en `ARCHITECTURE.md`; es una línea de documentación.
 
 **Tu primer ejercicio:** lanza tú mismo la vuelta de T-02e con el prompt del Paso B y revisa el resultado con la lista del Paso C. Antes de dar por buena cualquier tarea, haz cinco preguntas extra: *¿rompió algo documentado?*, *¿las pruebas fallarían si quitara la protección?*, *¿el reporte afirma algo que no ejecutó?*, *¿cómo interactúa esto con las tareas futuras?* y *¿el arreglo propuesto realmente funciona?*
