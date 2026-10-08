@@ -40,9 +40,9 @@ decisión técnica que no esté ya cubierta, en lugar de tomarla en silencio.
 - **Porqué:** Es lo más simple y seguro: evita perder citas o usuarios por ejecutarlo dos veces.
 - **Alternativas descartadas:** `DROP TABLE` + recrear (destructivo, exigiría confirmación); sistema de migraciones (excesivo para v1).
 
-## D-007 — Refuerzos del esquema de base de datos (T-02c) — **PROPUESTA, PENDIENTE DE APROBACIÓN HUMANA**
+## D-007 — Refuerzos del esquema de base de datos (T-02c) — **APROBADA por el humano (2026-10-08)**
 - **Fecha:** 2026-10-08
-- **Estado:** PROPUESTA. Ningún agente puede implementarla ni modificar `ARCHITECTURE.md` hasta que el humano marque cada opción abajo. T-02c en `TASKS.md` espera esta decisión.
+- **Estado:** APROBADA el 2026-10-08 00:25 (hora de Chile): el humano aceptó las opciones A, B, C, D, E y F por mensaje en la sesión. Se implementa en T-02c, que además queda explícitamente autorizada a modificar `ARCHITECTURE.md` (opción F).
 - **Origen:** revisiones de T-02 (hallazgos 1–6) y de T-03 (hallazgo 3).
 - **Porqué:** hoy el esquema acepta datos incoherentes (una hora "reservada" sin paciente, una duración negativa, un tipo de notificación cualquiera). Las reglas de `SPEC.md` §4 dependen solo del código de la aplicación; el esquema puede ser la segunda línea de defensa.
 - **Costo común a todas las opciones:** por D-006, `init-db` **no modifica tablas ya existentes**. Para aplicar un cambio de esquema hay que **borrar el archivo `agenda.db` y volver a ejecutar `init-db`**. Es aceptable mientras la base sea de práctica y no tenga datos reales; en producción haría falta un sistema de migraciones.
@@ -57,14 +57,14 @@ CHECK (
 )
 ```
 Impide una hora "reservada" sin paciente o una "libre" con paciente. Obliga a que cancelar limpie `paciente_id` y `reservada_en` (ya lo dice `ARCHITECTURE.md`).
-- [ ] SÍ   - [ ] NO   - [ ] CAMBIAR: ______
+- [x] SÍ   - [ ] NO   - [ ] CAMBIAR
 
 **B. Valores válidos de `notificaciones.tipo`** — Recomendación: **SÍ**
 ```sql
 CHECK (tipo IN ('confirmacion', 'recordatorio', 'cancelacion'))
 ```
 Costo: un tipo nuevo en el futuro exigirá cambiar el esquema.
-- [ ] SÍ   - [ ] NO   - [ ] CAMBIAR: ______
+- [x] SÍ   - [ ] NO   - [ ] CAMBIAR
 
 **C. Valores de dominio** — Recomendación: **SÍ**
 ```sql
@@ -72,29 +72,30 @@ horas.duracion_min          CHECK (duracion_min > 0)
 horas.recordatorio_enviado  CHECK (recordatorio_enviado IN (0, 1))
 notificaciones.leida        CHECK (leida IN (0, 1))
 ```
-- [ ] SÍ   - [ ] NO   - [ ] CAMBIAR: ______
+- [x] SÍ   - [ ] NO   - [ ] CAMBIAR
 
 **D. No repetir el inicio de una hora del mismo profesional** — Recomendación: **SÍ**
 ```sql
 UNIQUE (profesional_id, inicio)
 ```
 Impide dos horas idénticas. **No** impide el solape parcial (10:00–10:50 y 10:30–11:20), que sigue controlando la aplicación en T-05 (regla §4.3). Con un único profesional (D-004), esto además hace innecesario un índice propio para la regla §4.5.
-- [ ] SÍ   - [ ] NO   - [ ] CAMBIAR: ______
+- [x] SÍ   - [ ] NO   - [ ] CAMBIAR
 
 **E. Correo sin distinguir mayúsculas en `usuarios.email`** — Recomendación: **SÍ** (defensa en profundidad)
 ```sql
 email TEXT NOT NULL UNIQUE COLLATE NOCASE
 ```
 Hoy la unicidad depende solo de `normalizar_email()` (T-03b). Limitación: `NOCASE` de SQLite solo cubre letras ASCII; no sustituye a la normalización Unicode, la complementa.
-- [ ] SÍ   - [ ] NO   - [ ] CAMBIAR: ______
+- [x] SÍ   - [ ] NO   - [ ] CAMBIAR
 
 **F. Actualizar `ARCHITECTURE.md`** (autorización de edición) — Recomendación: **SÍ**
 Autorizas a que se modifique `ARCHITECTURE.md` (que `CLAUDE.md` reserva al humano) para: (1) reflejar en el "Modelo de datos" las opciones A–E aprobadas; (2) añadir el módulo ya existente `seguridad.py` al árbol (`# protección CSRF global (token en sesión, before_request)`) y su fila en la tabla de módulos (responsabilidad: token CSRF y verificación; no debe hacer: reglas de negocio).
-- [ ] SÍ   - [ ] NO
+- [x] SÍ   - [ ] NO
 
 ### Resolución
-- **Aprobada por:** ______   **Fecha:** ______
-- Hasta que se complete esta sección, T-02c sigue `PENDIENTE — requiere decisión humana`.
+- **Aprobada por:** el humano (usuario de la sesión), mensaje de las 00:25 del 2026-10-08: "a acepto, b acepto, c acepto, d acepto, e acepto, f acepto".
+- **Resultado:** A, B, C, D, E y F aprobadas sin cambios.
+- T-02c queda desbloqueada y es la siguiente tarea de esquema; debe ejecutarse **antes de T-04** (el login consultará `usuarios.email`, que cambia por la opción E) y en todo caso antes de T-05.
 
 ## D-008 — `SECRET_KEY` se exige al atender peticiones, no al crear la app
 - **Fecha:** 2026-10-08

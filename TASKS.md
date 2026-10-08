@@ -36,7 +36,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Origen:** REVIEW de T-02b, hallazgos 1 (media), 2–6 (bajas).
 
 ### T-02c — Reforzar integridad del esquema (hallazgos de la revisión de T-02)
-- **Estado:** PENDIENTE — **requiere decisión humana primero** (cambia el esquema documentado en `ARCHITECTURE.md`). **Dónde decidir: `DECISIONS.md` → D-007 (propuesta con opciones A–F para marcar SÍ/NO).**
+- **Estado:** PENDIENTE — **decisión humana APROBADA (D-007, opciones A–F, 2026-10-08)**. Autorizada a modificar `ARCHITECTURE.md` (opción F). Ejecutar **antes de T-04**.
 - **Depende de:** T-02
 - **Qué:** Tras aprobar el humano las propuestas en `DECISIONS.md` (D-007) y actualizar `ARCHITECTURE.md`: (1) CHECK que ate `estado`, `paciente_id` y `reservada_en` en `horas` (reserva consistente, regla §4.1); (2) CHECK de `notificaciones.tipo`; (3) CHECK de dominio en `duracion_min > 0` y `recordatorio_enviado IN (0,1)`; (4) evaluar `UNIQUE(profesional_id, inicio)` como refuerzo parcial de §4.3. Además, completar las pruebas de `NOT NULL` y de las FK `horas.paciente_id` y `notificaciones.hora_id`, y hacer que `test_comando_init_db` compare columnas. También decidir si `usuarios.email` lleva `COLLATE NOCASE` (la UNIQUE de SQLite distingue mayúsculas y hoy la unicidad depende solo de `normalizar_email()`; hallazgo 3 de la revisión de T-03) y, aprobado por el humano, añadir a `ARCHITECTURE.md` el módulo `seguridad.py` (`# protección CSRF global (token en sesión, before_request)`, y su fila en la tabla de módulos).
 - **Término:** Pruebas nuevas fallan si se quita cualquiera de los CHECK/NOT NULL/FK; `pytest` pasa. Debe quedar HECHA **antes** de T-05.
@@ -64,7 +64,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 
 ### T-04 — Login, logout y control de rol
 - **Estado:** PENDIENTE
-- **Depende de:** T-03b
+- **Depende de:** T-03b, T-02c
 - **Qué:** `/login`, `/logout`, decoradores `solo_paciente` y `solo_profesional`, comando `create-professional`. Debe además: (a) usar `normalizar_email()` de T-03b; (b) llamar a `session.clear()` y regenerar el token CSRF al iniciar y cerrar sesión (evita fijación de sesión); (c) guardar en la sesión **solo el id del usuario**; (d) fijar `SESSION_COOKIE_SAMESITE="Lax"`; (e) un mensaje **único** para credenciales inválidas, sin distinguir correo inexistente de contraseña errónea; (f) absorber los ítems del backlog T-02d #2 y #3.
 - **Término:** Pruebas: login correcto/incorrecto, paciente no accede a `/profesional` (US-3), el token CSRF cambia tras el login, el mensaje de error es idéntico para correo inexistente y contraseña errónea.
 
