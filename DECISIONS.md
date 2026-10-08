@@ -296,6 +296,7 @@ Autorizas a que se modifique `ARCHITECTURE.md` (que `CLAUDE.md` reserva al human
 - **Fecha:** 2026-10-08
 - **Estado:** PROPUESTA. No bloquea T-08. Origen: revisión de T-07, R-08.
 - **Problema:** SPEC no impide reservar una hora que empieza dentro de las próximas 24 h, y la regla de cancelación (US-9) exige 24 h de anticipación: esa reserva **no podría cancelarse nunca**. Además conviene confirmar que la regla 5 («un paciente no puede tener dos reservas a la misma hora») se entiende como **solape de intervalos** (lo implementado), no solo igualdad de inicio.
+- **Evidencia nueva (revisión de T-08, R-02):** hoy el paciente recibe «comunícate con el profesional», pero el profesional **tampoco puede** eliminarla (regla 4) y no tiene pantalla para cancelar; la confirmación al reservar no avisa nada. Conviene decidirla antes de T-09.
 - **Opciones:**
   - **A.** Permitirlo y documentar que una reserva con menos de 24 h es definitiva (hoy).
   - **B (recomendada).** Permitir reservar solo con más de 24 h de anticipación (coherente con cancelar; cambia SPEC y T-07).

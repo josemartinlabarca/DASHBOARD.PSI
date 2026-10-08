@@ -185,6 +185,15 @@ git conserva cada revisión aunque `REVIEW.md` se sobrescriba.
 - **Revisor: APROBADA.** Encontró que una frase de D-024 era falsa (Flask no deja `session.accessed` siempre en True): la corregí con una nota visible, como en otras ocasiones. Los hallazgos restantes son bajos y están en el backlog.
 - **Lección:** también los documentos de decisión contienen afirmaciones técnicas que hay que verificar, no solo el código.
 
+### Vueltas 14 a 19 — T-05 a T-08: la lógica de negocio (horas, reservas, cancelaciones)
+Aquí el ciclo ya es rutina: implementador → mi verificación → revisor → triage. Lo que cambió es **qué** encuentra cada revisión. Resumen:
+- **T-05 (agregar y eliminar horas):** 805 pruebas, 36 mutaciones. El revisor halló que `9999-12-31` se aceptaba y que un solape posterior daba 500 (`OverflowError`), y que el solape calculado en "reloj de pared" falla en las noches de cambio de horario. → **T-05b**: tope de 2 años (D-026) y solape con instantes absolutos. Después de eso, 17 748 casos alrededor de seis cambios de horario coinciden con un modelo independiente.
+- **T-06 (el paciente ve horas libres):** 902 pruebas. Aparecieron por primera vez **horas inventadas**: el implementador escribió en PROGRESS una hora posterior al reloj real (segunda vez, regla 8); la corregí con nota visible. Lección: si una regla se rompe dos veces, la siguiente instrucción debe decir exactamente qué NO hacer ("jamás una hora posterior al commit"). En T-07 y T-08 ya no ocurrió.
+- **T-07 (reservar):** el corazón de la concurrencia. `BEGIN IMMEDIATE` + `UPDATE ... WHERE estado='libre'` + revisión de `rowcount`. El revisor lanzó 12 procesos reales sobre la misma hora: siempre exactamente 1 éxito. Además comparó 800 decisiones de la regla 5 con un modelo independiente.
+- **T-08 (cancelar, 24 h, «Mis reservas»):** 1117 pruebas, 51 mutaciones. **Primer CAMBIOS REQUERIDOS en mucho tiempo**: una fixture con `time.tzset()` rompía todas las pruebas en Windows, y el README promete Windows. Se corrigió en una segunda ronda (7 pruebas que simulan la ausencia de `tzset`). Es el ejemplo del límite de 3 rondas por tarea funcionando.
+- **Lo que viene de tus decisiones:** D-020 (caracteres invisibles en el correo), D-022 (revocar cookie al cerrar sesión), D-023 (un solo profesional) y D-029 (reservar con menos de 24 h: hoy esa reserva no la puede deshacer nadie). Cuatro decisiones pendientes se acumulan: es un olor a que **decidir tarde cuesta**. Resuélvelas en lote.
+- **Lección general:** las revisiones empezaron en la sintaxis (T-01) y ahora encuentran errores de *diseño* (la reserva que nadie puede cancelar). Mientras más avanza el proyecto, más valioso es el revisor que cruza el cambio con las historias de usuario.
+
 ### Historial git resultante
 
 ```
@@ -215,9 +224,9 @@ docs: documentación base del proyecto Agenda Psi
 
 ## 4. Estado actual y qué sigue
 
-- Hecho: **T-01, T-02, T-02b, T-02d, T-03, T-03b, T-02c, T-02f, T-02g, T-02e, T-03c, T-04, T-04b** (664 pruebas pasando).
-- **Decisiones tuyas ya tomadas:** D-007 (esquema), D-015 (correo), D-016 (borrar horas), D-017 (formato de fecha), D-018 (carácter nulo). Pendientes (no bloquean): **D-020** (caracteres invisibles en el correo), **D-022** (revocar la cookie al cerrar sesión) y **D-023** (un solo profesional; conviene antes de cerrar T-05).
-- Siguiente, todas sin decisión tuya: **T-05** (agregar y eliminar horas) → T-06 …
+- Hecho: **T-01, T-02, T-02b, T-02d, T-03, T-03b, T-02c, T-02f, T-02g, T-02e, T-03c, T-04, T-04b, T-05, T-05b, T-06, T-07, T-08** (1124 pruebas pasando).
+- **Decisiones tuyas ya tomadas:** D-007 (esquema), D-015 (correo), D-016 (borrar horas), D-017 (formato de fecha), D-018 (carácter nulo). Pendientes: **D-020** (caracteres invisibles en el correo), **D-022** (revocar la cookie al cerrar sesión), **D-023** (un solo profesional) y **D-029** (reservar con menos de 24 h; conviene antes de T-09).
+- Siguiente: **T-08b** (acelerar la suite) → **T-09** (notificaciones) → T-10 …
 - Pendiente solo tuyo: autorizar (o no) que `app/correo.py` figure en `ARCHITECTURE.md`; es una línea de documentación.
 
 **Tu primer ejercicio:** lanza tú mismo la vuelta de T-02e con el prompt del Paso B y revisa el resultado con la lista del Paso C. Antes de dar por buena cualquier tarea, haz cinco preguntas extra: *¿rompió algo documentado?*, *¿las pruebas fallarían si quitara la protección?*, *¿el reporte afirma algo que no ejecutó?*, *¿cómo interactúa esto con las tareas futuras?* y *¿el arreglo propuesto realmente funciona?*

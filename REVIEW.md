@@ -1,106 +1,95 @@
-# REVIEW — T-07 Reservar hora (commit `a0e39c2`)
+# REVIEW — T-08 Cancelar reserva y «Mis reservas» (commit `1a8e1d8`)
 
-Revisor: lee el diff y ejecuta experimentos en copias bajo el scratchpad (`rev/`, `mut_*`, `exp*.py`); no se tocó el repositorio salvo este archivo.
+Revisor: leí el diff y ejecuté experimentos y mutaciones en copias bajo el scratchpad (`rev/`, `exp/`, `mut/`, `mutar.py`). No se tocó el repositorio salvo este archivo (`git status` limpio antes de escribirlo). Sin commit.
 
-## Veredicto: APROBADA
+## Veredicto: CAMBIOS REQUERIDOS
 
-Las reglas 1 y 5 se cumplen incluso con concurrencia real (procesos, hilos y un servidor `flask run` verdadero). No hay hallazgos de severidad alta. Hay un hallazgo medio que no es un defecto del código de T-07 sino un hueco de planificación (R-01: el paciente no puede ver ni cancelar sus reservas hasta T-11) y varios bajos. Nada de lo siguiente bloquea T-08.
+La lógica de T-08 es correcta: el borde de 24 h, la concurrencia, el reloj tras el bloqueo y «Mis reservas» pasaron todo lo que probé, y los hallazgos R-01, R-02, R-04 y R-05 de T-07 quedan cerrados. El único bloqueante es **R-01 de esta revisión**: la fixture automática `time.tzset()` hace que **ninguna prueba corra en Windows**, plataforma que el README y D-012 declaran soportada. Es un arreglo de pocas líneas. Además hay un callejón sin salida de producto (R-02, ya conocido como D-029) que conviene que el humano decida antes de T-09.
 
-## Qué verifiqué ejecutando (resumen)
+## Qué verifiqué ejecutando
 
 | Punto | Resultado |
 |---|---|
-| Suite completa en copia limpia del commit | 956 OK (46,5 s y 50,7 s en dos corridas). `FLASK_DEBUG=1 SECRET_KEY=abc` sobre `test_reservar.py`: 53 OK. |
-| 1. Concurrencia (script `exp1.py`) | **12 procesos y 12 hilos**, 12 pacientes por la misma hora, 15 rondas: siempre 1 éxito, 0 respuestas 500, estado final con los CHECK intactos y `PRAGMA integrity_check` = ok. Un paciente con 12 horas solapadas (12 profesionales), 10 rondas: siempre 1. Un paciente con 12 horas **no** solapadas a la vez: las 12 se reservan (el bloqueo no produce falsos rechazos). Profesional eliminando mientras 2 pacientes reservan, 25 rondas por modo: 13/12 (procesos) y 18/7 (hilos) reservadas/eliminadas, siempre coherente (o la fila existe y está reservada por exactamente un paciente que vio éxito, o no existe y nadie vio éxito), sin 500. Profesional que reserva: 403. Además, **servidor real** `flask run --no-reload` con 12 clientes HTTP simultáneos sobre 6 horas: 1 éxito por hora, solo 302, 0 *tracebacks* en el log (`exp_srv.py`). |
-| 2. Regla 5 contra modelo independiente (`exp2.py`) | Modelo con `zoneinfo` (instantes con `fold=0`, descartando horas ambiguas/inexistentes), 3 pacientes, 3 profesionales, duraciones 10-180 min, minutos aleatorios, cancelaciones intercaladas, en la noche de abril (3-4 abr 2027), la de septiembre (4-5 sep 2027) y un día normal: **800 decisiones, 0 discrepancias** (185 aceptadas, 615 rechazadas). Las reservas de otros pacientes no cuentan y las canceladas (estado vuelve a libre) tampoco; adyacentes por ambos lados se aceptan. |
-| 3. Hora futura (`exp34.py`) | inicio == ahora: rechazada; +1 s: aceptada; -1 s, en curso, pasada de 5 días: rechazadas; ahora = 11:59:59,9 con inicio 12:00:00: aceptada; ahora = 12:00:00,1: rechazada; hora pasada forzada por POST aunque no salga en la lista: rechazada con «Esa hora ya empezó o ya pasó». |
-| 4. Seguridad (`exp34.py`) | «No existe» y «ocupada por otro»: mismo texto, mismo código y mismo `Location`. Ids `0`, `-1`, `abc`, `+1`, `1e3`, `%20`, `1%00`, 10²¹: 404. Sin token, token vacío, token de otra sesión, cabecera `X-CSRFToken` falsa: 400. GET/HEAD: 405 (`Allow: OPTIONS, POST`). Sin sesión (con token de `/login`): 302 a `/login` (lo cubre la suite). Profesional: 403. Campos `paciente_id`, `reservada_en`, `estado`, `profesional_id` en el formulario: ignorados (la fila queda con el paciente de la sesión y la hora del reloj). `Cache-Control: no-store` en la respuesta 302 y en la página a la que redirige. Nombre del profesional `Dr <script>alert(1)</script> & Co`: el flash sale escapado (`&lt;script&gt;`). |
-| 5. `reservada_en` | `2026-10-12T12:00:00-03:00`: ISO con zona de Chile, sin fracción, igual que `usuarios.creado_en` (`2026-10-08T15:56:31-03:00`). Invierno -04:00 (lo fija una prueba). |
-| 6. Refactor | Ver R-10. |
-| 7. Mutaciones propias | 16 (14 pedidas + 2 variantes). Ver R-04 y R-05: 11 mueren, 5 sobreviven (una solo según la zona horaria del equipo). |
-| 8. Rendimiento | Bloqueo de escritura de `reservar_hora` con 50 000 filas en `horas`: 32 ms (0 reservas propias), 28 ms (200), 68 ms (2 000). Bloqueo externo de 7 s: la petición espera 5,0 s y responde 500 (página genérica en inglés); al soltarse el bloqueo la siguiente reserva funciona (302). |
+| Suite (copia del commit, `TZ=America/Santiago` del equipo) | **1117 passed en 65,9 s** (la entrada dice ≈62 s). 1117 − 956 = 161 nuevas (158 en `test_cancelar.py` + 3 por la prueba parametrizada nueva de `test_reservar.py`). Las líneas eliminadas de `tests/` son 4 (`git diff a64a234 1a8e1d8 -- tests`): 3 en `test_reservar.py` y 1 en `test_rutas_publicas.py`, como dice PROGRESS. |
+| 1. Borde de 24 h, `exp/e1.py` y `e1b.py` | Modelo independiente (`zoneinfo`, `fold=0`, resta de instantes UTC), **1500 casos aleatorios** (1055 pegados al borde ±2 s y ±1 µs) en las ventanas de septiembre y abril de 2026 y 2027 y en un día normal, con el sistema en UTC: **0 discrepancias**, ninguna transacción abierta. Casos fijos con el sistema en Tokio: exactamente 24:00:00 se permite; +1 µs, +0,5 s y +1 s se rechazan; −1 µs y −1 s se permiten; 6 horas de las dos noches de cambio de horario (23:30, 01:00, 00:30, 10:00) × {0, −1, +1 s}: todas coinciden con el modelo. |
+| 1. HTTP, `e2.py` | Reserva ajena, inexistente, ya libre y doble clic: **mismo texto y mismo `Location: /paciente`**. Profesional: 403. GET: 405. Sin token: 400. Una reserva con `recordatorio_enviado=1` queda tras cancelar como `('libre', NULL, NULL, 0)`; la reserva ajena no cambia. Una notificación ligada a la hora **sigue ahí con `hora_id` intacto** (no se borra la fila, `ON DELETE SET NULL` no se dispara). Tras cancelar, Beto reserva la misma hora y, tras cancelar él, Ana la reserva de nuevo. Los CHECK impiden `libre` con `paciente_id`, `reservada` sin `reservada_en`, etc. (verificado con UPDATE directo). |
+| 2. Concurrencia real, `e4.py` | Archivo SQLite, cada cliente con su app y su conexión, barrera, **12 procesos y 12 hilos**, 3 rondas por escenario: 12 cancelaciones simultáneas = exactamente 1 «Cancelaste…» y 11 «No encontramos…»; 6 cancelaciones de Ana contra 6 reservas de Beto = siempre 1 cancelación y 1 reserva, estado final `reservada` por Beto; 6 cancelaciones contra 6 eliminaciones del profesional = 1 cancelación y 1 eliminación (fila borrada, el resto «No se puede eliminar…» o 404); mezcla 4+4+4 coherente. **0 respuestas 500**, `PRAGMA integrity_check` ok, la base se abre sin bloqueo después. |
+| 3. Reloj tras el bloqueo, `e5.py` | Un hilo mantiene `BEGIN IMMEDIATE` 2 s con otra conexión; la llamada espera. `reloj` se invoca a los **2,05 s (reservar) y 2,04 s (cancelar)**, después de soltar el bloqueo; `reservada_en` = segundo de commit, no el de la llamada (2 s antes). R-02 de T-07 cerrado. Otros llamadores de `reservar_hora`: solo la ruta y 3 pruebas (`grep`). |
+| 4. «Mis reservas», `e3.py` | 0 reservas: «No tienes reservas próximas.» Con reservas en curso (empezó hace 30 min), pasada (hace 7 días), exactamente ahora, 23 h 59 min 59 s, 24 h exactas, 3 semanas y 5 semanas, más una de Beto y una hora libre: salen solo las 4 futuras propias, ordenadas por instante; 23:59:59 sin botón y con «Ya no se puede cancelar (faltan menos de 24 horas)»; 24:00:00 con botón; 3 formularios de cancelar + el de «Cerrar sesión», los 4 con `csrf_token`. Nombre de profesional `<script>alert(1)</script>&"x` escapado (`&lt;script&gt;`). `Cache-Control: no-store`, `Pragma: no-cache`. Nada de Beto ni de horas libres. |
+| 5. Fixture de zona | Ver R-01 y R-05. Simulé Windows (`del time.tzset` vía `sitecustomize`): `tests/test_login.py` da **95 errores** `AttributeError: module 'time' has no attribute 'tzset'`. Una prueba temporal con `zona_sistema` seguida de otra sin ella ve `TZ=UTC` y se restaura bien (con `TZ` definido y sin definir). |
+| 6. Mutaciones propias | **20** (14 pedidas + 6 más), subconjunto `test_cancelar, test_reservar, test_horas_libres, test_rutas_publicas, test_seguridad` con `-x`. **18 mueren, 2 sobreviven** (R-04). Tabla abajo. |
+| 7. Suite | `--durations=0`: setup 33,6 s (972 × ≈35 ms), llamadas 28,6 s. Ver R-03. |
+| 8. D-029, `e6.py` | Reservar una hora a 17 h: «Listo, reservaste tu hora…» sin aviso; en el panel sale «Ya no se puede cancelar»; cancelar por POST da el mensaje de anticipación; el profesional no puede eliminarla («Primero debe cancelarse la reserva»). Ver R-02. |
 
-No ejecuté: navegador real ni diseño (HTML sin estilos), varias réplicas del servidor, carga sostenida, las 29 mutaciones del implementador (no las repetí; solo las leí en PROGRESS), el recorrido manual exacto de PROGRESS (hice el mío con servidor real y 12 clientes).
+No verifiqué: navegador real ni diseño (HTML sin estilos); el recorrido manual del implementador (hice el mío por el cliente de pruebas de Flask, no con `flask run` y curl); las 51 mutaciones del implementador (solo las leí); `BEGIN IMMEDIATE` esperando más de 5 s (500 conocido, declarado, no lo repetí); varias réplicas ni carga sostenida; la suite con `TZ=Asia/Tokyo` (tampoco los «6 corridas» de concurrencia: confío en mis propias rondas).
 
-## Hallazgos
+Veracidad de PROGRESS: coincide en 1117/161/4 líneas, el R-05 reproducido (mi N16 muere), la hora de la entrada (`2026-10-08 16:34`) con el commit (16:34:50 −03) y la nota «reservar_hora cambió de firma, sin otros llamadores». Sin discrepancias.
 
-### R-01 — El paciente no puede ver ni cancelar sus reservas hasta T-11 — media (planificación)
-Tras reservar, el paciente solo ve un aviso flash en `/paciente` («Listo, reservaste tu hora: 09-10-2026 10:00 con Dr. Pro.»). Al recargar desaparece, `/paciente` no lista nada (hoy solo saludo, enlace a horas y «Cerrar sesión») y la hora desaparece de `/paciente/horas` (filtra `libre`). T-08 (`POST /horas/<id>/cancelar`) depende solo de T-07 y no menciona ninguna pantalla desde la que cancelar; la lista «próxima sesión / historial» (US-10) está en T-11, que depende de T-09 (después de T-08, T-09). Consecuencias: (a) T-08 quedaría sin botón (solo probable con POST a mano); (b) el recorrido de SPEC §9 (reserva → confirmación → recordatorio → cancelación) no se puede hacer por la interfaz; (c) el mensaje de rechazo de la regla 5 dice «Cancela esa reserva» y el paciente no tiene dónde hacerlo. US-8 («recibo confirmación») se cumple en el mínimo.
-Reproducción: reservar y cargar `/paciente` dos veces.
-Recomendación: **ajuste de TASKS** (orquestador): que T-08 incluya una lista mínima «Mis reservas» (futuras, con botón «Cancelar» con token CSRF) en `/paciente`, que T-11 después amplía con historial y notificaciones; o adelantar la parte de T-11 que lista reservas.
-
-### R-02 — El reloj se lee antes de esperar el bloqueo: `ahora` y `reservada_en` pueden quedar viejos — baja
-La ruta llama `tiempo.ahora_chile()` antes de `BEGIN IMMEDIATE`. Si la petición espera el bloqueo de escritura (hasta 5 s), usa un «ahora» anterior al instante real del commit. Reproducción (`exp9.py`): bloqueo externo de 4,5 s, hora que empieza dentro de 3 s: la reserva se acepta y se confirma a las 16:04:20, **un segundo después de que la hora empezara**, con `reservada_en = 16:04:16` (3-4 s antes del commit). Impacto real mínimo (los bloqueos duran decenas de ms), pero el mismo patrón en T-08 (24 h exactas) y en `reservada_en` (orden de reservas bajo contención) es evitable.
-Recomendación: **absorber en T-08**: tomar el reloj dentro de la transacción, después de `BEGIN IMMEDIATE` (p. ej. pasar `tiempo.ahora_chile` como función, o llamarlo dentro) y hacerlo igual en cancelar; una prueba con un bloqueo externo corto que verifique que `reservada_en` es posterior al fin de la espera.
-
-### R-03 — Bloqueo de SQLite > 5 s → 500 con página en inglés — baja (ya conocida)
-Medido: 5,0 s de espera y «500 Internal Server Error»; la base queda intacta y la siguiente reserva funciona. Mismo caso que T-05 R-02 (backlog) y reconocido en D-028. La transacción de T-07 es corta (≤ 68 ms con 2 000 reservas propias y 50 000 filas), así que en la práctica solo ocurre con un proceso externo colgado.
-Recomendación: **backlog** ya existente (T-05 R-02); al absorberlo, cubrir `crear_hora`, `eliminar_hora`, reservar y cancelar con el mismo manejo (`OperationalError` → «El sistema está ocupado, inténtalo de nuevo»). El cálculo dentro de la transacción es aceptable: son los intervalos de las reservas del paciente (decenas), sin SQL adicional.
-
-### R-04 — Faltan pruebas de que cada salida deja la transacción cerrada — baja
-Mutaciones que **sobreviven** a la suite completa: E (sin `rollback` en «ya empezó»), F (sin `rollback` en «no existe»), G (sin `rollback` en «no libre»), Z (el `except` solo atrapa un tipo de error, es decir, no hay `rollback` ante una excepción inesperada). Hoy son inocuas porque `close_db` cierra la conexión al terminar la petición, pero `reservar_hora` es una función con `db` como parámetro (la reutilizarán T-08/T-09/CLI) y el bloqueo de escritura quedaría tomado hasta que alguien cierre la conexión. Mueren: H (sin `rollback` tras `rowcount != 1`), y el de solape (la prueba `test_un_rechazo_no_deja_la_transaccion_abierta`).
-Recomendación: **backlog / absorber en T-08**: una prueba parametrizada que, para cada `return False` y para una excepción inyectada (p. ej. `IntegrityError` en el UPDATE), exija `db.in_transaction is False` y que una segunda conexión pueda escribir.
-
-### R-05 — Con la zona del equipo = Chile sobrevive una mutación de zona — baja
-Mutación D: `ahora.replace(tzinfo=None).timestamp()` (tomar la hora de pared de Chile como si fuera la del servidor) pasa toda la suite cuando el proceso corre con `TZ=America/Santiago` (el entorno de trabajo lo tiene así) y **muere** con `TZ=UTC` o `TZ=Asia/Tokyo` (verificado). Es decir, la suite solo detecta ese error si se ejecuta en una zona distinta de Chile.
-Recomendación: **backlog**: que `conftest.py` fije `TZ=UTC` (con `time.tzset()`) para toda la suite, o una prueba que corra el cálculo bajo `TZ=UTC` en un subproceso. Nota también para el verificador de T-14: correr `pytest` una vez con `TZ=UTC`.
-
-### R-06 — Suite ≈ 48 s: conviene abrir la tarea de velocidad antes de T-09 — baja
-Medido: 46,5 s (corrida limpia) y 50,7 s (con `--durations`). T-07 aporta 6,3 s (`test_reservar.py`, 53 pruebas, la concurrencia con procesos son menos de 2 s); `test_horas.py` suma 12,9 s y `test_esquema.py` 6,2 s; ninguna prueba individual pasa de 3,4 s: el costo es de unos 50 ms por prueba (app y base nuevas por prueba). Tendencia: 25 s (T-04b) → 35 s (T-05) → 48 s; cada tarea aporta 5-6 s, y T-08/T-09 la llevarían sobre 60 s.
-Recomendación: **tarea nueva pequeña** (después de T-08, antes de T-09) con la solución más barata: base plantilla ya inicializada que se copia por prueba, o una fixture de módulo para las pruebas de solo lectura; `pytest-xdist` requeriría `DECISIONS.md` (dependencia) y revisar la concurrencia de `test_reservar` (procesos y bloqueos). No bloquea nada.
-
-### R-07 — Detalles de enumeración y rutas alias — informativa
-(a) Una hora libre que ya empezó responde «Esa hora ya empezó o ya pasó», distinto de «no está disponible»: revela que el id existe y está libre. Ya es visible en la lista (que muestra los ids en los formularios) y es una cuenta única de profesional; **ignorar**. (b) `/horas/١/reservar`, `/horas/0001/reservar` y `/horas/%D9%A1/reservar` llegan al id 1 (302, no 404): Werkzeug acepta dígitos Unicode y ceros a la izquierda; ya anotado (T-05 R-06), **T-14**. (c) PUT/DELETE/PATCH sin token responden 400 (CSRF antes que 405): inocuo.
-
-### R-08 — Preguntas para el humano sobre el alcance — informativa
-(1) **Anticipación al reservar**: SPEC no impide reservar una hora que empieza en 3 horas. Esa reserva nunca podrá cancelarse (US-9 exige 24 h) y el recordatorio de T-10 saldría en la primera ejecución. Decidir si se aceptan o se exige un mínimo. (2) **Regla 5** dice «dos reservas a la misma hora»; D-028 la implementa como solape de intervalos [inicio, fin) (más estricta, correcta con duraciones distintas y con D-023). Confirmar que es lo querido (hoy es coherente con la regla 3 del profesional). **Decisión humana**, no bloquea.
-
-### R-09 — Notas para T-08, T-09, T-10, T-11 y T-12 — informativa
-- **T-08**: ver R-01 (pantalla) y R-02 (reloj dentro de la transacción). Cancelar con `UPDATE ... SET estado='libre', paciente_id=NULL, reservada_en=NULL WHERE id=? AND paciente_id=? AND estado='reservada'` y revisar `rowcount`; anticipación `inicio_s - ahora_s >= 24*3600`. La regla 5 de T-07 ya ignora lo que vuelve a `libre`. Mensaje distinto para «no es tuya» vs «no existe» no debe filtrar (mismo texto, como en T-07).
-- **T-09**: el punto natural es dentro de `reservar_hora`, entre la comprobación `reservadas != 1` y `db.commit()`, con la misma conexión y sin `commit` propio en `notificaciones.py`, para que reserva y notificaciones sean atómicas. El `SELECT` de la hora **no trae `h.profesional_id`** (hoy solo el nombre): T-09 lo necesita para notificar al profesional. El mensaje debe bastarse solo (fecha, hora, contraparte; `hora_id` puede quedar NULL, D-016). La escritura de `outbox.log` (archivo) conviene después del `commit`, para que un fallo del archivo no deshaga una reserva válida; decidirlo explícitamente.
-- **T-10**: `recordatorio_enviado` empieza en 0 por el esquema; T-07 no lo toca. Ver R-08 (1).
-- **T-11/T-12**: `reservada_en` es texto con desfase; **no ordenar por él**: en la hora repetida de abril `2027-04-03T23:10:00-04:00` (más tarde) ordena antes que `2027-04-03T23:30:00-03:00` (por comparación de texto, no ejecutado). Ordenar por instante de `inicio` (`tiempo.a_segundos_utc`) como hace T-06.
-
-### R-10 — Refactor `intervalo_guardado` y pruebas retiradas — informativa (sin problema)
-El diff de `profesional.py` es un traslado literal: `_minutos_guardados` y `_intervalo_guardado` pasan a `tiempo.py` con el cuerpo idéntico (solo cambia el docstring); los tres usos (`buscar_solape`, `_describir`) se actualizan, no quedan referencias al nombre antiguo y `profesional.py` no deja importaciones sin uso. Mi mutación J (aceptar minutos de cualquier tipo en la función movida) muere en `test_horas.py`, así que las pruebas del profesional siguen vigilando la función. Las «6 líneas eliminadas de `tests/`» son 5 de `test_no_hay_boton_de_reservar_todavia` (obsoleta: exigía que no hubiera `<form`; se reemplazó por una prueba que exige el formulario, el token y el id por fila) y 1 de `test_rutas_publicas.py` (la misma línea con `paciente.reservar` agregado): sin pérdida de cobertura. `tests/test_reservar.py` está justificado en D-028 (regla 10 de CLAUDE.md).
-
-### R-11 — Veracidad de PROGRESS.md — informativa (sin problema)
-Verificado: 956 pruebas OK; 54 nuevas = 53 en `test_reservar.py` + 1 en `test_horas.py` (la de `test_horas_libres.py` es un reemplazo neto 0); `FLASK_DEBUG=1`/`SECRET_KEY=abc` pasan; la concurrencia con procesos e hilos y los resultados del recorrido (reservar, rechazar a B, cruce, adyacente, 403, sin token, id 2**63) coinciden con lo que reproduje. `reservada_en = 2026-10-08T15:43:21-03:00` es plausible (anterior al commit). La hora de la entrada (15:47) coincide con el commit (15:47:14) y D-028 dice 15:46: esta vez no hay desfase (la regla 8 se respetó). No pude comprobar el contenido de las 29 mutaciones del implementador (script fuera del repo); de mis 16, 11 mueren, y las que sobreviven (R-04, R-05) no coinciden con las suyas porque son distintas.
-
-## Mutaciones propias (distintas de las 29 del implementador)
-
-Cada una en una copia completa; primero `test_reservar + test_horas_libres + test_rutas_publicas + test_horas` con `-x` y, si sobrevive, la suite completa.
+### Mutaciones propias (distintas de las 51 del implementador)
 
 | # | Mutación | Resultado |
 |---|---|---|
-| A | solape solo con `otro_inicio < fin_nuevo` | muere (`adyacentes_o_separadas`) |
-| B | solape solo con `inicio_nuevo < otro_fin` | muere (`adyacentes_o_separadas`) |
-| C | `minutos * 30` en `tiempo.intervalo_guardado` | muere (`solapes_del_mismo_paciente`) |
-| D | `ahora.replace(tzinfo=None).timestamp()` | **sobrevive con TZ=America/Santiago**, muere con TZ=UTC/Tokyo (R-05) |
-| E | sin `rollback` en «ya empezó» | **sobrevive** (R-04) |
-| F | sin `rollback` en «no existe» | **sobrevive** (R-04) |
-| G | sin `rollback` en «no libre» | **sobrevive** (R-04) |
-| H | sin `rollback` si `rowcount != 1` | muere (`el_update_condicional_decide`) |
-| J | `minutos` acepta cualquier tipo | muere (`test_horas`) |
-| K | `reservada_en` con reloj propio (`datetime.now`) | muere (`reserva_exitosa`) |
-| M | la ruta acepta GET | muere (`get_no_reserva`) |
-| Q | `ID_MAX = 2**63` | muere (`ids_invalidos_o_gigantes`) |
-| X | `BEGIN EXCLUSIVE` en vez de `IMMEDIATE` | muere (`primera_sentencia_es_begin_immediate`) |
-| Z | `except` que ya no atrapa excepciones inesperadas (sin `rollback`) | **sobrevive** (R-04) |
-| W | tolerancia de 1 s a favor de la hora que empieza | muere (`un_segundo_despues_de_ahora_si_se_reserva`) |
-| V | el mensaje de solape muestra la hora nueva en lugar de la existente | muere (`solapes_del_mismo_paciente`) |
+| N01 | 24 h − 1 s | muere |
+| N02 | decide con el **fin** de la sesión | muere |
+| N03 | aviso de éxito con el `inicio` crudo | muere |
+| N04 | `rowcount != 1` devuelve `True` | muere |
+| N05 | panel muestra la que empieza justo ahora | muere |
+| N06 | panel ordena solo por id | muere |
+| N07 | cancelar redirige a la lista de horas libres | muere |
+| N08 | plantilla sin el texto «Ya no se puede cancelar» | muere |
+| N09 | columna profesional con el nombre del paciente | muere |
+| N10 | ruta `min=0` | muere |
+| N11 | cancelar sin comprobar fecha ilegible (cae en «poca anticipación») | **sobrevive** |
+| N12 | `reservada_en` con `timespec="minutes"` | muere |
+| N13 | `cancelar_reserva` ignora el parámetro `reloj` | muere |
+| N14 | panel con reloj real en vez de `tiempo.ahora_chile` | muere |
+| N15 | margen SQL de 1 día a 0 | **sobrevive** |
+| N16 | `reservar_hora` con hora de Chile leída como hora del sistema (R-05 de T-07) | muere |
+| N17 | botón del panel decidido con el fin de la sesión | muere |
+| N18 | sin `rollback` en «poca anticipación» | muere |
+| N19 | sin `rollback` en el solape de `reservar_hora` | muere |
+| N20 | `except` de `cancelar_reserva` traga la excepción | muere |
 
-## Resumen de recomendaciones
+M04 y M05 del implementador **sí son equivalentes**: con el CHECK de `horas`, `paciente_id` no nulo implica `reservada` y una hora libre tiene `paciente_id` NULL (probé los tres UPDATE que lo violarían: `IntegrityError`).
 
-| Hallazgo | Severidad | Acción |
-|---|---|---|
-| R-01 | media | Ajuste de TASKS: lista «Mis reservas» con «Cancelar» dentro de T-08 |
-| R-02 | baja | Absorber en T-08 (reloj dentro de la transacción) |
-| R-03 | baja | Backlog ya existente (T-05 R-02) |
-| R-04 | baja | Absorber en T-08 (prueba de transacción cerrada en cada salida) |
-| R-05 | baja | Backlog (`TZ=UTC` en la suite) |
-| R-06 | baja | Tarea nueva pequeña de velocidad tras T-08 |
-| R-07 | informativa | Ignorar / T-14 |
-| R-08 | informativa | Decisión humana (anticipación al reservar; regla 5 como solape) |
-| R-09 | informativa | Notas para T-08 a T-12 |
-| R-10, R-11 | informativa | Sin acción |
+## Hallazgos
+
+### R-01 — La fixture automática `time.tzset()` rompe toda la suite en Windows — media
+`tests/conftest.py` llama `time.tzset()` en `zona_del_sistema_fija` (autouse) y en `fijar_zona_sistema`. `time.tzset` no existe en Windows. README (`.venv\Scripts\activate`, PowerShell, `pytest`) y D-012 (`tzdata` para `win32`) tratan Windows como soportado, y CLAUDE.md dice que una tarea no está terminada si `pytest` no pasa.
+Reproducción: `printf 'import time\ndel time.tzset\n' > sc/sitecustomize.py; PYTHONPATH=sc python3 -m pytest -q tests/test_login.py` → 95 errores de configuración, ninguna prueba corre.
+Recomendación: **tarea nueva T-08c (pequeña, antes de T-09)**: proteger con `hasattr(time, "tzset")`; si no existe, la autouse no hace nada y `zona_sistema` marca `pytest.skip("sin time.tzset")` (o parametriza solo con la zona actual); una prueba que fije el comportamiento simulando la ausencia como arriba. No requiere decisión humana.
+
+### R-02 — Callejón sin salida: una reserva hecha con < 24 h no la puede deshacer nadie, y nada lo avisa al reservar — media (D-029)
+Reproducción (`exp/e6.py`, ahora = 12:00): Ana reserva una hora de mañana 05:00 (17 h). Mensaje: «Listo, reservaste tu hora…», sin advertencia (ni en `horas_libres.html` ni en la confirmación). Después el panel dice «Ya no se puede cancelar»; el POST de cancelar da «Solo puedes cancelar con al menos 24 horas… comunícate con el profesional»; el **profesional tampoco puede**: eliminar da «No se puede eliminar una hora reservada. Primero debe cancelarse la reserva» (regla 4), y no existe ninguna pantalla donde el profesional cancele. El texto sugiere una salida que la aplicación no ofrece.
+Es lo que D-029 describe; lo nuevo es que el mensaje de cancelar remite a un profesional que en v1 no tiene herramienta. La implementación de T-08 es coherente con SPEC (no se pedía otra cosa).
+Recomendación: **decisión humana D-029, antes de T-09**. Si se aprueba B (solo reservar con ≥ 24 h), debe usar la misma constante y el mismo `>=` que cancelar, para que toda reserva exitosa sea cancelable en el instante de reservar; si C, el aviso va en la lista de horas libres (por fila con < 24 h) y en la confirmación, no solo después. Mientras tanto, cambiar el texto «comunícate con el profesional» por uno que no prometa una vía inexistente (T-09 o T-12).
+
+### R-03 — La suite sube a 65,9 s; T-08b confirmado, con una advertencia sobre su meta — baja
+`pytest --durations=0`: ningún caso pasa de 3 s (el mayor es `flask run` real, 3,0 s; luego la idempotencia exhaustiva, 2,8 s). El tiempo está en el conjunto: **setup 33,6 s** (972 preparaciones de ≈35 ms; `app` + `init_db` por prueba, en `test_cancelar.py` además un `init_db` autouse), **llamadas 28,6 s**. Por archivo (setup+llamada): `test_cancelar` 14,2 s (158 pruebas), `test_horas` 13,0 s (393), `test_reservar` 7,4 s, `test_esquema` 6,6 s (279), `test_login` 4,9 s, `test_registro` 4,6 s, `test_config` 4,0 s.
+Orientación: copiar una base ya inicializada (plantilla) en vez de `init_db` en cada prueba recortaría la mayor parte del setup, pero la meta de T-08b (< 25 s) también exige bajar las llamadas (28,6 s hoy): `test_horas`, `test_cancelar` y las parametrizaciones. T-08 aportó ≈ 13,5 s (158 pruebas) sobre los 48 s anteriores.
+Recomendación: **T-08b tal como está**; añadir en su texto que setup y llamadas pesan casi lo mismo.
+
+### R-04 — Dos mutaciones sobreviven; ninguna es un defecto — baja
+N11: si una reserva tiene fecha ilegible (solo por SQL, el CHECK deja pasar `2026-13-45T99:99:99`), quitar el chequeo hace que el rechazo salga con el mensaje de anticipación en vez del de «no encontrada»; la prueba `test_la_fila_con_fecha_ilegible…` solo exige categoría `error` y que la fila no cambie. Es un cambio de texto de un estado que la app no produce. N15: el margen SQL de 1 día es defensa; con 0 solo se pierde una fila imposible de crear (hora inexistente de septiembre guardada por SQL). Recomendación: **ignorar**.
+
+### R-05 — La fixture `TZ=UTC` por prueba es adecuada, con tres matices — informativa
+Evaluación: no hay código de la aplicación que dependa de la zona del sistema (`grep`: solo `datetime.now(zona_chile())` y conversiones con `zoneinfo`), de modo que fijar UTC no deja de probar nada de la app; la única clase de error que sí detecta es leer la hora de Chile como hora local (N16 la mata, y con el equipo en Santiago antes sobrevivía). Es una decisión adecuada, no excesiva, y el implementador la dejó expuesta como decisión suya, con la forma de revertirla. Se restaura bien y no contamina entre pruebas. Matices: (1) `os.environ["TZ"]` es del proceso, no del hilo; vale porque cada prueba corre hilos y procesos propios dentro de sí misma, pero fallaría con `pytest-xdist` en hilos (no se usa); (2) los subprocesos de las pruebas heredan `TZ=UTC` (inofensivo hoy); (3) solo 4 pruebas piden `zona_sistema` (tres zonas), las demás corren solo en UTC: basta para el borde, pero una prueba futura que dependa de la zona deberá pedirla. Recomendación: **ignorar** salvo el arreglo de R-01.
+
+### R-06 — Una sesión en curso desaparece de «Mis reservas» — informativa
+El filtro exige `inicio > ahora`: durante los 50 minutos de la sesión la reserva no sale en el panel (la probé: 11:30 con ahora 12:00). Es consistente con «futuras» y con T-05 R-07 del backlog (el panel del profesional también oculta horas iniciadas). Recomendación: **backlog para T-11**: decidir si «próxima sesión» incluye la que está en curso.
+
+### R-07 — Lo que T-09, T-10, T-11 y T-12 necesitan de `cancelar_reserva` — informativa
+- T-09: el `SELECT` de `cancelar_reserva` trae `inicio`, `duracion_min`, `estado`, `paciente_id` y el nombre del profesional, pero **no `profesional_id` ni el nombre del paciente** (hace falta un `JOIN usuarios` más). `reservar_hora` tampoco trae `profesional_id`. Las notificaciones deben insertarse antes del `commit` sin que `notificaciones.py` haga `commit` propio (si no, se rompe la atomicidad); la escritura de `outbox.log` es un archivo y no se deshace con `rollback`: hacerla después del `commit`. El mensaje debe bastarse solo (D-016: `hora_id` queda NULL si la hora se elimina; yo comprobé que la fila de notificación sobrevive a cancelar).
+- T-10: el reinicio de `recordatorio_enviado` a 0 al cancelar es correcto. Falta definir qué hace `send-reminders` con una reserva hecha con < 24 h (R-02): ¿la recuerda de inmediato o nunca? Y debe leer `estado` y marcar `recordatorio_enviado` dentro de `BEGIN IMMEDIATE`, para no mandar un recordatorio a una reserva que se cancela en el mismo instante (la cancelación permitida más tardía coincide con el momento del recordatorio, las 24 h exactas).
+- T-11/T-12: no ordenar por `reservada_en` (texto con offset); reutilizar `listar_reservas_futuras` o su criterio. El historial de US-10 no tiene dónde mostrar reservas canceladas: no hay `cancelada_en` ni fila de cancelación, solo la notificación de T-09.
+Recomendación: **notas en TASKS** (orquestador) para T-09 a T-12.
+
+## Cierre de hallazgos de T-07
+
+| Hallazgo | Estado |
+|---|---|
+| R-01 (sin «Mis reservas») | Cerrado: lista, botón, texto sin botón, CSRF (punto 4). |
+| R-02 (reloj antes del bloqueo) | Cerrado: espera real comprobada en `reservar_hora` y `cancelar_reserva` (punto 3). |
+| R-04 (rollback en cada salida) | Cerrado: N18, N19 y N20 mueren. |
+| R-05 (prueba que dependía de `TZ=America/Santiago`) | Cerrado: N16 muere con el equipo en Santiago. Abre R-01 de esta revisión (Windows). |
+| R-08 (D-029) | Sigue pendiente del humano (R-02 de esta revisión). |
