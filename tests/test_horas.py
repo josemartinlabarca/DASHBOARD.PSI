@@ -9,7 +9,7 @@ import pytest
 
 from app import auth, profesional, tiempo
 from app.db import get_db, init_db
-from tests.test_login import crear, iniciar
+from tests.test_login import crear, iniciar, permitir_varios_profesionales
 from tests.test_seguridad import extraer_token
 
 AHORA_REAL = tiempo.ahora_chile  # la función de verdad, antes de que la fixture la reemplace
@@ -41,6 +41,7 @@ def pro(app):
 
 @pytest.fixture
 def pro2(app):
+    permitir_varios_profesionales(app)
     crear(app, email="pro2@example.cl", rol="profesional", nombre="Dra. Dos")
     client = app.test_client()
     iniciar(client, "pro2@example.cl")

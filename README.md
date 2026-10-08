@@ -47,6 +47,14 @@ flask --app app init-db
 
 Esto borra todos sus datos; no lo hagas con datos que quieras conservar.
 
+**Importante tras T-08d (D-022 y D-023):** la tabla `usuarios` ganó la columna
+`sesion_version` (cierre de sesión que invalida las cookies copiadas) y el índice
+único `un_solo_profesional` (la base impide un segundo profesional). Un
+`agenda.db` anterior **no tiene la columna**: la aplicación fallaría al iniciar
+sesión con `no such column: sesion_version`. Bórralo y ejecuta `init-db` de nuevo
+como se indica arriba. Hoy `init-db` no avisa si detecta un esquema antiguo (eso
+queda para T-14).
+
 ### Variable `SECRET_KEY`
 
 `SECRET_KEY` es la clave secreta con la que Flask firma las sesiones y los

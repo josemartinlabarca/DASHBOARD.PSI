@@ -4,8 +4,13 @@ CREATE TABLE IF NOT EXISTS usuarios (
     email TEXT NOT NULL UNIQUE COLLATE NOCASE,
     password_hash TEXT NOT NULL,
     rol TEXT NOT NULL CHECK (rol IN ('paciente', 'profesional')),
-    creado_en TEXT NOT NULL
+    creado_en TEXT NOT NULL,
+    sesion_version INTEGER NOT NULL DEFAULT 0
 );
+
+-- Un solo profesional en v1 (D-004, D-023): la base impide un segundo. El índice es
+-- parcial: los pacientes (rol 'paciente') no entran en él y pueden ser muchos.
+CREATE UNIQUE INDEX IF NOT EXISTS un_solo_profesional ON usuarios (rol) WHERE rol = 'profesional';
 
 CREATE TABLE IF NOT EXISTS horas (
     id INTEGER PRIMARY KEY,

@@ -40,6 +40,8 @@ agenda-psi/
 - `password_hash` TEXT NOT NULL
 - `rol` TEXT NOT NULL CHECK (rol IN ('paciente','profesional'))
 - `creado_en` TEXT NOT NULL
+- `sesion_version` INTEGER NOT NULL DEFAULT 0 (D-022: la sesión guarda `(id, sesion_version)`; solo es válida si coincide con la de la base; el logout la incrementa con un `UPDATE` atómico y así invalida cualquier copia anterior de la cookie)
+- índice único parcial `CREATE UNIQUE INDEX IF NOT EXISTS un_solo_profesional ON usuarios (rol) WHERE rol = 'profesional'` (D-023: la base impide un segundo profesional; los pacientes no entran en el índice)
 
 **horas**
 - `id` INTEGER PK

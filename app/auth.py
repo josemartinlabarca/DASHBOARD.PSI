@@ -51,6 +51,10 @@ MENSAJE_NOMBRE_CARACTERES = (
 )
 MENSAJE_LOGIN_INVALIDO = "Correo o contraseña incorrectos."
 CLAVE_SESION_USUARIO = "usuario_id"
+CLAVE_SESION_VERSION = "sesion_version"  # D-022: copia de usuarios.sesion_version
+MENSAJE_PROFESIONAL_EXISTE = (
+    "Ya existe un profesional; en esta versión solo puede haber uno."
+)
 
 
 @lru_cache(maxsize=1)
@@ -76,6 +80,15 @@ def es_correo_duplicado(error):
     return (
         getattr(error, "sqlite_errorcode", None) == sqlite3.SQLITE_CONSTRAINT_UNIQUE
         and "UNIQUE constraint failed: usuarios.email" in str(error)
+    )
+
+
+def es_profesional_duplicado(error):
+    """True solo si `error` es la violación del índice único parcial de profesionales
+    (`usuarios.rol`, D-023); igual de estricta que `es_correo_duplicado`."""
+    return (
+        getattr(error, "sqlite_errorcode", None) == sqlite3.SQLITE_CONSTRAINT_UNIQUE
+        and "UNIQUE constraint failed: usuarios.rol" in str(error)
     )
 
 
@@ -223,7 +236,7 @@ def buscar_usuario_por_credenciales(email_bruto, password):
     fila = None
     if email and len(email) <= EMAIL_MAX:
         fila = get_db().execute(
-            "SELECT id, password_hash, rol FROM usuarios WHERE email = ?", (email,)
+            "SELECT id, password_hash, rol, sesion_version FROM usuarios WHERE email = ?", (email,)
         ).fetchone()
     demasiado_larga = len(password) > PASSWORD_MAX
     candidata = "" if demasiado_larga else password
@@ -234,14 +247,31 @@ def buscar_usuario_por_credenciales(email_bruto, password):
     return fila
 
 
-def iniciar_sesion(usuario_id):
-    """Sesión nueva solo con el id y token CSRF nuevo (evita fijación de sesión)."""
+def iniciar_sesion(usuario_id, sesion_version):
+    """Sesión nueva solo con el id, la versión vigente y token CSRF nuevo.
+
+    `session.clear()` evita la fijación de sesión; la versión (D-022) es la que
+    la base tenía al verificar la contraseña. El login NO la incrementa: abrir
+    sesión en otro aparato no debe cerrar las demás (solo el logout revoca).
+    """
     session.clear()
     session[CLAVE_SESION_USUARIO] = usuario_id
+    session[CLAVE_SESION_VERSION] = sesion_version
     generar_token()
 
 
-def cerrar_sesion():
+def cerrar_sesion(db, usuario_id):
+    """Revoca TODAS las copias de la cookie del usuario y limpia la sesión (D-022).
+
+    El incremento es un único UPDATE atómico (no lee y luego escribe), así dos
+    cierres a la vez suman dos. Se confirma antes de limpiar la cookie: si falla,
+    la excepción sube y la sesión sigue como estaba (no queda a medias).
+    """
+    db.execute(
+        "UPDATE usuarios SET sesion_version = sesion_version + 1 WHERE id = ?",
+        (usuario_id,),
+    )
+    db.commit()
     session.clear()
     generar_token()
 
@@ -258,7 +288,7 @@ def login():
         return render_template(
             "login.html", email=email_bruto.strip(), error=MENSAJE_LOGIN_INVALIDO
         )
-    iniciar_sesion(usuario["id"])
+    iniciar_sesion(usuario["id"], usuario["sesion_version"])
     return redirect(url_for(f"{usuario['rol']}.dashboard"))
 
 
@@ -270,18 +300,27 @@ def _es_id_valido(valor):
     return isinstance(valor, int) and not isinstance(valor, bool) and 0 < valor < 2**63
 
 
+def _es_version_valida(valor):
+    """Un entero (no `bool`) >= 0 que cabe en un INTEGER de SQLite."""
+    return isinstance(valor, int) and not isinstance(valor, bool) and 0 <= valor < 2**63
+
+
 def usuario_actual():
     """Fila (id, nombre, rol) del usuario de la sesión, o `None`.
 
-    La sesión guarda solo el id; el rol se lee siempre de la base, así que un
-    cambio de rol o un usuario borrado surte efecto en la siguiente petición.
+    La sesión guarda el id y la `sesion_version` con que se inició (D-022). El
+    rol se lee siempre de la base, así que un cambio de rol o un usuario borrado
+    surte efecto en la siguiente petición. Sin versión (cookies anteriores a
+    D-022), con tipo raro o distinta de la de la base: sin sesión.
     """
     if "usuario_actual" not in g:
         usuario_id = session.get(CLAVE_SESION_USUARIO)
+        version = session.get(CLAVE_SESION_VERSION)
         g.usuario_actual = None
-        if _es_id_valido(usuario_id):
+        if _es_id_valido(usuario_id) and _es_version_valida(version):
             g.usuario_actual = get_db().execute(
-                "SELECT id, nombre, rol FROM usuarios WHERE id = ?", (usuario_id,)
+                "SELECT id, nombre, rol FROM usuarios WHERE id = ? AND sesion_version = ?",
+                (usuario_id, version),
             ).fetchone()
     return g.usuario_actual
 
@@ -312,7 +351,7 @@ solo_profesional = _exigir("profesional")
 @bp.route("/logout", methods=["POST"])
 @login_requerido
 def logout():
-    cerrar_sesion()
+    cerrar_sesion(get_db(), usuario_actual()["id"])
     return redirect(url_for("inicio"))
 
 
@@ -343,11 +382,23 @@ def create_professional_command(email, nombre):
     if errores:
         raise click.ClickException(" ".join(errores.values()))
     db = get_db()
+    # D-023: la comprobación y la inserción van en la misma transacción con
+    # bloqueo de escritura (BEGIN IMMEDIATE); aun así, si otro proceso se cuela,
+    # el índice único parcial de la base lo rechaza y se traduce abajo.
+    db.execute("BEGIN IMMEDIATE")
     try:
+        if db.execute("SELECT 1 FROM usuarios WHERE rol = 'profesional'").fetchone():
+            db.rollback()
+            raise click.ClickException(MENSAJE_PROFESIONAL_EXISTE)
         crear_usuario(db, nombre, email, password, "profesional")
     except sqlite3.IntegrityError as error:
         db.rollback()
-        if not es_correo_duplicado(error):
-            raise
-        raise click.ClickException("Ya existe un usuario con ese correo.") from error
+        if es_correo_duplicado(error):
+            raise click.ClickException("Ya existe un usuario con ese correo.") from error
+        if es_profesional_duplicado(error):
+            raise click.ClickException(MENSAJE_PROFESIONAL_EXISTE) from error
+        raise
+    except BaseException:
+        db.rollback()  # no dejar la transacción abierta ante cualquier otra salida
+        raise
     click.echo(f"Profesional creado: {email}")

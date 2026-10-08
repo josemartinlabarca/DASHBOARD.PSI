@@ -240,6 +240,9 @@ def test_mismo_inicio_y_mismo_profesional_rechazado(db, ids):
 
 
 def test_mismo_inicio_con_otro_profesional_aceptado(db, ids):
+    # Con el índice de D-023 la base no admite un segundo profesional; se quita
+    # solo aquí para comprobar el alcance de UNIQUE (profesional_id, inicio).
+    db.execute("DROP INDEX un_solo_profesional")
     otro = crear_usuario(db, "otro@example.cl", "profesional")
     insertar_hora(db, profesional_id=ids["prof"], inicio="2026-10-20T10:00:00")
     insertar_hora(db, profesional_id=otro, inicio="2026-10-20T10:00:00")
@@ -304,7 +307,7 @@ def _usuario(db, **campos):
 
 
 COLUMNAS_NOT_NULL = {
-    "usuarios": ["nombre", "email", "password_hash", "rol", "creado_en"],
+    "usuarios": ["nombre", "email", "password_hash", "rol", "creado_en", "sesion_version"],
     "horas": [
         "profesional_id",
         "inicio",
@@ -809,7 +812,7 @@ SQL_ESPERADO = {
         "CREATE TABLE usuarios ( id INTEGER PRIMARY KEY, nombre TEXT NOT NULL,"
         " email TEXT NOT NULL UNIQUE COLLATE NOCASE, password_hash TEXT NOT NULL,"
         " rol TEXT NOT NULL CHECK (rol IN ('paciente', 'profesional')),"
-        " creado_en TEXT NOT NULL )"
+        " creado_en TEXT NOT NULL, sesion_version INTEGER NOT NULL DEFAULT 0 )"
     ),
     "horas": (
         "CREATE TABLE horas ( id INTEGER PRIMARY KEY,"
@@ -846,15 +849,109 @@ def test_el_sql_de_cada_tabla_es_exactamente_el_aprobado(db, tabla):
     assert _sql(db, tabla) == SQL_ESPERADO[tabla]
 
 
+# El índice es un objeto propio de sqlite_master (type='index'): su SQL se compara
+# igual que el de las tablas (D-023). Los índices automáticos de UNIQUE
+# (`sqlite_autoindex_*`) no tienen SQL y no cuentan.
+SQL_ESPERADO_INDICES = {
+    "un_solo_profesional": (
+        "CREATE UNIQUE INDEX un_solo_profesional ON usuarios (rol) WHERE rol = 'profesional'"
+    ),
+}
+
+
+@pytest.mark.base_real
+@pytest.mark.parametrize("indice", list(SQL_ESPERADO_INDICES))
+def test_el_sql_de_cada_indice_es_exactamente_el_aprobado(db, indice):
+    fila = db.execute(
+        "SELECT sql, tbl_name FROM sqlite_master WHERE type='index' AND name=?", (indice,)
+    ).fetchone()
+    assert fila is not None
+    assert " ".join(fila["sql"].split()) == SQL_ESPERADO_INDICES[indice]
+    assert fila["tbl_name"] == "usuarios"
+
+
 @pytest.mark.base_real
 def test_no_hay_otros_objetos_en_la_base(db):
-    """Sin triggers, vistas ni índices extra que cambien el comportamiento."""
+    """Sin triggers ni vistas, y el único índice declarado es el de D-023."""
     filas = db.execute(
         "SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'"
     ).fetchall()
     assert {(f["type"], f["name"]) for f in filas} == {
         ("table", "usuarios"), ("table", "horas"), ("table", "notificaciones"),
+        ("index", "un_solo_profesional"),
     }
+
+
+# --- D-023: un solo profesional (índice único parcial) ----------------------------
+
+MENSAJE_SEGUNDO_PROFESIONAL = "UNIQUE constraint failed: usuarios.rol"
+
+
+def test_el_indice_es_unico_y_parcial_sobre_rol(db):
+    (fila,) = [f for f in db.execute("PRAGMA index_list(usuarios)") if f["name"] == "un_solo_profesional"]
+    assert (fila["unique"], fila["origin"], fila["partial"]) == (1, "c", 1)
+    assert [c["name"] for c in db.execute("PRAGMA index_info(un_solo_profesional)")] == ["rol"]
+
+
+def test_un_primer_profesional_se_acepta(db):
+    crear_usuario(db, "uno@example.cl", "profesional")
+
+
+def test_un_segundo_profesional_lo_rechaza_la_base_con_sql_directo(db):
+    crear_usuario(db, "uno@example.cl", "profesional")
+    rechazada(lambda: crear_usuario(db, "dos@example.cl", "profesional"), MENSAJE_SEGUNDO_PROFESIONAL)
+    assert db.execute("SELECT COUNT(*) FROM usuarios WHERE rol='profesional'").fetchone()[0] == 1
+
+
+def test_el_error_del_segundo_profesional_no_se_confunde_con_el_del_correo(db):
+    from app.auth import es_correo_duplicado, es_profesional_duplicado
+
+    crear_usuario(db, "uno@example.cl", "profesional")
+    with pytest.raises(sqlite3.IntegrityError) as info:
+        crear_usuario(db, "dos@example.cl", "profesional")
+    assert es_profesional_duplicado(info.value) and not es_correo_duplicado(info.value)
+
+
+def test_el_indice_no_afecta_a_los_pacientes(db):
+    """Un índice sin la cláusula WHERE impediría el segundo paciente."""
+    crear_usuario(db, "p1@example.cl", "paciente")
+    crear_usuario(db, "p2@example.cl", "paciente")
+    crear_usuario(db, "p3@example.cl", "paciente")
+    crear_usuario(db, "uno@example.cl", "profesional")
+    crear_usuario(db, "p4@example.cl", "paciente")
+
+
+def test_cambiar_el_rol_de_un_paciente_a_profesional_tambien_se_rechaza(db):
+    crear_usuario(db, "uno@example.cl", "profesional")
+    paciente = crear_usuario(db, "p@example.cl", "paciente")
+    rechazada(
+        lambda: db.execute("UPDATE usuarios SET rol='profesional' WHERE id=?", (paciente,)),
+        MENSAJE_SEGUNDO_PROFESIONAL,
+    )
+
+
+def test_borrado_el_profesional_se_puede_crear_otro(db):
+    uno = crear_usuario(db, "uno@example.cl", "profesional")
+    db.execute("DELETE FROM usuarios WHERE id=?", (uno,))
+    crear_usuario(db, "dos@example.cl", "profesional")
+
+
+# --- D-022: sesion_version ---------------------------------------------------------
+
+def test_sesion_version_por_defecto_es_0(db):
+    uid = crear_usuario(db)
+    assert db.execute("SELECT sesion_version FROM usuarios WHERE id=?", (uid,)).fetchone()[0] == 0
+
+
+def test_sesion_version_no_acepta_null_ni_se_omite_en_table_info(db):
+    info = {f["name"]: f for f in db.execute("PRAGMA table_info(usuarios)")}
+    assert (info["sesion_version"]["type"], info["sesion_version"]["notnull"],
+            info["sesion_version"]["dflt_value"]) == ("INTEGER", 1, "0")
+    uid = crear_usuario(db)
+    rechazada(
+        lambda: db.execute("UPDATE usuarios SET sesion_version=NULL WHERE id=?", (uid,)),
+        "NOT NULL constraint failed: usuarios.sesion_version",
+    )
 
 
 FK_ESPERADAS = {

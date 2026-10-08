@@ -6,7 +6,7 @@ import pytest
 
 from app import auth, paciente, profesional, tiempo
 from app.db import get_db, init_db
-from tests.test_login import crear, iniciar
+from tests.test_login import crear, iniciar, permitir_varios_profesionales
 
 # "Ahora" fijo: 12:00 en Chile (UTC-3 en octubre) = 15:00 UTC. Una hora de las
 # 13:00 de hoy es futura en Chile pero ya pasó si se compara con la hora UTC.
@@ -39,6 +39,10 @@ def paciente_cli(app):
 
 
 def nuevo_profesional(app, email="pro@example.cl", nombre="Dr. Pro"):
+    with app.app_context():
+        hay_uno = get_db().execute("SELECT 1 FROM usuarios WHERE rol = 'profesional'").fetchone()
+    if hay_uno:  # el segundo profesional solo existe quitando el índice de D-023
+        permitir_varios_profesionales(app)
     crear(app, email=email, rol="profesional", nombre=nombre)
     with app.app_context():
         return get_db().execute("SELECT id FROM usuarios WHERE email = ?", (email,)).fetchone()[0]

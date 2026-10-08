@@ -25,6 +25,21 @@ def crear(app, email="ana@example.cl", password=CLAVE, rol="paciente", nombre="A
         auth.crear_usuario(auth.get_db(), nombre, email, password, rol)
 
 
+def permitir_varios_profesionales(app):
+    """Quita el índice `un_solo_profesional` (D-023) de la base de ESTA prueba.
+
+    Varias pruebas modelan dos profesionales a propósito para comprobar que el
+    código filtra por `profesional_id` (aislamiento, regla 5 entre profesionales);
+    la base real ya no admite un segundo. Solo afecta a la base temporal de la
+    prueba que lo llama. El comportamiento real lo cubren test_esquema.py y
+    test_crear_profesional.py.
+    """
+    with app.app_context():
+        db = auth.get_db()
+        db.execute("DROP INDEX IF EXISTS un_solo_profesional")
+        db.commit()
+
+
 def iniciar(client, email="ana@example.cl", password=CLAVE, **extra):
     """Envía el formulario con un token real leído del HTML."""
     token = extraer_token(client.get("/login").text)
@@ -128,12 +143,13 @@ def test_el_rol_se_lee_de_la_base_en_cada_peticion(app, client):
 # ----------------------------------------------------- sesión y cookie
 
 
-def test_la_sesion_guarda_solo_el_id_y_el_token_csrf(app, client):
+def test_la_sesion_guarda_solo_el_id_la_version_y_el_token_csrf(app, client):
     crear(app)
     iniciar(client)
     datos = sesion(client)
-    assert set(datos) == {"usuario_id", "csrf_token"}
+    assert set(datos) == {"usuario_id", "sesion_version", "csrf_token"}
     assert isinstance(datos["usuario_id"], int)
+    assert datos["sesion_version"] == 0 and type(datos["sesion_version"]) is int
 
 
 def test_el_token_csrf_cambia_tras_iniciar_sesion(app, client):
@@ -435,6 +451,7 @@ def test_id_de_sesion_con_tipo_o_valor_raro_no_autentica(app, client, valor, aut
     client.get("/login")
     with client.session_transaction() as s:
         s["usuario_id"] = valor
+        s["sesion_version"] = 0  # la versión vigente (D-022): aquí se prueba solo el id
     r = client.get("/paciente")
     assert r.status_code == (200 if autentica else 302)  # nunca 500
 
@@ -584,3 +601,231 @@ def test_los_archivos_estaticos_conservan_su_cache(app, client, tmp_path):
     assert r.status_code == 200
     assert "no-store" not in r.headers.get("Cache-Control", "")
     assert "Pragma" not in r.headers
+
+
+# ------------------------------------------- D-022: revocar la sesión al salir
+
+
+def version_en_base(app, email="ana@example.cl"):
+    con = sqlite3.connect(app.config["DATABASE"])
+    try:
+        return con.execute("SELECT sesion_version FROM usuarios WHERE email = ?", (email,)).fetchone()[0]
+    finally:
+        con.close()
+
+
+def poner_version(app, version, email="ana@example.cl"):
+    con = sqlite3.connect(app.config["DATABASE"])
+    con.execute("UPDATE usuarios SET sesion_version = ? WHERE email = ?", (version, email))
+    con.commit()
+    con.close()
+
+
+def cookie(client):
+    return client.get_cookie("session").value
+
+
+def cliente_con_cookie(app, valor):
+    otro = app.test_client()
+    otro.set_cookie("session", valor)
+    return otro
+
+
+def cerrar(client):
+    token = sesion(client)["csrf_token"]
+    return client.post("/logout", data={"csrf_token": token})
+
+
+def da_acceso(client, ruta="/paciente"):
+    r = client.get(ruta)
+    if r.status_code == 302:
+        assert r.headers["Location"] == "/login"
+        return False
+    assert r.status_code == 200
+    return True
+
+
+def test_una_cookie_copiada_antes_del_logout_deja_de_valer(app, client):
+    crear(app)
+    iniciar(client)
+    copia = cookie(client)
+    assert da_acceso(cliente_con_cookie(app, copia))  # control: la copia valía
+    assert cerrar(client).status_code == 302
+    assert not da_acceso(cliente_con_cookie(app, copia))
+    assert not da_acceso(client)
+
+
+def test_el_logout_incrementa_la_version_en_uno_cada_vez(app, client):
+    crear(app)
+    assert version_en_base(app) == 0
+    iniciar(client)
+    assert version_en_base(app) == 0  # el login no la toca
+    cerrar(client)
+    assert version_en_base(app) == 1
+    iniciar(client)
+    assert sesion(client)["sesion_version"] == 1  # la sesión nueva lleva la vigente
+    assert da_acceso(client)
+    cerrar(client)
+    assert version_en_base(app) == 2
+
+
+def test_tras_volver_a_entrar_la_cookie_vieja_sigue_muerta_y_la_nueva_vale(app, client):
+    crear(app)
+    iniciar(client)
+    vieja = cookie(client)
+    cerrar(client)
+    iniciar(client)
+    nueva = cookie(client)
+    assert nueva != vieja
+    assert da_acceso(cliente_con_cookie(app, nueva))
+    assert not da_acceso(cliente_con_cookie(app, vieja))
+
+
+def test_el_login_no_incrementa_la_version_ni_cierra_otras_sesiones(app, client):
+    """Decisión de T-08d: solo el logout revoca; entrar desde otro aparato no expulsa."""
+    crear(app)
+    iniciar(client)
+    segundo = app.test_client()
+    iniciar(segundo)
+    assert version_en_base(app) == 0
+    assert da_acceso(client) and da_acceso(segundo)
+
+
+def test_el_logout_cierra_tambien_las_otras_sesiones_del_mismo_usuario(app, client):
+    """Consecuencia aceptada de D-022: la versión es por usuario, no por aparato."""
+    crear(app)
+    iniciar(client)
+    celular = app.test_client()
+    iniciar(celular)
+    cerrar(client)
+    assert not da_acceso(celular)
+
+
+def test_el_logout_de_un_usuario_no_afecta_a_otro(app, client):
+    crear(app)
+    crear(app, email="beto@example.cl", nombre="Beto")
+    iniciar(client)
+    beto = app.test_client()
+    iniciar(beto, "beto@example.cl")
+    cerrar(client)
+    assert version_en_base(app, "beto@example.cl") == 0
+    assert version_en_base(app) == 1
+    assert da_acceso(beto)
+
+
+def test_una_cookie_con_el_id_de_uno_y_la_version_de_otro_no_autentica(app, client):
+    crear(app)
+    crear(app, email="beto@example.cl", nombre="Beto")
+    poner_version(app, 3, "beto@example.cl")  # Ana en 0, Beto en 3
+    client.get("/login")
+    with client.session_transaction() as s:
+        s["usuario_id"] = 1
+        s["sesion_version"] = 3  # versión de Beto con el id de Ana
+    assert not da_acceso(client)
+    with client.session_transaction() as s:
+        s["usuario_id"] = 2
+        s["sesion_version"] = 0  # versión de Ana con el id de Beto
+    assert not da_acceso(client)
+    with client.session_transaction() as s:
+        s["usuario_id"] = 2
+        s["sesion_version"] = 3  # control: la pareja correcta
+    assert da_acceso(client)
+
+
+@pytest.mark.parametrize("delta", [-1, 1, 2, 100])
+def test_una_version_distinta_de_la_vigente_no_autentica(app, client, delta):
+    crear(app)
+    poner_version(app, 5)
+    client.get("/login")
+    with client.session_transaction() as s:
+        s["usuario_id"] = 1
+        s["sesion_version"] = 5 + delta
+    assert not da_acceso(client)
+
+
+def test_una_cookie_sin_version_no_autentica(app, client):
+    """Cookies anteriores a D-022 (solo `usuario_id`) dejan de valer."""
+    crear(app)
+    client.get("/login")
+    with client.session_transaction() as s:
+        s["usuario_id"] = 1
+    assert not da_acceso(client)
+    with client.session_transaction() as s:
+        s["sesion_version"] = 0
+    assert da_acceso(client)  # control: con la versión sí
+
+
+@pytest.mark.parametrize(
+    "valor",
+    ["0", "1", False, True, 0.0, 1.0, None, [0], [1], {"a": 0}, -1, 2**63, 2**63 - 1, 10**30, "", b"0"],
+    ids=repr,
+)
+def test_version_de_sesion_con_tipo_o_valor_raro_no_autentica(app, client, valor):
+    """La base tiene la versión 1; ningún valor raro, aunque `==` a 1 o 0, entra (nunca 500)."""
+    crear(app)
+    poner_version(app, 1)
+    client.get("/login")
+    with client.session_transaction() as s:
+        s["usuario_id"] = 1
+        s["sesion_version"] = valor
+    assert not da_acceso(client)
+    with client.session_transaction() as s:
+        s["sesion_version"] = 1
+    assert da_acceso(client)  # control
+
+
+def test_bool_no_se_acepta_como_version_0(app, client):
+    crear(app)  # versión 0 en la base
+    client.get("/login")
+    with client.session_transaction() as s:
+        s["usuario_id"] = 1
+        s["sesion_version"] = False
+    assert not da_acceso(client)
+
+
+def test_el_incremento_parte_del_valor_actual_de_la_base_no_de_uno_leido_antes(app):
+    """El UPDATE es atómico (`sesion_version = sesion_version + 1`): si otra conexión
+    cambió la versión después de leerla, no se pierde esa suma."""
+    crear(app)
+    with app.test_request_context():
+        db = auth.get_db()
+        poner_version(app, 7)  # otro proceso la cambió
+        auth.cerrar_sesion(db, 1)
+    assert version_en_base(app) == 8
+
+
+def test_el_logout_confirma_el_cambio_antes_de_responder(app, client):
+    crear(app)
+    iniciar(client)
+    cerrar(client)
+    con = sqlite3.connect(app.config["DATABASE"])  # otra conexión: ve el cambio ya confirmado
+    assert con.execute("SELECT sesion_version FROM usuarios").fetchone()[0] == 1
+    assert not con.in_transaction
+    con.close()
+
+
+def test_si_el_logout_falla_no_se_limpia_la_sesion_ni_se_miente(app, client, monkeypatch):
+    crear(app)
+    iniciar(client)
+    antes = sesion(client)
+
+    def falla(*args, **kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(auth, "cerrar_sesion", falla)
+    app.config["PROPAGATE_EXCEPTIONS"] = False
+    r = client.post("/logout", data={"csrf_token": antes["csrf_token"]})
+    assert r.status_code == 500
+    assert sesion(client) == antes
+
+
+def test_logout_sin_sesion_valida_no_incrementa_nada(app, client):
+    crear(app)
+    iniciar(client)
+    copia = cookie(client)
+    cerrar(client)  # versión 1
+    muerto = cliente_con_cookie(app, copia)
+    token = sesion(muerto)["csrf_token"]
+    r = muerto.post("/logout", data={"csrf_token": token})
+    assert r.status_code == 302 and r.headers["Location"] == "/login"
+    assert version_en_base(app) == 1

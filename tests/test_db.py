@@ -92,6 +92,7 @@ COLUMNAS_ESPERADAS = {
         ("password_hash", "TEXT", 1, None, 0),
         ("rol", "TEXT", 1, None, 0),
         ("creado_en", "TEXT", 1, None, 0),
+        ("sesion_version", "INTEGER", 1, "0", 0),
     ],
     "horas": [
         ("id", "INTEGER", 0, None, 1),
@@ -146,3 +147,37 @@ def test_init_db_no_borra_datos_existentes(app):
     assert runner.invoke(args=["init-db"]).exit_code == 0
     with app.app_context():
         assert get_db().execute("SELECT COUNT(*) FROM usuarios").fetchone()[0] == 1
+
+
+# --- T-08d: índice y columna nuevos (D-022, D-023) y D-006 ---------------------------
+
+def test_init_db_crea_el_indice_un_solo_profesional(db):
+    filas = db.execute(
+        "SELECT name, tbl_name FROM sqlite_master WHERE type='index' AND name NOT LIKE 'sqlite_%'"
+    ).fetchall()
+    assert [(f["name"], f["tbl_name"]) for f in filas] == [("un_solo_profesional", "usuarios")]
+
+
+def test_init_db_dos_veces_no_falla_por_el_indice(app):
+    runner = app.test_cli_runner()
+    assert runner.invoke(args=["init-db"]).exit_code == 0
+    assert runner.invoke(args=["init-db"]).exit_code == 0
+
+
+def test_init_db_sobre_un_esquema_antiguo_no_agrega_la_columna(app):
+    """D-006: `init-db` no altera tablas existentes. Una base creada antes de T-08d
+    sigue SIN `sesion_version` (hay que borrar `agenda.db`; ver README). El aviso
+    automático de esquema antiguo queda para T-14 (backlog de T-02c)."""
+    antigua = sqlite3.connect(app.config["DATABASE"])
+    antigua.execute(
+        "CREATE TABLE usuarios (id INTEGER PRIMARY KEY, nombre TEXT NOT NULL,"
+        " email TEXT NOT NULL UNIQUE COLLATE NOCASE, password_hash TEXT NOT NULL,"
+        " rol TEXT NOT NULL CHECK (rol IN ('paciente', 'profesional')),"
+        " creado_en TEXT NOT NULL)"
+    )
+    antigua.commit()
+    antigua.close()
+    assert app.test_cli_runner().invoke(args=["init-db"]).exit_code == 0
+    with sqlite3.connect(app.config["DATABASE"]) as conn:
+        columnas = [c[1] for c in conn.execute("PRAGMA table_info(usuarios)")]
+    assert "sesion_version" not in columnas
