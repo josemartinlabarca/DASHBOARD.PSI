@@ -1,52 +1,101 @@
-# REVIEW — T-02f (commit 0f29be6) — Revisor
+# REVIEW.md — Revisión de T-02g (commits `df7a71f` y `17ddc55`)
 
-**APROBADO.** No hay hallazgos altos. El esquema implementa exactamente D-016 y D-017 (dos líneas, nada más), `ARCHITECTURE.md` solo cambió las dos líneas autorizadas, D-016 y D-017 conservan su texto y solo ganaron "Implementada", `python3 -m pytest` da 232 OK (7,3 s en mi copia), no hay `.db`, procesos ni cambios sin commitear. Hay un hallazgo medio (NUL en `inicio`, con corrección distinta a la que propone el implementador) y varios bajos. Todo lo verificado se ejecutó en SQLite 3.45.1, en memoria o en una copia temporal del repositorio (borrada del repo; el repo quedó intacto).
+Revisor, 2026-10-08. SQLite 3.45.1. Todo se ejecutó en copias en el scratchpad; el repo no se tocó
+(`git status --short` vacío). `python3 -m pytest -q` en el repo: **357 passed**.
+
+## Qué se verificó de verdad
+
+- CHECK nuevo probado con 23 valores en memoria (script propio, no el de PROGRESS).
+- 8 mutaciones del esquema en copia, con `tests/test_esquema.py` completo (248 pruebas).
+- Conteos de PROGRESS (95 y 31 pruebas nuevas, 5 fallos al quitar `instr`) recalculados.
+- `flask --app app init-db` con el esquema nuevo: OK.
+- NO reproduje: el recorrido con `flask run`/curl ni `init-db` sobre una base antigua (afirmados en PROGRESS).
 
 ## Hallazgos
 
-### 1. MEDIA — `app/schema.sql:23` — El CHECK de `inicio` acepta un NUL y texto posterior, y eso elude la UNIQUE
-Confirmado. `2026-12-01T10:00:00\x00` y `2026-12-01T10:00:00\x00x` entran con `typeof='text'`, `length()=19` y `length(CAST(inicio AS BLOB))` de 20 y 21: son valores distintos del canónico (la UNIQUE no los detecta) pero `length()` y `GLOB` los ven como 19 caracteres. Consecuencias: un duplicado/solape exacto eludible, y `datetime.fromisoformat()` sobre ese valor fallaría en T-06/T-10. Severidad real: media y no alta, porque exige que una ruta inserte texto sin formatear (T-05 debe construirlo con `datetime.strftime`), pero justamente el objetivo de D-017 era que la base no dependiera de eso. Solo el NUL pasa: probé `\x01`, `\x7f`, `\n`, dígitos árabe-índicos/ancho completo, `²` y todos se rechazan.
+### R-01 — El CHECK cierra el hueco del NUL (confirmación, no es defecto) — informativa
+Evidencia (insert en `horas` con el esquema de `HEAD`):
+`canon` ACEPTA (typeof text, length 19, bytes 19); RECHAZAN con `CHECK constraint failed`: NUL al final,
+NUL+texto, NUL al inicio, NUL en medio de la fecha, NUL en medio de la hora, `\x00` solo, BLOB canónico,
+BLOB con NUL, entero `20261201`, real `1.5`, `\n` final, espacio como separador, `Z`, fracción `.0`,
+`t` minúscula, espacio final, vacío; `NULL` falla por NOT NULL. Con la fila canónica ya insertada,
+`canon+'\x00'` no elude la UNIQUE (lo frena el CHECK). Un BLOB canónico también se rechaza (GLOB no
+coincide con BLOB), así que no hay forma de tener dos filas "iguales" con tipos distintos.
+Recomendación: ignorar.
 
-Qué más pasa o no el GLOB (probado):
-- INTEGER (`20261201`), REAL, y enteros largos: rechazados (la afinidad TEXT los convierte a texto sin la forma).
-- BLOB `b'2026-12-01T10:00:00'` y `b'...\x00z'`: rechazados (GLOB no coincide con BLOB). Por tanto `typeof(inicio)='text'` es innecesario y no cierra el NUL (los valores con NUL son `text`).
-- Fecha con forma correcta pero imposible (`2026-13-45T25:61:61`, `0000-00-00T00:00:00`): aceptada a propósito (D-017).
+### R-02 — Pasan el CHECK valores que no son fecha-hora válidas (`2026-13-45T99:99:99`) — informativa (ya decidido)
+Evidencia: `2026-13-45T99:99:99`, `0000-00-00T00:00:00` y `9999-99-99T99:99:99` se ACEPTAN (typeof text, 19).
+Esto está documentado como riesgo aceptado/delegado: D-017 («el CHECK valida la forma, no que la fecha
+exista»), ARCHITECTURE.md línea de `inicio`, T-05 (a: «validar que la fecha exista y no sea pasada»), y la
+prueba `test_fecha_con_forma_valida_pero_inexistente_se_acepta_en_la_base` más los comentarios de la ronda 2.
+No es hallazgo nuevo. Recomendación: ignorar; T-05 ya lo exige.
 
-`length(inicio) = 19` NO sirve (el implementador, en PROGRESS.md, y el orquestador coinciden en que es falso): con ese CHECK adicional el NUL sigue pasando (lo comprobé: `OK` para los valores con NUL, y mi mutación de ese CHECK deja las 232 pruebas en verde, incluida la que "documenta" el NUL). Sirven `length(CAST(inicio AS BLOB)) = 19` e `instr(inicio, char(0)) = 0` (ambos rechazan los valores con NUL; probados). El CHECK mínimo y correcto, sin tocar nada más:
-`CHECK (inicio GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]' AND instr(inicio, char(0)) = 0)` (o `length(CAST(inicio AS BLOB)) = 19`; esta última además fija el largo por bytes y es la más difícil de malinterpretar).
-Recomendación: cambiarlo **modifica el esquema aprobado en D-017**, así que requiere decisión humana: abrir D-018 (o enmendar D-017) con esa opción y, si se aprueba, una tarea breve que cambie `schema.sql` y `ARCHITECTURE.md`. Hasta entonces, T-05 debe guardar solo el resultado de formatear un `datetime`. Corregir en PROGRESS.md (Bloqueos y dudas) la propuesta `CHECK (length(inicio) = 19)`, que es errónea y induciría al humano a aprobar un arreglo inútil.
+### R-03 — Pruebas redundantes (duplicados exactos de valor) — baja
+Evidencia (valores idénticos probados dos veces):
+- `solo_prefijo_y_nul` == `nul_al_final` (`CANONICO + "\x00"`), ambos en `NULOS_RECHAZADOS`. Mutación «quitar
+  `AND instr`» hace fallar las dos (`[nul_al_final]`, `[solo_prefijo_y_nul]`): cuentan como 2 de las "5".
+- `2026-12-01 10:00:00` está en `pos10-separador-'T'-por-espacio` y en `COMODINES_Y_SEPARADORES[0]`.
+- `20*6-…`, `*026-…`, `…10:00:0?` están en la tabla de comodines y salen también de las sustituciones por
+  posición (`pos02/pos00-…-por-asterisco`, `pos18-…-por-interrogacion`).
+- `0000-00-00T00:00:00` está en `todo-ceros`, en `test_fecha_con_forma_valida_pero_inexistente…` y cerca de
+  `pos*-0`.
+Efecto: la cifra "95 pruebas nuevas" infla la cobertura en ~6 casos; no hay falso positivo. Recomendación:
+backlog (limpieza cuando se toque el archivo, junto con T-02e).
 
-### 2. MEDIA — `tests/test_esquema.py:638` (`test_limitacion_conocida_nul_tras_el_prefijo_canonico_pasa_el_check`) — La prueba "documenta" el defecto de una forma frágil
-La prueba pasa mientras exista el defecto y, si se corrige el esquema, falla con un `sqlite3.IntegrityError: CHECK constraint failed` crudo en la línea del `insertar_hora`, sin explicar que el fallo es una buena noticia. Verificado aplicando `AND length(CAST(inicio AS BLOB))=19` en la copia: falla con ese error sin contexto. Recomendación: envolver la inserción y, si lanza `IntegrityError`, hacer `pytest.fail("El esquema ya rechaza el NUL: elimina esta prueba de limitación y convierte el caso en una prueba de rechazo normal")`; o marcarla con `pytest.mark.xfail(strict=True)` sobre una prueba que afirme el rechazo deseado.
+### R-04 — Los `rechazada(...)` solo exigen «CHECK constraint failed», sin identificar cuál — baja
+Evidencia: `rechazada(accion, "CHECK constraint failed")` acepta cualquiera de los CHECK de `horas`. Verifiqué
+que hoy no hay falsa razón: `insertar_hora` por defecto es una hora libre válida (duracion 50, estado libre),
+y con la mutación `CHECK (1 OR inicio GLOB …)` fallan 123 pruebas, entre ellas las 71 por posición, las 13 de
+comodines y las 7 de NUL (conteo por `grep` de la salida de pytest). O sea, hoy todas dependen del CHECK de
+`inicio`. El riesgo es futuro: si alguien cambia el valor por defecto de `insertar_hora` (p. ej. `duracion_min`),
+las pruebas seguirían en verde por otro CHECK. Recomendación: backlog; afirmar `"inicio GLOB"` en el fragmento
+(el mensaje de SQLite incluye el texto del CHECK, visible arriba) o añadirlo a T-02e.
 
-### 3. MEDIA (consecuencia de D-016, no del código) — `INSERT OR REPLACE` en `horas` borra la fila internamente y dispara el SET NULL sin avisar
-Comprobado: con FK ON, `INSERT OR REPLACE INTO horas(id, ...)` con el mismo `id` (y también un reemplazo por conflicto de la UNIQUE con otro `id`) deja las notificaciones con `hora_id = NULL`, con `recursive_triggers` 0 o 1 (no hay triggers en el esquema). Esto no ocurre en el flujo previsto (T-07 y T-08 usan `UPDATE`, que no dispara nada; `ON CONFLICT ... DO UPDATE` tampoco), pero sí si T-05 usara `REPLACE` para "editar" una hora. `UPDATE horas SET id=...` con notificaciones asociadas falla con `FOREIGN KEY constraint failed` (SET NULL solo cubre `ON DELETE`, no `ON UPDATE`). Recomendación: anotar en T-05 "prohibido `INSERT OR REPLACE`/`REPLACE` sobre `horas` (D-016: pierde el vínculo de las notificaciones); usar `UPDATE`" y añadir una prueba de T-05 que lo vigile.
+### R-05 — Mutaciones verificadas: las pruebas fallan por la razón declarada — informativa
+Resultados en copia (suite `test_esquema.py`, control 0 fallos de 248):
+| Mutación | Fallan | Pruebas que fallan |
+|---|---|---|
+| quitar `AND instr(...)` | 5 | solo las de NUL (final, con texto, prefijo+NUL), UNIQUE-NUL y UPDATE-NUL |
+| `instr…=0` → `length(inicio) = 19` | 5 | las mismas 5 (confirma que `length` no sirve) |
+| `[T ]` en vez de `T` | 2 | las de espacio como separador |
+| comodín en el año (`[0-9]*` ) | 6 | pruebas de año/comodines |
+| `[0-8]` en el último dígito de los segundos | 2 | `pos18-9`, `todo-nueves` (solo esas) |
+| `[1-9]` en el primer dígito | 3 | `pos00-0`, `todo-ceros`, `fecha_con_forma_valida…` |
+| quitar el CHECK | 123 | rechazos por posición/comodín/NUL |
+| `AND typeof(inicio)='text'` añadido | 0 | sobrevive: es equivalente (GLOB ya rechaza BLOB/número); no es defecto |
+Coincide con las cifras de PROGRESS (5, 2, 6, 123). Nota: de las 7 pruebas de NUL, solo 3 dependen de
+`instr`; las otras 4 (inicio, medio, medio de la hora, solo `\x00`) las rechaza ya el GLOB. Es correcto como
+red de seguridad, pero el docstring («`instr` lo cierra») sugiere más de lo que ejercitan. Recomendación: ignorar.
 
-### 4. MEDIA — `TASKS.md` T-09 / T-10 / T-11 / T-12 — Falta anotar que `hora_id` puede ser NULL
-Ninguna tarea futura lo menciona; solo hay una frase suelta en el "Problemas / dudas" de PROGRESS.md. Impacto: T-09 no debe exigir `hora_id` al leer; T-11/T-12 no pueden hacer `JOIN` interno con `horas` (perderían las notificaciones de horas eliminadas) sino `LEFT JOIN`, y deben mostrar el `mensaje` guardado (por eso el mensaje debe llevar fecha y hora y nombre de la contraparte en texto, porque ya no se podrá reconstruir desde `hora_id`) y, sin enlace, no ofrecer "ver hora"; T-10 no usa `notificaciones` para decidir qué recordar (la fuente es `horas.estado='reservada'` y `recordatorio_enviado`, ambas en `horas`), así que no depende de `hora_id` NULL, pero su prueba debe confirmar que una hora eliminada no genera recordatorio ni error. Recomendación: añadir a T-09 "el mensaje de cada notificación debe ser autosuficiente (fecha, hora, contraparte), porque `hora_id` puede quedar NULL (D-016)", y a T-11 y T-12 "tolerar notificaciones con `hora_id` NULL: `LEFT JOIN`, mostrar el mensaje sin enlace" con una prueba cada una.
+### R-06 — Documentación veraz, con dos restos menores — baja
+- Verificado: 95 = 7+1+1+1+1+71+13 y 31 = 28+2+1; 357 pasan; la línea `inicio` de ARCHITECTURE.md coincide
+  con `schema.sql`; `length(inicio) = 19` solo aparece ya en D-018 (descartada) y en la mutación (iii).
+- La nota de corrección sobre `length(inicio)=19` se eliminó junto con el bullet de "Bloqueos" (df7a71f), por
+  lo que la afirmación falsa ya no está en ninguna parte viva de PROGRESS; la entrada histórica de T-02f
+  («Problemas / dudas: ver "Bloqueos" (NUL en inicio)») ahora apunta a algo que no existe. Es historial; aceptable.
+- PROGRESS (ronda 1, "Problemas") dice que TASKS.md pedía «aceptar el espacio»; esa redacción ya se corrigió en
+  `9e5e2d2` (commit posterior), por lo que la duda quedó obsoleta, no falsa.
+- No reproduje: el recorrido manual con `flask run`/curl y `init-db` sobre base antigua.
+Recomendación: ignorar.
 
-### 5. BAJA — `tests/test_esquema.py` (D-017) — Dos mutaciones sutiles del GLOB quedan en verde
-Ejecutadas en la copia (las 232 pruebas pasan): (a) aceptar espacio o `T` como separador, `T` → `[T ]`: nadie prueba `2026-12-01 10:00:00` (con segundos); la prueba de la revisión solo usa `2026-12-01 10:00` (el largo ya lo rechazaba); (b) prefijo laxo `[0-9]*[0-9][0-9][0-9]` (comodín en el año) también pasa. Recomendación: añadir a `OTROS_FORMATOS_INVALIDOS` `"2026-12-01 10:00:00"`, `"2026-12-01_10:00:00"`, `"2026-1x-01T10:00:00"`, `"20x6-12-01T10:00:00"`, `"2026-12-0xT10:00:00"` (un carácter malo por posición); o, más simple, una prueba que recorra las 19 posiciones sustituyendo un carácter por `x`.
+### R-07 — T-02e no menciona D-018 — baja
+TASKS.md T-02e: «Si D-016 o D-017 cambian el esquema, la comparación debe reflejarlo»; depende de T-02g pero
+no cita D-018. Si T-02e compara el SQL de `sqlite_master`, debe incluir `AND instr(inicio, char(0)) = 0`.
+Recomendación: tarea nueva trivial (editar TASKS.md) o anotar al orquestador; no bloquea.
 
-### 6. BAJA — `tests/test_esquema.py:499` — `test_el_esquema_declara_on_delete_set_null_solo_en_hora_id` no fija `ON UPDATE` ni la diferibilidad
-Añadir `ON UPDATE CASCADE` a `hora_id` deja las 232 en verde (el PRAGMA se lee solo `on_delete`). Añadir `DEFERRABLE INITIALLY DEFERRED` sí se detecta (2). Es el tipo de ampliación que T-02e debería cerrar. Recomendación: anotarlo en T-02e (comparar también `on_update` y la tupla completa de `foreign_key_list`, o el SQL normalizado de `sqlite_master`, que cubriría también el CHECK de `inicio` completo).
+### R-08 — Contradicciones entre documentos — ninguna
+SPEC no define el formato de `inicio`; ARCHITECTURE, DECISIONS (D-017/D-018), TASKS (T-02g, T-05) y
+`schema.sql` coinciden. D-017 dice «la base rechaza cualquier otro formato»: ahora es cierto salvo la
+validez calendárica, que D-017 mismo exceptúa.
 
-### 7. BAJA — `tests/test_esquema.py:486` — La prueba de control con FK apagadas
-Es robusta en lo esencial: hace `db.commit()` antes del `PRAGMA foreign_keys = OFF` (necesario porque el PRAGMA es no-op dentro de una transacción) y, si el PRAGMA no tuviera efecto, el SET NULL actuaría y la aserción `== hora` fallaría. Comprobé con una conexión aparte: con FK OFF el DELETE de `horas` deja `hora_id` colgando, y además `DELETE` de un usuario con notificaciones **pasa** (con FK ON sigue bloqueado). Es algo frágil solo por depender de ese orden implícito; añadir un comentario o un `assert db.execute("PRAGMA foreign_keys").fetchone()[0] == 0` tras el PRAGMA lo haría explícito. El resto de las pruebas D-016 no pasan por casualidad con FK apagadas, porque `test_las_pruebas_de_fk_corren_con_claves_foraneas_activas` fija el estado de la fixture (aunque es una prueba aparte y no una guarda dentro de cada una; aceptable).
+### R-09 — Impacto en tareas futuras — informativa
+T-05 ya recoge: guardar `inicio` solo formateando un `datetime`, validar existencia/no pasado, no usar
+`INSERT OR REPLACE`. Falta (menor) anotar que, con el CHECK, un `IntegrityError` por formato debe traducirse a
+mensaje de usuario en español y no a 500 (T-05 debe validar antes de insertar). Las demás columnas de texto
+(`reservada_en`, `creado_en`) no tienen CHECK de formato; fuera de alcance de D-018.
 
-### 8. BAJA — `PROGRESS.md` (entrada T-02f y Bloqueos) — Afirmación falsa en el reporte del implementador
-"un CHECK `(length(inicio) = 19)` lo cerraría" (Bloqueos) es falso (ver hallazgo 1). El resto de las afirmaciones lo verifiqué como verdaderas: 232 = 187 + 45; "Ninguna prueba existente cambió" (el diff de `tests/` son 248 inserciones y 0 borrados; todas las pruebas previas usan `2026-10-20T10:00:00`); mutaciones reproducidas con los mismos recuentos: quitar SET NULL 4, CASCADE 4, RESTRICT 4, SET DEFAULT 1, quitar el CHECK 30, GLOB que acepta cualquier cosa tras `HH:MM` 12 (y GLOB `T` minúscula: 1); la hora de PROGRESS (01:09) coincide con el commit (01:09:26); la afirmación de que SET DEFAULT solo la detecta la declaración es correcta. Recomendación: corregir la frase en PROGRESS.md (ver hallazgo 1).
+## Veredicto
 
-### 9. BAJA — `README.md:39` — Nota exacta pero larga
-La línea nueva ahora supera el ancho del resto del párrafo y mezcla dos ideas. Es exacta (T-02f exige borrar `agenda.db`). Recomendación opcional: partirla en dos líneas.
-
-### 10. BAJA — Suite de ~7 s y redundancia
-La suite pasó de 6,0 a 7,3 s (en mi medición); el archivo de esquema tarda 1,9 s en 123 pruebas; el costo es de configuración de la fixture, no de las pruebas nuevas. No es un problema ahora, pero crece con cada tarea. Redundancia menor: el control de `typeof` no aporta; las pruebas `test_no_se_puede_eliminar_*` (3) solapan con las FK de T-02c. Compatibilidad: `ON DELETE SET NULL` y `GLOB` con rangos existen desde SQLite 3.6.19 / 2.x (las FK exigen 3.6.19+ y `PRAGMA foreign_keys=ON`); ninguna prueba depende de un comportamiento posterior a 3.45.1 salvo la documentación del NUL (el comportamiento de GLOB con NUL es antiguo y estable). Los mensajes `CHECK constraint failed` y `FOREIGN KEY constraint failed` tienen la forma de 3.45.1; en versiones muy antiguas el texto del CHECK varía, pero no es relevante con `flask>=3.1`.
-
-## Verificación de la lista del orquestador
-1. Fidelidad: esquema (+1 CHECK, +`ON DELETE SET NULL`, nada más), `ARCHITECTURE.md` (solo las líneas `inicio` y `hora_id` del modelo de datos; no se añadió `correo.py`), `DECISIONS.md` (solo `Implementada`), README (una nota). Conforme.
-2. NUL: confirmado; `length()=19` no sirve; `instr`/`CAST AS BLOB` sí; `typeof` no ayuda.
-3. D-016: cumple lo prometido con FK ON (hora_id NULL, mensaje y tipo intactos; el borrado de usuarios sigue bloqueado). Con FK OFF no actúa (queda colgando y el borrado de usuarios pasa), por lo que cualquier camino con FK apagadas (conexión nueva sin `get_db()`, scripts, `sqlite3` CLI) se salta D-016. Recomendación para T-05: abrir siempre la conexión con `get_db()`.
-4. Pruebas: reproducidas ocho mutaciones; las dos sutiles que pasan están en los hallazgos 5 y 6.
-5. Proceso: commit con formato `T-02f: ...`; `SPEC.md`, `REVIEW.md` previa y `app/correo.py` no se tocaron; TASKS.md y PROGRESS.md coherentes (T-02f HECHA; T-02e antes de T-05); Siguiente paso y Estado actual correctos.
-6. Adicional: el CHECK usa `GLOB`, que distingue mayúsculas (la `t` minúscula se rechaza; verificado por mutación). `DECISIONS.md` conserva el horario de verano pendiente para T-10/T-14.
+**APROBADA.** El CHECK cierra el bypass del NUL (incluidos BLOB/entero/real), las mutaciones objetivo de T-02g
+hacen fallar pruebas por la razón correcta, y la documentación es veraz en lo que pude reproducir. Los
+hallazgos R-03, R-04 y R-07 son bajos (backlog), sin cambios requeridos.

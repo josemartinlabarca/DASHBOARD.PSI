@@ -63,6 +63,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Depende de:** T-02c, T-02f, T-02g
 - **Qué:** Las pruebas de T-02c no detectan una restricción **ampliada**: añadir `'otro'` al CHECK de `notificaciones.tipo`, `'cancelada'` al de `horas.estado`, comparar `rol` con `lower()` o añadir un tope superior a `duracion_min` deja las 187 pruebas en verde (comprobado por el orquestador y por el revisor). Hacer que las pruebas fijen el conjunto exacto: la técnica más simple es comparar el SQL de cada tabla de `sqlite_master` con el esperado (normalizando espacios), o probar valores vecinos inválidos. Si D-016 o D-017 cambian el esquema, la comparación debe reflejarlo.
 - **También (hallazgo 6 de la revisión de T-02f):** añadir `ON UPDATE CASCADE` a `notificaciones.hora_id` hoy pasa sin que ninguna prueba falle porque la prueba de `PRAGMA foreign_key_list` solo lee `on_delete`: que compare también `on_update` (y la columna entera de `foreign_key_list`).
+- **También (hallazgo R-07 de la revisión de T-02g):** si la prueba compara el SQL de `sqlite_master`, el CHECK de `inicio` esperado debe incluir `AND instr(inicio, char(0)) = 0` (D-018).
 - **Término:** Las mutaciones "ampliar `tipo` con `'otro'`", "ampliar `estado` con `'cancelada'`", "`rol` con `lower()`" y "tope superior en `duracion_min`" hacen fallar al menos una prueba; `python3 -m pytest` pasa. Debe quedar HECHA **antes** de T-05.
 - **Origen:** REVIEW de T-02c, hallazgo 2.
 
@@ -114,6 +115,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Qué:** Formulario y rutas de US-4 y US-5 con reglas 2, 3 y 4.
 - **Requisitos que vienen de las revisiones de T-02c (resolver al implementar):** (a) **D-016 y D-017 ya están decididas** (T-02f las aplica al esquema): la aplicación debe guardar `inicio` siempre en formato canónico `YYYY-MM-DDTHH:MM:SS` hora local de Chile, validar que la fecha exista y no sea pasada, y poder eliminar una hora que fue reservada y cancelada; (b) la comprobación de solape (regla §4.3 y §4.5) debe hacerse dentro de una transacción `BEGIN IMMEDIATE`, porque el esquema solo impide inicios idénticos, no solapes parciales; (c) pruebas del flujo real: reservar → cancelar → eliminar la hora debe funcionar.
 - **Consecuencia de D-016 (revisión de T-02f, hallazgo 3):** `INSERT OR REPLACE` / `REPLACE INTO` sobre `horas` borra y reinserta la fila, lo que **dispara `ON DELETE SET NULL` y pierde el vínculo de las notificaciones sin avisar** (comprobado por el revisor). Prohibido en todo el código sobre `horas`: usar `INSERT`, `UPDATE` o `DELETE` explícitos (una prueba o una comprobación sobre el código fuente debe vigilarlo). `UPDATE` y `ON CONFLICT DO UPDATE` no lo disparan. Además `inicio` solo se guarda como resultado de formatear un `datetime` (nunca texto crudo del formulario).
+- **Nota (revisión de T-02g, R-02/R-09):** el esquema acepta fechas de forma válida pero imposibles (`2026-13-45T99:99:99`); la validación del calendario es **solo** de la aplicación y debe ocurrir *antes* de insertar. Un `IntegrityError` por formato debe traducirse a un mensaje en español, no a un 500.
 - **Término:** Pruebas: crear hora válida, rechazar pasado, rechazar solape, no eliminar reservada.
 
 ### T-06 — Paciente ve horas libres
@@ -201,6 +203,9 @@ en qué tarea conviene absorberlo.
 | T-03 #9 | Los límites de longitud cuentan caracteres, no bytes (inocuo) | — |
 | T-02c #4 | `init-db` sobre una base con esquema antiguo termina con éxito y sin aviso, dejando las tablas sin las restricciones nuevas; avisar con `PRAGMA user_version` o comparando `sqlite_master` con `schema.sql` | T-14 |
 | T-02f #9 | `README.md:39`: la nota sobre borrar `agenda.db` es exacta pero la línea quedó demasiado larga | cuando se toque el README |
+| T-02g R-03 | Pruebas redundantes en `tests/test_esquema.py`: `solo_prefijo_y_nul` duplica `nul_al_final`; tres casos de comodín y el del espacio salen también de las sustituciones por posición; `0000-00-00T00:00:00` se prueba tres veces | cuando se toque ese archivo |
+| T-02g R-04 | El helper `rechazada(...)` solo exige «CHECK constraint failed», sin decir cuál; si cambian los valores por defecto de `insertar_hora`, una prueba podría fallar por otro CHECK sin que se note | T-02e (al fijar el SQL exacto) |
+| T-02g R-06 | Restos menores en `PROGRESS.md`: la entrada histórica de T-02f remite a una duda ya resuelta y la duda sobre «aceptar el espacio» quedó obsoleta tras `9e5e2d2` | cuando se toque PROGRESS |
 | T-02c #9 | En `tests/test_esquema.py` la cobertura de NOT NULL y FK es triplemente redundante y la rama `usuarios` de `test_not_null_rechaza_null` es poco legible | cuando se toque ese archivo |
 
 ---

@@ -153,6 +153,13 @@ git conserva cada revisión aunque `REVIEW.md` se sobrescriba.
 - **Tu decisión (D-018):** añadir `instr(inicio, char(0)) = 0`, la opción recomendada. Como cambia lo que aprobaste en D-017, la dejé como tarea nueva (**T-02g**) y corregí en `PROGRESS.md` la afirmación falsa, con una nota visible.
 - **Lección:** el mismo agente que encontró el defecto propuso un arreglo que no funcionaba. Encontrar un problema y arreglarlo bien son dos verificaciones distintas.
 
+### Vuelta 9 — T-02g Cerrar el hueco del carácter nulo (D-018)
+- **Ronda 1 del implementador:** añadió `instr(inicio, char(0)) = 0` al CHECK, reemplazó la prueba que "documentaba" el defecto por pruebas que exigen el rechazo y agregó una prueba por posición del formato. 326 pruebas, 8 mutaciones detectadas.
+- **Mi verificación encontró un hueco que sus 8 mutaciones no veían:** hice yo una mutación sistemática (cambiar cada uno de los 14 dígitos del GLOB de `[0-9]` a `[0-8]`, `[1-9]`, `[0-4]` y `[5-9]`). Los 14 mutantes `[0-8]` **sobrevivían**: ninguna prueba usaba un 9 en cada posición. Lo devolví al implementador (ronda 2).
+- **Ronda 2:** 31 pruebas nuevas con los dígitos de borde 0 y 9 en cada posición. 357 pruebas en tres entornos. Re-ejecuté mi script y las **56 de 56** mutaciones quedan detectadas; el diff solo toca `tests/` y `PROGRESS.md`.
+- **Revisor: APROBADA.** Reprodujo el cierre del NUL con 23 valores (incluidos BLOB, enteros y NUL al inicio, medio y final). Hallazgos solo bajos: pruebas redundantes, un helper que no dice qué CHECK falló, y que T-02e debe incluir `instr(...)` al comparar el SQL. Todos quedaron en `TASKS.md`.
+- **Lección:** las mutaciones que escribe el propio autor reflejan lo que ya pensó. Una mutación **sistemática** (todas las posiciones × todas las variantes) encuentra lo que no pensó.
+
 ### Historial git resultante
 
 ```
@@ -183,12 +190,12 @@ docs: documentación base del proyecto Agenda Psi
 
 ## 4. Estado actual y qué sigue
 
-- Hecho: **T-01, T-02, T-02b, T-02d, T-03, T-03b, T-02c, T-02f** (232 pruebas pasando).
+- Hecho: **T-01, T-02, T-02b, T-02d, T-03, T-03b, T-02c, T-02f, T-02g** (357 pruebas pasando).
 - **Decisiones tuyas ya tomadas:** D-007 (esquema), D-015 (correo), D-016 (borrar horas), D-017 (formato de fecha), D-018 (carácter nulo). No hay ninguna pendiente.
-- Siguiente, todas sin decisión tuya: **T-02g** (cerrar el hueco del NUL) → **T-02e** (pruebas con el conjunto exacto de valores) → **T-03c** (hallazgos de T-03b) → **T-04** (login) → **T-05**.
+- Siguiente, todas sin decisión tuya: **T-02e** (pruebas con el conjunto exacto de valores) → **T-03c** (hallazgos de T-03b) → **T-04** (login) → **T-05**.
 - Pendiente solo tuyo: autorizar (o no) que `app/correo.py` figure en `ARCHITECTURE.md`; es una línea de documentación.
 
-**Tu primer ejercicio:** lanza tú mismo la vuelta de T-02g con el prompt del Paso B y revisa el resultado con la lista del Paso C. Antes de dar por buena cualquier tarea, haz cinco preguntas extra: *¿rompió algo documentado?*, *¿las pruebas fallarían si quitara la protección?*, *¿el reporte afirma algo que no ejecutó?*, *¿cómo interactúa esto con las tareas futuras?* y *¿el arreglo propuesto realmente funciona?*
+**Tu primer ejercicio:** lanza tú mismo la vuelta de T-02e con el prompt del Paso B y revisa el resultado con la lista del Paso C. Antes de dar por buena cualquier tarea, haz cinco preguntas extra: *¿rompió algo documentado?*, *¿las pruebas fallarían si quitara la protección?*, *¿el reporte afirma algo que no ejecutó?*, *¿cómo interactúa esto con las tareas futuras?* y *¿el arreglo propuesto realmente funciona?*
 
 ## 5. Consejos profesionales (lo que hace la diferencia)
 
@@ -224,6 +231,8 @@ docs: documentación base del proyecto Agenda Psi
 30. **Una prueba que "documenta" un defecto aceptándolo es frágil.** Si el defecto se corrige, la prueba falla sin explicar por qué. Mejor una prueba que exija el comportamiento correcto o una marca `xfail(strict=True)` con instrucciones.
 31. **Cada decisión de diseño tiene efectos laterales en el código futuro.** `ON DELETE SET NULL` hace peligroso `INSERT OR REPLACE`. Anota esas consecuencias en las tareas que las sufrirán.
 32. **Conoce los límites de tu herramienta.** `length()` y `GLOB` de SQLite se detienen en un NUL; en otras bases de datos o lenguajes el mismo problema tiene otro nombre.
+33. **Muta de forma sistemática, no solo con lo que se te ocurre.** Las 8 mutaciones del implementador dejaron vivos 14 mutantes; un script que probó todas las posiciones y variantes los encontró. Automatiza la mutación cuando el espacio es pequeño y regular.
+34. **Cuando un agente corrige, vuelve a ejecutar tu propia verificación, no la suya.** Su "56/56" se confirmó porque yo lo corrí aparte, en una copia limpia.
 
 ## 6. Trampas de principiante que ya viste en acción
 
