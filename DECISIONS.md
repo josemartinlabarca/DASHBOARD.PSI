@@ -147,9 +147,9 @@ Autorizas a que se modifique `ARCHITECTURE.md` (que `CLAUDE.md` reserva al human
 ## Plantilla para nuevas decisiones
 
 ```
-## D-015 — Política de caracteres permitidos en el correo (T-03c) — **PROPUESTA, PENDIENTE DE APROBACIÓN HUMANA**
+## D-015 — Política de caracteres permitidos en el correo (T-03c) — **APROBADA por el humano (2026-10-08 00:38): opción 2**
 - **Fecha:** 2026-10-08
-- **Estado:** PROPUESTA. Origen: hallazgo 2 de la revisión de T-03b. Ningún agente puede implementarla hasta que el humano elija.
+- **Estado:** APROBADA el 2026-10-08 00:38 (hora de Chile): el humano eligió la **opción 2**. Origen: hallazgo 2 de la revisión de T-03b. Ningún agente puede implementarla hasta que el humano elija.
 - **Problema:** `normalizar_email` (D-013) solo rechaza espacios y las categorías Unicode Cc y Cf. Siguen pasando caracteres invisibles o engañosos (selectores de variación, relleno hangul, braille en blanco, combinantes sueltos, uso privado) y los homoglifos de otros alfabetos (una «е» cirílica idéntica a la «e» latina), que D-013 aceptó como riesgo.
 - **Efecto en el usuario:** el riesgo real es de **suplantación visual** (dos cuentas que se ven iguales) y de cuentas que el usuario no puede reproducir al escribir.
 
@@ -159,7 +159,11 @@ Autorizas a que se modifique `ARCHITECTURE.md` (que `CLAUDE.md` reserva al human
 - **3. Mantener como está.** Sin cambios; el riesgo queda aceptado en D-013 y documentado. Solo se añaden las pruebas del punto 1 de T-03c.
 
 ### Resolución
-- **Elegida:** ______   **Aprobada por:** ______   **Fecha:** ______
+- **Elegida:** opción 2 — rechazar todas las categorías `C*` (Cc, Cf, Co, Cn, Cs) y las marcas `Mn`, `Mc` y `Me`.
+- **Aprobada por:** el humano (usuario de la sesión), respuesta a la pregunta de D-015.   **Fecha:** 2026-10-08 00:38
+- **Se recomendaba la opción 1 (solo ASCII).** El humano prefirió la opción 2 para admitir correos con tildes o `ñ` precompuestas.
+- **Riesgo aceptado conscientemente:** los homoglifos de otros alfabetos (p. ej. la «е» cirílica idéntica a la «e» latina) **siguen siendo aceptados**: la opción 2 no los resuelve. Se mantiene el riesgo ya aceptado en D-013 y debe revisarse en T-14 (revisión final de seguridad).
+- **Consecuencias para la implementación:** las marcas combinantes se rechazan, así que el correo debe llegar **precompuesto** (NFKC ya lo compone; p. ej. `ñ` U+00F1). Las pruebas deben cubrir que `señor@x.cl` precompuesto y descompuesto (`n` + U+0303, que NFKC compone) se normalizan igual y se aceptan, que un combinante suelto se rechaza, y que los puntos de uso privado, no asignados y sustitutos se rechazan. Los Cn dependen de la versión de Python: documentarlo y fijar la prueba a categorías, no a una lista de puntos de código.
 
 ## D-00X — Título
 - **Fecha:**
