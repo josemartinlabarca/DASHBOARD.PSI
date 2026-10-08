@@ -263,7 +263,7 @@ def test_el_update_condicional_decide_y_se_revisa_rowcount(app, pro_id, ana, bet
     with app.app_context():
         db = get_db()
         ok, mensaje = modulo_paciente.reservar_hora(
-            Intruso(db), hora, uid(app, "ana@example.cl"), tiempo.ahora_chile()
+            Intruso(db), hora, uid(app, "ana@example.cl")
         )
         assert (ok, LIBRE in mensaje) == (False, True)
         assert db.in_transaction is False
@@ -284,7 +284,7 @@ def test_la_primera_sentencia_es_begin_immediate(app, pro_id, ana):
     with app.app_context():
         db = get_db()
         db.set_trace_callback(sentencias.append)
-        modulo_paciente.reservar_hora(db, hora, uid(app, "ana@example.cl"), tiempo.ahora_chile())
+        modulo_paciente.reservar_hora(db, hora, uid(app, "ana@example.cl"))
     assert sentencias[0] == "BEGIN IMMEDIATE"
     assert sentencias[-1] == "COMMIT"
     assert sum(s.startswith("UPDATE horas SET") for s in sentencias) == 1
@@ -366,6 +366,21 @@ def test_futuro_o_pasado_se_decide_con_instantes_y_no_con_el_reloj_de_pared(
     hora = insertar(app, pro_id, "2027-04-03T23:40:00")
     assert reservar_y_aviso(ana, hora)[0] == "error"
     assert fila(app, hora)[0] == "libre"
+
+
+def test_el_borde_de_hora_futura_no_depende_de_la_zona_del_sistema(app, pro_id, ana, zona_sistema):
+    """R-05 (T-07): `ahora` es Chile 12:00 (15:00Z). Leer esa hora de Chile como hora del
+    sistema (`ahora.replace(tzinfo=None).timestamp()`) coincide con la correcta solo si el
+    equipo está en Chile; la prueba corre con el sistema en UTC, Tokio y Chile."""
+    pasada = insertar(app, pro_id, "2026-10-08T12:00:00")  # justo ahora
+    futura = insertar(app, pro_id, "2026-10-08T12:00:01")  # un segundo después
+    lejana = insertar(app, pro_id, "2026-10-08T23:00:00")  # futura en Chile y en UTC
+    assert reservar_y_aviso(ana, pasada)[0] == "error"
+    assert fila(app, pasada) == ("libre", None, None)
+    reservar(ana, futura)
+    assert fila(app, futura)[0] == "reservada"
+    reservar(ana, lejana)
+    assert fila(app, lejana)[0] == "reservada"
 
 
 # ------------------------------------------------- regla 5: solapes ----
@@ -462,7 +477,7 @@ def test_un_rechazo_no_deja_la_transaccion_abierta(app, ana):
     with app.app_context():
         db = get_db()
         ok, _ = modulo_paciente.reservar_hora(
-            db, intento, uid(app, "ana@example.cl"), tiempo.ahora_chile()
+            db, intento, uid(app, "ana@example.cl")
         )
         assert ok is False and db.in_transaction is False
 

@@ -1,4 +1,5 @@
-"""Rutas del paciente: panel (T-04), horas libres futuras (T-06, US-7) y reservar (T-07, US-8)."""
+"""Rutas del paciente: panel con «Mis reservas» (T-04, T-08), horas libres futuras (T-06, US-7),
+reservar (T-07, US-8) y cancelar (T-08, US-9)."""
 from datetime import datetime, timedelta
 
 from flask import Blueprint, flash, redirect, render_template, url_for
@@ -26,6 +27,20 @@ MENSAJE_SOLAPE = (
     "Cancela esa reserva o elige otro horario."
 )
 MENSAJE_CONFIRMACION = "Listo, reservaste tu hora: {cuando} con {profesional}."
+
+# US-9: se puede cancelar con «al menos 24 horas» de anticipación, es decir, con
+# exactamente 24 h también (inicio - ahora >= 24 h, en instantes absolutos).
+ANTICIPACION_CANCELAR_S = 24 * 3600
+MENSAJE_RESERVA_NO_ENCONTRADA = (
+    "No encontramos esa reserva entre las tuyas. Puede que ya esté cancelada."
+)  # no existe, es de otra persona, ya está libre o no se puede interpretar: no se distingue
+MENSAJE_POCA_ANTICIPACION = (
+    "Solo puedes cancelar con al menos 24 horas de anticipación, y a esta sesión "
+    "le falta menos (o ya pasó). Si necesitas cambiarla, comunícate con el profesional."
+)
+MENSAJE_CANCELADA = (
+    "Cancelaste tu reserva del {cuando} con {profesional}. La hora quedó libre."
+)
 
 
 def listar_horas_libres_futuras(db, ahora):
@@ -69,10 +84,48 @@ def listar_horas_libres_futuras(db, ahora):
     ]
 
 
+def listar_reservas_futuras(db, paciente_id, ahora):
+    """Reservas del paciente cuyo inicio es posterior a `ahora`, por instante (y luego id).
+
+    Cada una trae `cancelable`: faltan al menos 24 h (instantes absolutos). Mismo
+    criterio que `cancelar_reserva`, que es quien decide de verdad al enviar el
+    formulario. Una sola consulta con JOIN (sin N+1); las filas con fecha o
+    duración que no sirven no se muestran. Se ordena en Python por instante, no
+    por el texto de `reservada_en` (no ordena bien en la noche de cambio de hora).
+    """
+    corte = ahora.replace(tzinfo=None) - timedelta(days=MARGEN_SQL_DIAS)
+    filas = db.execute(
+        "SELECT h.id, h.inicio, h.duracion_min, u.nombre AS profesional"
+        " FROM horas h JOIN usuarios u ON u.id = h.profesional_id"
+        " WHERE h.paciente_id = ? AND h.estado = 'reservada' AND h.inicio > ?",
+        (paciente_id, corte.strftime(FORMATO_GUARDADO)),
+    ).fetchall()
+    ahora_s = ahora.timestamp()
+    reservas = []
+    for fila in filas:
+        intervalo = tiempo.intervalo_guardado(fila)
+        if intervalo is None or intervalo[0] <= ahora_s:
+            continue
+        reservas.append((intervalo[0], fila["id"], fila))
+    reservas.sort(key=lambda t: (t[0], t[1]))
+    return [
+        {
+            "id": fila["id"],
+            "inicio": mostrar_inicio(fila["inicio"]),
+            "duracion_min": fila["duracion_min"],
+            "profesional": fila["profesional"],
+            "cancelable": inicio_s - ahora_s >= ANTICIPACION_CANCELAR_S,
+        }
+        for inicio_s, _, fila in reservas
+    ]
+
+
 @bp.route("/paciente")
 @solo_paciente
 def dashboard():
-    return render_template("paciente.html", usuario=usuario_actual())
+    usuario = usuario_actual()
+    reservas = listar_reservas_futuras(get_db(), usuario["id"], tiempo.ahora_chile())
+    return render_template("paciente.html", usuario=usuario, reservas=reservas)
 
 
 @bp.route("/paciente/horas")
@@ -85,8 +138,13 @@ def horas_libres():
 # ------------------------------------------------------------- reservar ----
 
 
-def reservar_hora(db, hora_id, paciente_id, ahora):
+def reservar_hora(db, hora_id, paciente_id, reloj=None):
     """Reserva la hora para el paciente. Devuelve `(ok, mensaje)`.
+
+    `reloj` es una función sin argumentos que devuelve «ahora» con zona (por
+    defecto `tiempo.ahora_chile`, buscado al llamar). Se invoca **después** de
+    obtener el bloqueo (T-08, R-02): si la petición esperó el bloqueo, «ahora» y
+    `reservada_en` son los del instante real en que se decide, no los de antes de esperar.
 
     Todo ocurre en una transacción `BEGIN IMMEDIATE`: se toma el bloqueo de
     escritura **antes** de leer, así entre la comprobación de las reglas y el
@@ -99,6 +157,7 @@ def reservar_hora(db, hora_id, paciente_id, ahora):
     """
     db.execute("BEGIN IMMEDIATE")
     try:
+        ahora = (reloj or tiempo.ahora_chile)()
         hora = db.execute(
             "SELECT h.inicio, h.duracion_min, h.estado, h.paciente_id, u.nombre AS profesional"
             " FROM horas h JOIN usuarios u ON u.id = h.profesional_id WHERE h.id = ?",
@@ -148,8 +207,64 @@ def reservar_hora(db, hora_id, paciente_id, ahora):
 @bp.route(f"/horas/<int(min=1, max={ID_MAX}):hora_id>/reservar", methods=["POST"])
 @solo_paciente
 def reservar(hora_id):
-    ok, mensaje = reservar_hora(
-        get_db(), hora_id, usuario_actual()["id"], tiempo.ahora_chile()
-    )
+    ok, mensaje = reservar_hora(get_db(), hora_id, usuario_actual()["id"])
     flash(mensaje, "exito" if ok else "error")
     return redirect(url_for("paciente.dashboard" if ok else "paciente.horas_libres"))
+
+
+# ------------------------------------------------------------- cancelar ----
+
+
+def cancelar_reserva(db, hora_id, paciente_id, reloj=None):
+    """Cancela la reserva del paciente y deja la hora libre. Devuelve `(ok, mensaje)`.
+
+    Misma estructura que `reservar_hora`: `BEGIN IMMEDIATE`, luego el reloj
+    (después de esperar el bloqueo), luego las reglas y al final un UPDATE
+    condicional `WHERE id = ? AND paciente_id = ? AND estado = 'reservada'` con
+    revisión de `rowcount` (D-003): solo se cancela una reserva propia, y solo si
+    sigue vigente. La hora vuelve al estado de una hora nueva: `libre`, sin
+    paciente ni `reservada_en` y con `recordatorio_enviado` en 0 (D-030).
+    Anticipación: `inicio - ahora >= 24 h` en instantes absolutos (no hora de pared).
+    Una hora inexistente, ajena, ya libre o ilegible da el mismo mensaje.
+    """
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        ahora = (reloj or tiempo.ahora_chile)()
+        hora = db.execute(
+            "SELECT h.inicio, h.duracion_min, h.estado, h.paciente_id, u.nombre AS profesional"
+            " FROM horas h JOIN usuarios u ON u.id = h.profesional_id WHERE h.id = ?",
+            (hora_id,),
+        ).fetchone()
+        if hora is None or hora["estado"] != "reservada" or hora["paciente_id"] != paciente_id:
+            db.rollback()
+            return False, MENSAJE_RESERVA_NO_ENCONTRADA
+        intervalo = tiempo.intervalo_guardado(hora)
+        if intervalo is None:
+            db.rollback()
+            return False, MENSAJE_RESERVA_NO_ENCONTRADA
+        if intervalo[0] - ahora.timestamp() < ANTICIPACION_CANCELAR_S:
+            db.rollback()
+            return False, MENSAJE_POCA_ANTICIPACION
+        canceladas = db.execute(
+            "UPDATE horas SET estado = 'libre', paciente_id = NULL, reservada_en = NULL,"
+            " recordatorio_enviado = 0"
+            " WHERE id = ? AND paciente_id = ? AND estado = 'reservada'",
+            (hora_id, paciente_id),
+        ).rowcount
+        if canceladas != 1:
+            db.rollback()
+            return False, MENSAJE_RESERVA_NO_ENCONTRADA
+        db.commit()
+    except BaseException:
+        db.rollback()
+        raise
+    cuando = mostrar_inicio(hora["inicio"])
+    return True, MENSAJE_CANCELADA.format(cuando=cuando, profesional=hora["profesional"])
+
+
+@bp.route(f"/horas/<int(min=1, max={ID_MAX}):hora_id>/cancelar", methods=["POST"])
+@solo_paciente
+def cancelar(hora_id):
+    ok, mensaje = cancelar_reserva(get_db(), hora_id, usuario_actual()["id"])
+    flash(mensaje, "exito" if ok else "error")
+    return redirect(url_for("paciente.dashboard"))

@@ -8,7 +8,7 @@ Aplicación web liviana donde un **profesional** publica horas disponibles y los
 
 - Registro e inicio de sesión (roles: `paciente`, `profesional`).
 - El profesional agrega y elimina horas disponibles.
-- El paciente ve las horas libres y reserva una.
+- El paciente ve las horas libres, reserva una y la cancela con al menos 24 horas de anticipación (lista «Mis reservas» en su panel).
 - Dashboard para cada rol (próximas sesiones, historial).
 - Notificaciones de confirmación y recordatorio de hora.
 

@@ -2,6 +2,37 @@
 {% block titulo %}Panel · Agenda Psi{% endblock %}
 {% block contenido %}
   <h1>Hola, {{ usuario.nombre }}</h1>
+
+  <h2>Mis reservas</h2>
+  {% if reservas %}
+    <table>
+      <thead>
+        <tr><th>Fecha y hora</th><th>Duración</th><th>Profesional</th><th>Cancelar</th></tr>
+      </thead>
+      <tbody>
+        {% for reserva in reservas %}
+          <tr>
+            <td>{{ reserva.inicio }}</td>
+            <td>{{ reserva.duracion_min }} min</td>
+            <td>{{ reserva.profesional }}</td>
+            <td>
+              {% if reserva.cancelable %}
+                <form method="post" action="{{ url_for('paciente.cancelar', hora_id=reserva.id) }}">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button type="submit">Cancelar</button>
+                </form>
+              {% else %}
+                Ya no se puede cancelar (faltan menos de 24 horas)
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p>No tienes reservas próximas.</p>
+  {% endif %}
+
   <p><a href="{{ url_for('paciente.horas_libres') }}">Ver horas disponibles</a></p>
   <form method="post" action="{{ url_for('auth.logout') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

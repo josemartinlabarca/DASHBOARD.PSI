@@ -1,6 +1,8 @@
 import importlib
+import os
 import pkgutil
 import sys
+import time
 
 import pytest
 from werkzeug import security
@@ -59,3 +61,37 @@ def app(tmp_path):
 @pytest.fixture
 def client(app):
     return app.test_client()
+
+
+# --- Zona horaria del sistema (T-08, R-05 de la revisión de T-07) ---------------
+# La aplicación decide con instantes absolutos y la zona de Chile (`zoneinfo`),
+# nunca con la zona del equipo. Si las pruebas corrieran con la zona del equipo
+# y esta fuera Chile, un error como `ahora.replace(tzinfo=None).timestamp()`
+# (hora de Chile leída como hora del sistema) pasaría desapercibido. Por eso
+# cada prueba corre con el sistema en UTC, sea cual sea el equipo; y las pruebas
+# de borde piden además `zona_sistema` para repetirse en otras zonas.
+ZONAS_DE_SISTEMA = ["UTC", "Asia/Tokyo", "America/Santiago"]
+
+
+def fijar_zona_sistema(nombre):
+    os.environ["TZ"] = nombre
+    time.tzset()
+
+
+@pytest.fixture(autouse=True)
+def zona_del_sistema_fija():
+    anterior = os.environ.get("TZ")
+    fijar_zona_sistema("UTC")
+    yield
+    if anterior is None:
+        os.environ.pop("TZ", None)
+        time.tzset()
+    else:
+        fijar_zona_sistema(anterior)
+
+
+@pytest.fixture(params=ZONAS_DE_SISTEMA)
+def zona_sistema(request):
+    """Repite la prueba con el sistema en UTC, Tokio y Chile (la de Chile es la que escondía R-05)."""
+    fijar_zona_sistema(request.param)
+    return request.param
