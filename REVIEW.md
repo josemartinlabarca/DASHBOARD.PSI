@@ -1,95 +1,112 @@
-# REVIEW — T-08 Cancelar reserva y «Mis reservas» (commit `1a8e1d8`)
+# REVIEW — T-08b Acelerar la suite sin perder cobertura (commit `f9363e1`)
 
-Revisor: leí el diff y ejecuté experimentos y mutaciones en copias bajo el scratchpad (`rev/`, `exp/`, `mut/`, `mutar.py`). No se tocó el repositorio salvo este archivo (`git status` limpio antes de escribirlo). Sin commit.
+Revisor: leí el diff completo (`git show f9363e1`), TASKS (T-08b), D-019, D-030, D-031, la entrada de PROGRESS, `tests/conftest.py`, `tests/test_aislamiento.py` y los archivos de pruebas tocados. Todos los experimentos y mutaciones se hicieron en copias bajo el scratchpad (`new/` = `f9363e1`, `old/` = `90636f6`, ambas con `git archive`; `m/` para mutantes; `vx/` = venv con `pytest-xdist` y `pytest-randomly` solo para el experimento). El repositorio no se tocó salvo este archivo. Sin commit.
 
-## Veredicto: CAMBIOS REQUERIDOS
+## Veredicto: APROBADA
 
-La lógica de T-08 es correcta: el borde de 24 h, la concurrencia, el reloj tras el bloqueo y «Mis reservas» pasaron todo lo que probé, y los hallazgos R-01, R-02, R-04 y R-05 de T-07 quedan cerrados. El único bloqueante es **R-01 de esta revisión**: la fixture automática `time.tzset()` hace que **ninguna prueba corra en Windows**, plataforma que el README y D-012 declaran soportada. Es un arreglo de pocas líneas. Además hay un callejón sin salida de producto (R-02, ya conocido como D-029) que conviene que el humano decida antes de T-09.
+El cambio es solo de infraestructura de pruebas y cumple el criterio de T-08b: mismas 1124 pruebas más 11 nuevas, mismas aserciones, suite en 24-28 s (antes 61-65 s), y todas las mutaciones que probé siguen muriendo. No encontré ninguna regresión de fiabilidad ni cobertura perdida. Hay un hallazgo **media** (R-01: `/dev/shm` sin tope de capacidad, falla con un error confuso en contenedores con `/dev/shm` pequeño) y varios menores; ninguno bloquea T-09, pero R-01 conviene resolverlo antes de que la suite crezca otro tanto.
 
 ## Qué verifiqué ejecutando
 
 | Punto | Resultado |
 |---|---|
-| Suite (copia del commit, `TZ=America/Santiago` del equipo) | **1117 passed en 65,9 s** (la entrada dice ≈62 s). 1117 − 956 = 161 nuevas (158 en `test_cancelar.py` + 3 por la prueba parametrizada nueva de `test_reservar.py`). Las líneas eliminadas de `tests/` son 4 (`git diff a64a234 1a8e1d8 -- tests`): 3 en `test_reservar.py` y 1 en `test_rutas_publicas.py`, como dice PROGRESS. |
-| 1. Borde de 24 h, `exp/e1.py` y `e1b.py` | Modelo independiente (`zoneinfo`, `fold=0`, resta de instantes UTC), **1500 casos aleatorios** (1055 pegados al borde ±2 s y ±1 µs) en las ventanas de septiembre y abril de 2026 y 2027 y en un día normal, con el sistema en UTC: **0 discrepancias**, ninguna transacción abierta. Casos fijos con el sistema en Tokio: exactamente 24:00:00 se permite; +1 µs, +0,5 s y +1 s se rechazan; −1 µs y −1 s se permiten; 6 horas de las dos noches de cambio de horario (23:30, 01:00, 00:30, 10:00) × {0, −1, +1 s}: todas coinciden con el modelo. |
-| 1. HTTP, `e2.py` | Reserva ajena, inexistente, ya libre y doble clic: **mismo texto y mismo `Location: /paciente`**. Profesional: 403. GET: 405. Sin token: 400. Una reserva con `recordatorio_enviado=1` queda tras cancelar como `('libre', NULL, NULL, 0)`; la reserva ajena no cambia. Una notificación ligada a la hora **sigue ahí con `hora_id` intacto** (no se borra la fila, `ON DELETE SET NULL` no se dispara). Tras cancelar, Beto reserva la misma hora y, tras cancelar él, Ana la reserva de nuevo. Los CHECK impiden `libre` con `paciente_id`, `reservada` sin `reservada_en`, etc. (verificado con UPDATE directo). |
-| 2. Concurrencia real, `e4.py` | Archivo SQLite, cada cliente con su app y su conexión, barrera, **12 procesos y 12 hilos**, 3 rondas por escenario: 12 cancelaciones simultáneas = exactamente 1 «Cancelaste…» y 11 «No encontramos…»; 6 cancelaciones de Ana contra 6 reservas de Beto = siempre 1 cancelación y 1 reserva, estado final `reservada` por Beto; 6 cancelaciones contra 6 eliminaciones del profesional = 1 cancelación y 1 eliminación (fila borrada, el resto «No se puede eliminar…» o 404); mezcla 4+4+4 coherente. **0 respuestas 500**, `PRAGMA integrity_check` ok, la base se abre sin bloqueo después. |
-| 3. Reloj tras el bloqueo, `e5.py` | Un hilo mantiene `BEGIN IMMEDIATE` 2 s con otra conexión; la llamada espera. `reloj` se invoca a los **2,05 s (reservar) y 2,04 s (cancelar)**, después de soltar el bloqueo; `reservada_en` = segundo de commit, no el de la llamada (2 s antes). R-02 de T-07 cerrado. Otros llamadores de `reservar_hora`: solo la ruta y 3 pruebas (`grep`). |
-| 4. «Mis reservas», `e3.py` | 0 reservas: «No tienes reservas próximas.» Con reservas en curso (empezó hace 30 min), pasada (hace 7 días), exactamente ahora, 23 h 59 min 59 s, 24 h exactas, 3 semanas y 5 semanas, más una de Beto y una hora libre: salen solo las 4 futuras propias, ordenadas por instante; 23:59:59 sin botón y con «Ya no se puede cancelar (faltan menos de 24 horas)»; 24:00:00 con botón; 3 formularios de cancelar + el de «Cerrar sesión», los 4 con `csrf_token`. Nombre de profesional `<script>alert(1)</script>&"x` escapado (`&lt;script&gt;`). `Cache-Control: no-store`, `Pragma: no-cache`. Nada de Beto ni de horas libres. |
-| 5. Fixture de zona | Ver R-01 y R-05. Simulé Windows (`del time.tzset` vía `sitecustomize`): `tests/test_login.py` da **95 errores** `AttributeError: module 'time' has no attribute 'tzset'`. Una prueba temporal con `zona_sistema` seguida de otra sin ella ve `TZ=UTC` y se restaura bien (con `TZ` definido y sin definir). |
-| 6. Mutaciones propias | **20** (14 pedidas + 6 más), subconjunto `test_cancelar, test_reservar, test_horas_libres, test_rutas_publicas, test_seguridad` con `-x`. **18 mueren, 2 sobreviven** (R-04). Tabla abajo. |
-| 7. Suite | `--durations=0`: setup 33,6 s (972 × ≈35 ms), llamadas 28,6 s. Ver R-03. |
-| 8. D-029, `e6.py` | Reservar una hora a 17 h: «Listo, reservaste tu hora…» sin aviso; en el panel sale «Ya no se puede cancelar»; cancelar por POST da el mensaje de anticipación; el profesional no puede eliminarla («Primero debe cancelarse la reserva»). Ver R-02. |
+| 1. Cobertura equivalente | `pytest --collect-only` en `old` y `new`: **los 1124 identificadores de antes siguen idénticos** y la única diferencia son los 11 de `test_aislamiento.py` (`diff ids_old ids_new`). Conteo de líneas con `assert`/`pytest.raises` por archivo en `90636f6` vs `f9363e1`: **no cambia en ningún archivo salvo `test_aislamiento.py` (0 → 19)**. Líneas eliminadas de `tests/` excluyendo `conftest.py`: 26 (6 `test_config`, 10 `test_conftest_sin_tzset`, 10 `test_correo`); revisadas una a una: firmas `tmp_path` → `tmp_path_factory`, `_correr` → `_corrida` (misma clave = mismos argumentos), `communicate(timeout=3)` → lectura de stderr hasta el aviso, y la función exhaustiva partida en `revisar_rango_de_puntos_de_codigo` (cuerpo idéntico). Ninguna aserción acortada o debilitada. |
+| 1. Recorrido exhaustivo de correo | Cálculo propio: para 2 a 8 procesos, los rangos `[cortes[k], cortes[k+1])` unidos reproducen **exactamente los 1.112.064 puntos** (sin duplicados ni huecos). Mutaciones en `normalizar_email` que aceptan un solo punto de código raro (U+0001, U+7FFFF, U+88000 = inicio del 2.º rango con 2 núcleos, U+10FFFD = último): **las 4 mueren** y el mensaje de fallo llega con el punto (`AssertionError: ('0x10fffd', 'Co')`). Con `os.cpu_count()=1` y con `get_all_start_methods` sin `fork` (rama en proceso) pasa (92 OK). `-W error` en `test_correo.py` y en toda la suite: sin avisos (en un solo proceso). |
+| 2. Fiabilidad | Suite completa **3 veces** seguidas: 27,8 / 26,9 / 27,1 s, 1135 OK; otras 4 corridas: 24,2-26,6 s. Con `SECRET_KEY=abc` (26,9 s), `FLASK_DEBUG=1` (30,0 / 26,6 / 24,5 s), `TZ=Asia/Tokyo` (27,1 s): 1135 OK. **Cada archivo por separado**: 19 archivos OK. **50 pruebas elegidas al azar, cada una sola**: 0 fallan. Orden inverso: 1135 OK. Orden aleatorio (plugin propio, semillas 11, 12, 13): 1134 OK + 1 falla, siempre `test_zona_horaria.py::test_las_pruebas_anteriores_no_dejan_la_cache_poblada`. Dos suites a la vez (pids distintos en `/dev/shm`): ambas OK en 28,6 s. Simulando Windows (`sitecustomize` con `del time.tzset`, `os.access('/dev/shm')` falso y solo `spawn`): **1063 passed, 72 skipped, 32,2 s**; en `90636f6` con la misma simulación: 1052 passed, 72 skipped (los mismos 72 saltos: `zona_sistema` y 3 de control). |
+| 2. Prueba dependiente del orden | **Confirmado en el commit anterior**: `90636f6` con la semilla 11 da 1123 OK + 1 falla en esa misma prueba. Ver R-03. |
+| 3. Esquema | 17 mutaciones de `schema.sql` en copias (CHECK de `rol` ampliado, DEFAULT 50→60, `nombre` sin NOT NULL, `email` sin UNIQUE, sin COLLATE NOCASE, ON DELETE SET NULL→CASCADE, ON UPDATE CASCADE en `horas`, columna extra, índice extra, sin `UNIQUE(profesional_id, inicio)`, CHECK de `tipo` ampliado, `leida` DEFAULT 1, GLOB sin `instr(inicio, char(0))`, FK de `paciente_id` quitada, `estado` DEFAULT `reservada`, comentario SQL añadido, doble espacio): **16 de 17 mueren en `test_esquema.py`** (la primera prueba que falla es de ese archivo en las 16); solo sobrevive el doble espacio, que es equivalente (el SQL guardado se normaliza en la comparación; igual en `90636f6`). Las tres pruebas `base_real` (`SQL exacto`, `otros objetos`, `FK completo`) usan el `init_db` real: `test_con_base_real_no_hay_atajo` lo comprueba y la copia de la plantilla se compara con la real en `test_aislamiento`. |
+| 3. Plantilla desactualizada | No puede ocurrir: la plantilla vive en memoria y en `tmp_path_factory` de la sesión, se crea de nuevo en cada `pytest` desde el `schema.sql` actual (las mutaciones de arriba lo demuestran: cada copia mutada partió de una sesión nueva). Nada se persiste entre corridas (`-p no:cacheprovider` o no). |
+| 3. `pytest-xdist` | Instalado en un venv de prueba: `-n 2` → **1135 OK en 17,7 s**, `/dev/shm` limpio después, pero **81 avisos** `DeprecationWarning: ... multi-threaded, use of fork() may lead to deadlocks` (R-05). `pytest-randomly` (2 corridas): 1135 OK (la prueba de R-03 pasó por azar). |
+| 4. Mutaciones de la app | **24 propias** (T-04 a T-08), suite completa con `--maxfail=1`: **23 mueren**, 1 sobrevive (`MARGEN_SQL_DIAS = 0`; también sobrevive en `90636f6` en `test_horas_libres/cancelar/reservar`, y es un mutante equivalente en la práctica: ver R-07). Mueren: POST como método seguro de CSRF, sin `Pragma`, cookie `HttpOnly=False`, `SameSite=None`, `PASSWORD_MIN` 7, `EMAIL_MAX` 255, `DURACION_MAX` 481, `ANIOS_MAX` 3, pasado `<` en vez de `<=` al publicar, DELETE sin `estado='libre'`, duración por defecto 45, horas libres con `<`, sin filtro `libre`, orden por id, reservar con `<`, solape con `<=`, `reservada_en` en minutos, cancelar sin limpiar `recordatorio_enviado`, botón `>` en vez de `>=`, anticipación 23 h, redirección de cancelar a otra página, `fold=1`, cancelar sin comprobar dueño. Ninguna coincide con las 13 del implementador (solo las leí). |
+| 4. `init_db` y `get_db` | 8 mutaciones de `app/db.py`/`schema.sql`: mueren sin script, DROP previo, `CREATE TABLE` sin `IF NOT EXISTS`, sin `foreign_keys=ON`, sin `row_factory`. Sobreviven `init_db` sin `commit` (equivalente: `executescript` ya confirma), `PRAGMA user_version=5` en el esquema y `close_db` sin cerrar: **los tres sobreviven igual en `90636f6`** (no es regresión; ver R-07). |
+| 4. Mutaciones de la propia infraestructura | 6 mutaciones de `conftest.py` mueren a través de `test_aislamiento`/`test_hash_rapido`: copiar siempre sobre una base con tablas, `tmp_path` compartido, copia al revés (escribir en la plantilla), plantilla incompleta, clave de la caché de URL constante, hash rápido apagado. Además: con `DATABASE` fijo en la fixture `app`, **3 de las 11 pruebas de aislamiento fallan** (reproduce lo dicho en PROGRESS). |
+| 5. `/dev/shm` | Ver R-01, R-02 y R-06. Medí pico de uso: **≈23,5 MB** por corrida (≈20 KB por prueba); permisos del directorio `drwx------`; dos corridas simultáneas usan directorios distintos y los dos se borran. Con `/dev/shm` de 12 MB (espacio de nombres de montaje propio con `unshare -m`) la suite **se rompe a las ≈650 pruebas** con `sqlite3.OperationalError: database or disk is full`. Con `kill -TERM` el directorio **queda** en `/dev/shm`. |
+| 5. Dependencias / hash rápido | `requirements.txt` sin cambios; `conftest.py` importa `jinja2` y `werkzeug` (dependencias transitivas de Flask, ya instaladas). `app/` no importa nada de `tests/` ni de `conftest`; el hash rápido solo existe en una fixture `autouse`; las pruebas `hash_real` verifican `scrypt:32768:8:1` en `app.auth`, en `create-professional` y en `hash_falso`. No puede filtrarse a producción. |
+| 6. Tiempos | Ver R-04 y la tabla de abajo. |
 
-No verifiqué: navegador real ni diseño (HTML sin estilos); el recorrido manual del implementador (hice el mío por el cliente de pruebas de Flask, no con `flask run` y curl); las 51 mutaciones del implementador (solo las leí); `BEGIN IMMEDIATE` esperando más de 5 s (500 conocido, declarado, no lo repetí); varias réplicas ni carga sostenida; la suite con `TZ=Asia/Tokyo` (tampoco los «6 corridas» de concurrencia: confío en mis propias rondas).
+### Tiempos medidos (equipo de 2 núcleos, `TZ=America/Santiago` del equipo)
 
-Veracidad de PROGRESS: coincide en 1117/161/4 líneas, el R-05 reproducido (mi N16 muere), la hora de la entrada (`2026-10-08 16:34`) con el commit (16:34:50 −03) y la nota «reservar_hora cambió de firma, sin otros llamadores». Sin discrepancias.
+| Corrida | Tiempo |
+|---|---|
+| `90636f6` (antes), 1124 pruebas | 65,1 s (PROGRESS: 63,2 s) |
+| `f9363e1` (después), 3 corridas seguidas | 27,8 / 26,9 / 27,1 s |
+| `f9363e1`, 4 corridas más | 24,2 / 24,5 / 24,5 / 26,6 s |
+| con `FLASK_DEBUG=1` (3 corridas) | **30,0** / 26,6 / 24,5 s |
+| orden aleatorio (3 semillas) | 29,1 / **30,8** / 27,4 s |
+| `pytest-randomly` | 29,6 / 27,9 s |
+| simulando Windows (sin `/dev/shm` ni `fork`) | **32,2 s** |
+| `-n 2` (xdist) | 17,7 s |
 
-### Mutaciones propias (distintas de las 51 del implementador)
+Por fase (`--durations=0`): antes setup 31,9 s + call 30,1 s; después setup 6,1 s + call 16,6 s (el resto es recolección e importación). `--durations=10` de lo que queda: el recorrido exhaustivo de correo 2,35 s, concurrencia con procesos 0,56-0,97 s, `create-professional` por subproceso 0,79 s, y el resto son subprocesos de `test_conftest_sin_tzset.py` y `test_hash_rapido.py` (0,6-0,74 s cada uno). No queda ninguna prueba sobre 2,4 s.
 
-| # | Mutación | Resultado |
-|---|---|---|
-| N01 | 24 h − 1 s | muere |
-| N02 | decide con el **fin** de la sesión | muere |
-| N03 | aviso de éxito con el `inicio` crudo | muere |
-| N04 | `rowcount != 1` devuelve `True` | muere |
-| N05 | panel muestra la que empieza justo ahora | muere |
-| N06 | panel ordena solo por id | muere |
-| N07 | cancelar redirige a la lista de horas libres | muere |
-| N08 | plantilla sin el texto «Ya no se puede cancelar» | muere |
-| N09 | columna profesional con el nombre del paciente | muere |
-| N10 | ruta `min=0` | muere |
-| N11 | cancelar sin comprobar fecha ilegible (cae en «poca anticipación») | **sobrevive** |
-| N12 | `reservada_en` con `timespec="minutes"` | muere |
-| N13 | `cancelar_reserva` ignora el parámetro `reloj` | muere |
-| N14 | panel con reloj real en vez de `tiempo.ahora_chile` | muere |
-| N15 | margen SQL de 1 día a 0 | **sobrevive** |
-| N16 | `reservar_hora` con hora de Chile leída como hora del sistema (R-05 de T-07) | muere |
-| N17 | botón del panel decidido con el fin de la sesión | muere |
-| N18 | sin `rollback` en «poca anticipación» | muere |
-| N19 | sin `rollback` en el solape de `reservar_hora` | muere |
-| N20 | `except` de `cancelar_reserva` traga la excepción | muere |
+### Veracidad de PROGRESS.md
 
-M04 y M05 del implementador **sí son equivalentes**: con el CHECK de `horas`, `paciente_id` no nulo implica `reservada` y una hora libre tiene `paciente_id` NULL (probé los tres UPDATE que lo violarían: `IntegrityError`).
+Coincide: 1124 → 1135 (+11), 63 → ~28 s (yo medí 65 → 24-28 s), «1134 OK y 1 falla» con orden aleatorio y la misma prueba (también falla en `90636f6`), «3 de 11 fallan con base compartida» (reproducido), hora de la entrada `18:06` frente a `18:07:00 -03` del commit. El `fork` del recorrido y el cambio a 4 corridas del subproceso están dichos en D-031 y son ciertos. Discrepancias menores: (1) la entrada dice «no ejecutado… ni la suite simulando Windows tras estos cambios»: yo sí la ejecuté (resultado arriba) y da 32,2 s, no menos de 30 s; (2) «27-29 s» es el rango favorable: con `FLASK_DEBUG=1` y en orden aleatorio medí 30,0 y 30,8 s.
 
 ## Hallazgos
 
-### R-01 — La fixture automática `time.tzset()` rompe toda la suite en Windows — media
-`tests/conftest.py` llama `time.tzset()` en `zona_del_sistema_fija` (autouse) y en `fijar_zona_sistema`. `time.tzset` no existe en Windows. README (`.venv\Scripts\activate`, PowerShell, `pytest`) y D-012 (`tzdata` para `win32`) tratan Windows como soportado, y CLAUDE.md dice que una tarea no está terminada si `pytest` no pasa.
-Reproducción: `printf 'import time\ndel time.tzset\n' > sc/sitecustomize.py; PYTHONPATH=sc python3 -m pytest -q tests/test_login.py` → 95 errores de configuración, ninguna prueba corre.
-Recomendación: **tarea nueva T-08c (pequeña, antes de T-09)**: proteger con `hasattr(time, "tzset")`; si no existe, la autouse no hace nada y `zona_sistema` marca `pytest.skip("sin time.tzset")` (o parametriza solo con la zona actual); una prueba que fije el comportamiento simulando la ausencia como arriba. No requiere decisión humana.
+### R-01 (media) — La carpeta temporal en `/dev/shm` no comprueba capacidad: con un `/dev/shm` pequeño la suite falla con «database or disk is full»
 
-### R-02 — Callejón sin salida: una reserva hecha con < 24 h no la puede deshacer nadie, y nada lo avisa al reservar — media (D-029)
-Reproducción (`exp/e6.py`, ahora = 12:00): Ana reserva una hora de mañana 05:00 (17 h). Mensaje: «Listo, reservaste tu hora…», sin advertencia (ni en `horas_libres.html` ni en la confirmación). Después el panel dice «Ya no se puede cancelar»; el POST de cancelar da «Solo puedes cancelar con al menos 24 horas… comunícate con el profesional»; el **profesional tampoco puede**: eliminar da «No se puede eliminar una hora reservada. Primero debe cancelarse la reserva» (regla 4), y no existe ninguna pantalla donde el profesional cancele. El texto sugiere una salida que la aplicación no ofrece.
-Es lo que D-029 describe; lo nuevo es que el mensaje de cancelar remite a un profesional que en v1 no tiene herramienta. La implementación de T-08 es coherente con SPEC (no se pedía otra cosa).
-Recomendación: **decisión humana D-029, antes de T-09**. Si se aprueba B (solo reservar con ≥ 24 h), debe usar la misma constante y el mismo `>=` que cancelar, para que toda reserva exitosa sea cancelable en el instante de reservar; si C, el aviso va en la lista de horas libres (por fila con < 24 h) y en la confirmación, no solo después. Mientras tanto, cambiar el texto «comunícate con el profesional» por uno que no prometa una vía inexistente (T-09 o T-12).
+- **Evidencia:** `pytest_configure` usa `/dev/shm` si `os.access(..., W_OK)`; no mira el espacio libre. Cada prueba deja su base hasta el final de la sesión (≈20 KB; pico medido ≈23,5 MB para 1135 pruebas). Docker y muchos CI montan `/dev/shm` de 64 MB por defecto. Reproducido: `unshare -m sh -c 'mount -t tmpfs -o size=12m tmpfs /dev/shm && python3 -m pytest -q -x'` → `648 passed, 1 error` con `sqlite3.OperationalError: database or disk is full` (en `app/auth.py:89`, que parece un fallo de la aplicación). Con 64 MB se llegaría a ≈3.300 pruebas, unas 3 veces la suite actual (T-09 a T-14 suman cientos).
+- **Impacto:** fallo de la suite sin relación aparente con el código, que además no ocurre en la máquina del desarrollador. Es el riesgo principal de la aceleración: vuelve la suite dependiente de un recurso del entorno.
+- **Recomendación:** tarea nueva pequeña (puede ir con T-09): usar `/dev/shm` solo si `shutil.disk_usage('/dev/shm').free` es, por ejemplo, ≥ 256 MB, y/o borrar la carpeta de cada prueba al terminar (el directorio por prueba pesa lo mismo que se ahorra del `fsync`, pero así el uso no crece con el número de pruebas). Añadir una variable de entorno para desactivar tmpfs sin pasar `--basetemp`.
 
-### R-03 — La suite sube a 65,9 s; T-08b confirmado, con una advertencia sobre su meta — baja
-`pytest --durations=0`: ningún caso pasa de 3 s (el mayor es `flask run` real, 3,0 s; luego la idempotencia exhaustiva, 2,8 s). El tiempo está en el conjunto: **setup 33,6 s** (972 preparaciones de ≈35 ms; `app` + `init_db` por prueba, en `test_cancelar.py` además un `init_db` autouse), **llamadas 28,6 s**. Por archivo (setup+llamada): `test_cancelar` 14,2 s (158 pruebas), `test_horas` 13,0 s (393), `test_reservar` 7,4 s, `test_esquema` 6,6 s (279), `test_login` 4,9 s, `test_registro` 4,6 s, `test_config` 4,0 s.
-Orientación: copiar una base ya inicializada (plantilla) en vez de `init_db` en cada prueba recortaría la mayor parte del setup, pero la meta de T-08b (< 25 s) también exige bajar las llamadas (28,6 s hoy): `test_horas`, `test_cancelar` y las parametrizaciones. T-08 aportó ≈ 13,5 s (158 pruebas) sobre los 48 s anteriores.
-Recomendación: **T-08b tal como está**; añadir en su texto que setup y llamadas pesan casi lo mismo.
+### R-02 (baja) — Directorio en `/dev/shm` con nombre predecible y que queda si el proceso muere por señal
 
-### R-04 — Dos mutaciones sobreviven; ninguna es un defecto — baja
-N11: si una reserva tiene fecha ilegible (solo por SQL, el CHECK deja pasar `2026-13-45T99:99:99`), quitar el chequeo hace que el rechazo salga con el mensaje de anticipación en vez del de «no encontrada»; la prueba `test_la_fila_con_fecha_ilegible…` solo exige categoría `error` y que la fila no cambie. Es un cambio de texto de un estado que la app no produce. N15: el margen SQL de 1 día es defensa; con 0 solo se pierde una fila imposible de crear (hora inexistente de septiembre guardada por SQL). Recomendación: **ignorar**.
+- **Evidencia:** `kill -TERM <pid de pytest>` a los 8 s de la corrida: `/dev/shm/pytest-agenda-psi-<pid>` queda (4,3 MB y creciendo hasta ~23 MB si se corta tarde); `pytest_unconfigure` solo corre con salida normal o `KeyboardInterrupt`. El nombre usa el pid (predecible) en un directorio con bit sticky compartido. Permisos del propio directorio: `0700`. Colisión de pid con un resto de otra corrida: pytest borra y recrea el `basetemp` dado, así que se recupera; un directorio ajeno con ese nombre (otro usuario) haría fallar el arranque (no lo ejecuté: solo tengo un usuario).
+- **Impacto:** RAM ocupada hasta reiniciar, en CI con tiempo límite (SIGTERM/SIGKILL). En equipos de varios usuarios, un posible fallo de arranque; no hay riesgo de datos: son bases de prueba.
+- **Recomendación:** backlog. Usar `tempfile.mkdtemp(prefix='pytest-agenda-psi-', dir='/dev/shm')` (nombre aleatorio, `0700`, sin colisión) y limpiar los restos de otros pids ya muertos al iniciar. Combinar con R-01.
 
-### R-05 — La fixture `TZ=UTC` por prueba es adecuada, con tres matices — informativa
-Evaluación: no hay código de la aplicación que dependa de la zona del sistema (`grep`: solo `datetime.now(zona_chile())` y conversiones con `zoneinfo`), de modo que fijar UTC no deja de probar nada de la app; la única clase de error que sí detecta es leer la hora de Chile como hora local (N16 la mata, y con el equipo en Santiago antes sobrevivía). Es una decisión adecuada, no excesiva, y el implementador la dejó expuesta como decisión suya, con la forma de revertirla. Se restaura bien y no contamina entre pruebas. Matices: (1) `os.environ["TZ"]` es del proceso, no del hilo; vale porque cada prueba corre hilos y procesos propios dentro de sí misma, pero fallaría con `pytest-xdist` en hilos (no se usa); (2) los subprocesos de las pruebas heredan `TZ=UTC` (inofensivo hoy); (3) solo 4 pruebas piden `zona_sistema` (tres zonas), las demás corren solo en UTC: basta para el borde, pero una prueba futura que dependa de la zona deberá pedirla. Recomendación: **ignorar** salvo el arreglo de R-01.
+### R-03 (baja) — `test_las_pruebas_anteriores_no_dejan_la_cache_poblada` depende del orden: es un defecto real de la prueba, anterior a T-08b
 
-### R-06 — Una sesión en curso desaparece de «Mis reservas» — informativa
-El filtro exige `inicio > ahora`: durante los 50 minutos de la sesión la reserva no sale en el panel (la probé: 11:30 con ahora 12:00). Es consistente con «futuras» y con T-05 R-07 del backlog (el panel del profesional también oculta horas iniciadas). Recomendación: **backlog para T-11**: decidir si «próxima sesión» incluye la que está en curso.
+- **Evidencia:** confirmado en `90636f6` (semilla 11: 1123 OK + 1 falla) y en `f9363e1` (semillas 11, 12, 13: siempre la misma prueba; sola o inmediatamente después de `test_zona_chile_se_crea_una_sola_vez` pasa). Afirma que el `lru_cache` global de `zona_chile` está vacío sin haberlo vaciado ella: depende de que la anterior (fixture `cache_de_zona_limpia`) corra justo antes.
+- **Impacto:** no oculta regresiones; impide adoptar orden aleatorio (`pytest-randomly`) o ejecutar en paralelo con `-p xdist` agrupando distinto. Bajo xdist `-n 2` pasó por azar de reparto. El implementador acierta al decir que no es suyo, pero T-08b invita a reducir la dependencia de orden y esta prueba queda como la única.
+- **Recomendación:** backlog (tarea de 3 líneas): que la prueba use la fixture `cache_de_zona_limpia`, ejecute una petición que use la zona y verifique que el teardown la deja vacía, o dentro de la prueba haga `cache_clear()` y compruebe que `zona_chile()` vuelve a poblarla. No es defecto de la entrega.
 
-### R-07 — Lo que T-09, T-10, T-11 y T-12 necesitan de `cancelar_reserva` — informativa
-- T-09: el `SELECT` de `cancelar_reserva` trae `inicio`, `duracion_min`, `estado`, `paciente_id` y el nombre del profesional, pero **no `profesional_id` ni el nombre del paciente** (hace falta un `JOIN usuarios` más). `reservar_hora` tampoco trae `profesional_id`. Las notificaciones deben insertarse antes del `commit` sin que `notificaciones.py` haga `commit` propio (si no, se rompe la atomicidad); la escritura de `outbox.log` es un archivo y no se deshace con `rollback`: hacerla después del `commit`. El mensaje debe bastarse solo (D-016: `hora_id` queda NULL si la hora se elimina; yo comprobé que la fila de notificación sobrevive a cancelar).
-- T-10: el reinicio de `recordatorio_enviado` a 0 al cancelar es correcto. Falta definir qué hace `send-reminders` con una reserva hecha con < 24 h (R-02): ¿la recuerda de inmediato o nunca? Y debe leer `estado` y marcar `recordatorio_enviado` dentro de `BEGIN IMMEDIATE`, para no mandar un recordatorio a una reserva que se cancela en el mismo instante (la cancelación permitida más tardía coincide con el momento del recordatorio, las 24 h exactas).
-- T-11/T-12: no ordenar por `reservada_en` (texto con offset); reutilizar `listar_reservas_futuras` o su criterio. El historial de US-10 no tiene dónde mostrar reservas canceladas: no hay `cancelada_en` ni fila de cancelación, solo la notificación de T-09.
-Recomendación: **notas en TASKS** (orquestador) para T-09 a T-12.
+### R-04 (baja) — El margen frente a 30 s es estrecho y a veces no se cumple; el criterio depende del equipo
 
-## Cierre de hallazgos de T-07
+- **Evidencia:** 24,2-27,8 s en condiciones normales, pero 30,0 s (`FLASK_DEBUG=1`), 30,8 s (orden aleatorio) y 32,2 s (Windows simulado sin tmpfs ni `fork`). Las mediciones del implementador (27-29 s) son el extremo favorable. El ruido entre corridas idénticas es de ±2 s.
+- **Impacto:** `python3 -m pytest` «en menos de 30 s» (criterio de TASKS) se cumple en lo normal pero no es robusto; un criterio absoluto en un equipo de 2 núcleos fallará por ruido, y las tareas siguientes que sumen 3-4 s lo romperán sin que nadie haya empeorado nada.
+- **Recomendación:** decisión humana: reformular el criterio como relativo (p. ej. «no más de 30 s en el equipo de referencia o ≤ 45 % del tiempo de antes») o aceptar «≈ 30 s». Lo que queda es sobre todo subprocesos reales (≈ 12 s según D-031) y concurrencia; no hay ganancia fácil adicional.
 
-| Hallazgo | Estado |
-|---|---|
-| R-01 (sin «Mis reservas») | Cerrado: lista, botón, texto sin botón, CSRF (punto 4). |
-| R-02 (reloj antes del bloqueo) | Cerrado: espera real comprobada en `reservar_hora` y `cancelar_reserva` (punto 3). |
-| R-04 (rollback en cada salida) | Cerrado: N18, N19 y N20 mueren. |
-| R-05 (prueba que dependía de `TZ=America/Santiago`) | Cerrado: N16 muere con el equipo en Santiago. Abre R-01 de esta revisión (Windows). |
-| R-08 (D-029) | Sigue pendiente del humano (R-02 de esta revisión). |
+### R-05 (baja) — El reparto con `fork` ahorra ≈ 0,7 s y trae un aviso/riesgo bajo `xdist` o en procesos con hilos
+
+- **Evidencia:** el recorrido tarda 2,35 s en 2 núcleos frente a 2,36 s con `cpu_count=1` en la suite completa (la prueba sola: 1,83 s el archivo entero con 2 procesos frente a 2,53 s con 1). Bajo `-n 2` aparecen 81 `DeprecationWarning` («multi-threaded, use of fork() may lead to deadlocks»); sin xdist no hay aviso. Con muchos núcleos abre hasta 8 procesos por proceso de prueba.
+- **Impacto:** ganancia casi nula frente a la complejidad; si algún día se corre con `-W error` o con xdist en un equipo cargado, es una posible fuente de fallos intermitentes (interbloqueos al hacer `fork` con hilos).
+- **Recomendación:** ignorar por ahora; si crece el costo, preferir `forkserver`/`spawn` o volver a un único proceso. La corrección está bien: mutaciones y reparto verificados.
+
+### R-06 (informativa) — Las carpetas temporales de las pruebas ya no se conservan al fallar
+
+- **Evidencia:** `tmp_path` propio con contador ignora la política de retención de pytest (`tmp_path_retention_policy`) y `pytest_unconfigure` borra todo en `/dev/shm`. Antes, pytest conservaba las 3 últimas sesiones para inspeccionar la base de una prueba fallida.
+- **Impacto:** depurar un fallo con la base en mano exige pasar `--basetemp=ruta` (única forma de evitar `/dev/shm`). No está documentado.
+- **Recomendación:** documentar en README/TUTORIAL junto con la variable de R-01 (ignorar si se resuelve R-01).
+
+### R-07 (informativa) — Supervivientes que no son regresión
+
+- **Evidencia:** `MARGEN_SQL_DIAS = 0` sobrevive en `old` y `new` (es un margen defensivo del SQL que Python vuelve a filtrar; no construí un caso que lo distinga, por lo que lo trato como equivalente); `init_db` sin `commit`, `PRAGMA user_version` en el esquema y `close_db` sin cerrar sobreviven igual en `90636f6`. `test_aislamiento` compara `user_version` de la plantilla con la real, pero ninguna prueba exige un valor.
+- **Impacto:** ninguno nuevo.
+- **Recomendación:** ignorar; si se quiere, backlog para una prueba de `close_db` (cierra la conexión de la petición) cuando se toque `app/db.py`.
+
+### R-08 (informativa) — Dependencias de la infraestructura con API privada y de hilo
+
+- **Evidencia:** la caché de URL usa `Rule._compile_builder`, `Rule._trace`, `Rule._converters` (privados de Werkzeug 3.1.8 instalado; `requirements.txt` solo exige Flask `>=3.1,<3.2`, que admite otras versiones de Werkzeug 3.x). La plantilla es una conexión `:memory:` creada en el hilo principal: usarla desde otro hilo da `ProgrammingError` (verifiqué el comportamiento con un script); hoy ninguna prueba llama `init_db()` desde un hilo (los hilos de `test_cancelar`, `test_login` usan archivos ya creados).
+- **Impacto:** un cambio interno de Werkzeug rompería la suite con `AttributeError` visible (no silencioso). Una prueba futura que cree su base dentro de un hilo fallará con un mensaje que no apunta a `conftest`.
+- **Recomendación:** backlog: anotar la restricción en D-031 o hacer que la caché de URL se desactive sola si falta el atributo; `plantilla.backup` puede usar `check_same_thread=False`.
+
+### R-09 (informativa) — Lo demás que revisé sin hallazgos
+
+- Base plantilla: `Connection.backup` copia páginas e `user_version`; `PRAGMA foreign_keys` es por conexión y `get_db` lo activa igual; el atajo solo actúa con la base vacía y si hay tablas ejecuta el `init_db` real (probado en `test_aislamiento` y por mutación).
+- Caché de plantillas Jinja: la clave incluye el hash del fuente; no puede servir una plantilla obsoleta dentro de una sesión (el fuente no cambia) ni entre sesiones (vive en memoria).
+- Caché de constructores de URL: la clave incluye `append_unknown`, el trazado de la regla, los convertidores con sus atributos y los valores por defecto; lo demás que usa `_compile_builder` sale de esos mismos datos. Mutación de la clave a constante muere.
+- `test_conftest_sin_tzset.py`: las 4 corridas distintas cubren los 4 argumentos distintos que usaban las 6; ninguna aserción pierde fuerza. Efecto colateral: si falla una corrida fallan en bloque las pruebas que la comparten (correlación, no pérdida).
+- `test_flask_run_real_avisa...`: la lectura de stderr con hilo termina cuando aparece el aviso, el proceso se detiene y se espera; no queda proceso vivo (`finally` + `kill`).
+- Doble importación de `conftest` (como `conftest` y como `tests.conftest` en `test_aislamiento`/`test_hash_rapido`): ya existía; `tests.conftest` se importa al recolectar, cuando `init_db` y `Rule._compile_builder` aún son los reales, así que `cf._init_db_real` y `cf._compilar_constructor_real` son lo que dicen ser.
+
+## Qué NO verifiqué
+
+- Windows ni macOS reales (solo la simulación descrita: sin `tzset`, sin `/dev/shm`, sin `fork`).
+- Python 3.11/3.12 (solo 3.13.16); Werkzeug distinto de 3.1.8.
+- Colisión o ataque con un directorio de otro usuario en `/dev/shm` (un solo usuario), ni `SIGKILL` (solo `SIGTERM`).
+- Las 13 mutaciones del implementador (las leí; las mías son otras).
+- La suite con `pytest` a secas del `PATH` (el ejecutable `/root/.local/bin/pytest` usa un intérprete sin `jinja2`; `python3 -m pytest` sí funciona; no comprobé si en `90636f6` ocurre lo mismo con `flask`: es un detalle del equipo).
+- Rendimiento con 8 o más núcleos.

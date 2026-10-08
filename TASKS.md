@@ -166,11 +166,18 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Término:** `python3 -m pytest` pasa con el mismo número de pruebas (o más) y en menos de 30 s; las mutaciones representativas de T-02e, T-05 y T-07 siguen muriendo (re-ejecutar 6 de ellas y mostrarlas).
 - **Origen:** REVIEW de T-07, R-06; backlog T-03c R-11, T-04b R-08, T-05 R-12.
 
+### T-08c — Endurecer la infraestructura de pruebas de T-08b (sin decisiones humanas)
+- **Estado:** PENDIENTE
+- **Depende de:** T-08b
+- **Qué:** (1) **R-01 (media):** `tests/conftest.py` usa `/dev/shm` sin comprobar su capacidad; con 12 MB libres la suite se rompe a las ~650 pruebas («database or disk is full») y Docker trae 64 MB por defecto (pico actual 23,5 MB). Usar `/dev/shm` solo si el espacio libre es holgado (≥ 4× el pico medido) y, si no, caer al directorio temporal normal; permitir forzarlo con una variable de entorno; pruebas de la decisión con `shutil.disk_usage` simulado. (2) **R-02 (baja):** crear el directorio con `tempfile.mkdtemp` (nombre impredecible, permisos 0700) y limpiarlo también ante SIGTERM/`atexit`. (3) **R-03 (baja):** `tests/test_zona_horaria.py::test_las_pruebas_anteriores_no_dejan_la_cache_poblada` depende del orden de ejecución (falla en orden aleatorio, ya fallaba antes de T-08b): hacerla independiente (que ella misma limpie y verifique el estado que prueba) sin debilitarla; comprobar que la mutación que deja la caché poblada sigue haciéndola fallar. (4) Actualizar el criterio de D-031: el umbral de 30 s es orientativo (mediciones de 24 a 31 s según el equipo); el criterio firme es «no más de la mitad del tiempo previo a T-08b (63 s)».
+- **Término:** la suite pasa en orden normal, inverso y aleatorio (semillas 1–4) y con `/dev/shm` simulado casi lleno; las mutaciones «quitar la comprobación de espacio» y «dejar la caché poblada» hacen fallar al menos una prueba; mismo nº de pruebas o más. Debe quedar HECHA **antes** de T-09.
+- **Origen:** REVIEW de T-08b (R-01, R-02, R-03, R-04).
+
 ## Fase 4 — Notificaciones
 
 ### T-09 — Notificaciones de confirmación y cancelación
 - **Estado:** PENDIENTE
-- **Depende de:** T-08, T-08b
+- **Depende de:** T-08, T-08b, T-08c
 - **Qué:** `notificaciones.py`; crear registros y escribir `outbox.log` al reservar y cancelar (US-11, US-13).
 - **Nota de revisión de T-02f (`hora_id` puede ser NULL, D-016):** T-09: el mensaje de la notificación debe bastarse solo (fecha, hora y contraparte), porque `hora_id` queda NULL si la hora se elimina (D-016); prueba con la hora eliminada.
 - **Notas de la revisión de T-07 (R-09):** el `SELECT` de la hora en `reservar_hora` no trae `profesional_id` (añadirlo si hace falta); las notificaciones se insertan **dentro** de la transacción, antes del `commit`, para que reserva y aviso sean atómicos; en T-11/T-12 no ordenar por `reservada_en` (texto con offset: no ordena bien en la noche de cambio de hora).
@@ -260,6 +267,8 @@ en qué tarea conviene absorberlo.
 | T-08 R-06 | Una sesión en curso desaparece de «Mis reservas» (solo se listan futuras) | T-11 |
 | T-08 R-07 | El `SELECT` de cancelar no trae `profesional_id` ni el nombre del paciente (T-09 los necesitará); `outbox.log` se escribe después del commit; T-10 debe leer el estado dentro de `BEGIN IMMEDIATE` | T-09/T-10 |
 | T-08 R-08 | En Windows las pruebas con `zona_sistema` se saltan (sin `tzset`): los bordes por zona solo corren en Linux/macOS | T-14 |
+| T-08b R-05 | La caché de URL de las pruebas usa API privada de Werkzeug y la plantilla no es segura entre hilos | si se actualiza Werkzeug |
+| T-08b | `pytest-xdist` funciona (1135 OK en 17,7 s) pero emite avisos de `fork`; no se adopta sin decisión (dependencia nueva) | si la suite vuelve a pasar de 60 s |
 | T-02c #9 | En `tests/test_esquema.py` la cobertura de NOT NULL y FK es triplemente redundante y la rama `usuarios` de `test_not_null_rechaza_null` es poco legible | cuando se toque ese archivo |
 
 ---
