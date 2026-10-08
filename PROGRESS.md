@@ -5,12 +5,13 @@ Los agentes agregan aquí una entrada al final de cada vuelta. Lo más reciente 
 ## Estado actual
 
 - Fase: 2 (Usuarios) en curso
-- Última tarea hecha: T-03
+- Última tarea hecha: T-03b
 - Próxima tarea: T-04 (T-02c sigue pendiente y requiere decisión humana antes de T-05)
 
 ## Bloqueos y dudas abiertas
 
-_(ninguno)_
+- Para T-13: el 413 por defecto de Werkzeug (`MAX_CONTENT_LENGTH`, D-014) responde en inglés ("Request Entity Too Large"). Falta una página de error en español; no se arregló en T-03b.
+- T-02c sigue esperando la decisión humana sobre D-007 (propuesta sin aprobar); no se tocó.
 
 ## Bitácora
 
@@ -49,3 +50,10 @@ _(ninguno)_
 - Cómo se verificó: `python3 -m pytest -q` pasa (62 pruebas: las 25 anteriores + 37 nuevas en `tests/test_registro.py` y `tests/test_seguridad.py`). Pruebas de mutación ejecutadas y revertidas: sin `before_request` CSRF fallan 5; con el rol leído del formulario falla 1; sin hash fallan 2; sin capturar `IntegrityError` fallan 4; con `|safe` en el nombre falla 1. Manual con curl en directorio y base temporales (`flask --app app run --debug`, puerto libre): GET `/registro` 200 con token; POST válido (con `rol=profesional` y correo `Ana@Example.cl`) 302 hacia `/`; mismo POST repetido 200 con mensaje de duplicado, sin 500; POST sin token 400 con el mensaje CSRF; en la base: 1 usuario, hash con prefijo `scrypt:`, rol `paciente`, `creado_en` `...-03:00`. Servidor cerrado, temporales borrados, sin `.db` en el repo.
 - Problemas / dudas: el mensaje de duplicado no puede ocultar del todo la existencia del correo sin verificación por correo (aceptado, D-010). `zoneinfo` puede requerir el paquete `tzdata` en Windows; no se agregó dependencia (funciona en Linux/macOS). Los backlog T-02d #2 y #3 siguen para T-04.
 - Siguiente paso sugerido: T-04 (login, logout, decoradores de rol y `create-professional`); usar `seguridad.py` para el formulario de login.
+
+### [2026-10-08 00:26] T-03b — Endurecer el registro — Implementador
+- Qué se hizo: (1) `requirements.txt` con `tzdata; sys_platform == "win32"` y `ZoneInfo` creado al usarlo (`zona_chile()` con `lru_cache`, error claro si faltan datos) — D-012. (2) `app/correo.py` con `normalizar_email()` (NFKC + recorte + `casefold` + NFKC; `ValueError` ante espacios internos y categorías Unicode Cc/Cf), usada por el registro; archivo nuevo justificado en D-013 (con el homoglifo cirílico como riesgo aceptado). (3) `MAX_CONTENT_LENGTH = 16 * 1024` en la fábrica — D-014. (4) Pruebas reforzadas: CSRF en PUT/PATCH/DELETE, escape del correo en `value="..."`, hash scrypt con mínimos leídos de la versión instalada de werkzeug, duplicado sin SELECT previo (traza SQL con `set_trace_callback`). (5) Nota en D-009 sobre POST a ruta inexistente (400). Pruebas nuevas: `tests/test_correo.py`, `tests/test_zona_horaria.py` y ampliaciones en `test_registro.py` y `test_seguridad.py`. Sin tocar SPEC, ARCHITECTURE, REVIEW, D-007 ni el esquema.
+- Cómo se verificó: `python3 -m pytest -q` da 109 pruebas OK sin `SECRET_KEY`/`FLASK_DEBUG`, con `SECRET_KEY=abc` y con `FLASK_DEBUG=1`. Mutaciones ejecutadas en copias temporales (borradas): CSRF solo para POST -> fallan 3 (PUT/PATCH/DELETE); `|safe` en el correo -> 1; `pbkdf2:sha256:1` -> 1; `scrypt:1024:8:1` -> 1 (`scrypt:2:8:1` ni siquiera funciona en OpenSSL: error de memoria); SELECT previo al INSERT -> 1; sin ninguna NFKC -> 4; sin chequeo Cc/Cf -> 11; `lower()` en vez de `casefold` -> 2; sin `MAX_CONTENT_LENGTH` -> 1; `ZoneInfo` al importar -> 2. Quitar solo la primera NFKC deja todo en verde porque la segunda ya cubre el caso (equivalente, no un hueco). Simulación sin zona horaria (`PYTHONTZPATH` a un directorio vacío y `tzdata` bloqueado): `import app`, `create_app()` y `flask init-db` funcionan; registrar un usuario da 500 con el mensaje que pide instalar `tzdata` y no crea el usuario. El paquete `tzdata` NO está instalado en este sistema (Linux usa `/usr/share/zoneinfo`). La línea de requirements se validó en un venv temporal borrado (`pip install --dry-run -r requirements.txt`, `pip download tzdata`, y el marcador evalúa True en win32 y False en linux). Recorrido con servidor temporal y curl: GET `/registro` con token; POST `Ａna@Example.cl` -> 302; POST `ana@example.cl` -> 200 con aviso de duplicado; POST de 20 kB -> 413; POST sin token -> 400; en la base, 1 usuario `ana@example.cl`, rol `paciente`, hash `scrypt:`. Se leyó la base con `sqlite3` de Python (el comando `sqlite3` no está instalado). Servidor cerrado por PID, temporales borrados, sin `.db` en el repo.
+- Problemas / dudas: el 413 de Werkzeug está en inglés (anotado para T-13). Un POST sobrecargado da 413 incluso sin token porque el CSRF lee `request.form` primero. El homoglifo cirílico queda sin resolver (D-013). T-02c sigue pendiente de decisión humana.
+- Siguiente paso sugerido: T-04 (login, logout, roles, `create-professional`) usando `normalizar_email()`.
+

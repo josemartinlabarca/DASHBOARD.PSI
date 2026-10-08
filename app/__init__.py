@@ -3,6 +3,7 @@ import os
 from flask import Flask, render_template
 
 NOMBRE_PROYECTO = "Agenda Psi"
+TAMANO_MAX_PETICION = 16 * 1024  # bytes; ver D-014
 SECRET_KEY_DESARROLLO = "dev-no-usar-en-produccion"
 MENSAJE_SIN_SECRET_KEY = (
     "Falta la variable de entorno SECRET_KEY. Defínela antes de servir la "
@@ -16,6 +17,7 @@ def create_app(test_config=None):
     app = Flask(__name__)
     app.config.from_mapping(
         SECRET_KEY=os.environ.get("SECRET_KEY"),
+        MAX_CONTENT_LENGTH=TAMANO_MAX_PETICION,
         DATABASE=os.environ.get(
             "DATABASE", os.path.join(app.root_path, os.pardir, "agenda.db")
         ),

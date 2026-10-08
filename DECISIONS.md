@@ -106,6 +106,7 @@ Autorizas a que se modifique `ARCHITECTURE.md` (que `CLAUDE.md` reserva al human
 - **Fecha:** 2026-10-08
 - **Decisión:** Token aleatorio (`secrets.token_hex(32)`) guardado en la sesión firmada de Flask; las plantillas lo obtienen con `{{ csrf_token() }}` (global de Jinja) y lo envían en el campo `csrf_token` (o en la cabecera `X-CSRFToken`). Un `before_request` verifica con `hmac.compare_digest` en todo método que no sea GET/HEAD/OPTIONS/TRACE y responde 400 con un mensaje claro si falta o no coincide. Se registra después del `before_request` de D-008, así que sin `SECRET_KEY` el error sigue siendo el de la clave (hay prueba).
 - **Porqué:** Son unas 40 líneas, sin dependencia nueva, y al ser global los formularios futuros (login, reservas, horas) no pueden olvidar la verificación. Se crea el archivo `app/seguridad.py` (no previsto en ARCHITECTURE.md) para que sea reutilizable y no quede dentro de `auth.py`.
+- **Consecuencia:** un POST a una ruta inexistente responde 400 y no 404/405, porque el CSRF (`before_request`) corre antes del enrutamiento; un GET a la misma ruta sí responde 404. Hay prueba.
 - **Alternativas descartadas:** Flask-WTF (dependencia nueva con versión fija; trae formularios y validadores que no usamos); verificar en cada vista (fácil de olvidar).
 
 ## D-010 — Validaciones y mensajes del registro
@@ -120,6 +121,27 @@ Autorizas a que se modifique `ARCHITECTURE.md` (que `CLAUDE.md` reserva al human
 - **Decisión:** Mantener `pytest.ini` (agregado en T-02d) con `pythonpath = .` y `testpaths = tests`.
 - **Porqué:** Sin `pythonpath = .`, el comando literal `pytest` del README falla en un venv limpio con `ModuleNotFoundError: app`, porque `app` no está instalado como paquete. `testpaths = tests` evita que pytest recorra otras carpetas (venv, etc.). Registra el ítem de backlog "T-02d #4".
 - **Alternativas descartadas:** `pip install -e .` con `pyproject.toml` (más archivos y empaquetado innecesario en v1); `conftest.py` en la raíz (más implícito).
+
+## D-012 — `tzdata` para Windows y zona horaria creada al usarla
+- **Fecha:** 2026-10-08
+- **Decisión:** `requirements.txt` agrega `tzdata; sys_platform == "win32"` (dependencia nueva, sin tope de versión: son solo datos de zonas y se actualizan con las reglas horarias). El `ZoneInfo("America/Santiago")` ya no se crea al importar `app/auth.py`, sino la primera vez que se usa (`zona_chile()`, con `functools.lru_cache`). Si faltan los datos, lanza `RuntimeError` con un mensaje que nombra `tzdata` y `requirements.txt`; el registro responde 500 sin crear el usuario.
+- **Porqué:** Windows no trae base de datos de zonas horarias; sin el paquete, `ZoneInfo(...)` fallaba al importar y rompía hasta `init-db` y `create_app()`. Linux y macOS usan la del sistema, por eso el marcador `sys_platform`. En este sistema (Linux) el paquete `tzdata` no está instalado y no hace falta: se usa `/usr/share/zoneinfo`.
+- **Alternativas descartadas:** instalar `tzdata` en todas las plataformas (innecesario donde el sistema ya la trae); usar un `timezone(timedelta(hours=-3))` fijo (incorrecto: Chile cambia de hora); atrapar el error y guardar sin zona (datos ambiguos).
+
+## D-013 — `normalizar_email()` en `app/correo.py`
+- **Fecha:** 2026-10-08
+- **Decisión:** Función pura `normalizar_email(valor)` en el archivo nuevo `app/correo.py`. Pasos: NFKC, recorte de espacios en los bordes, `casefold`, NFKC otra vez (`casefold` puede dejar texto sin normalizar). Lanza `ValueError` si queda algún espacio interno o un carácter de categoría Unicode Cc (control) o Cf (formato/invisible, p. ej. ancho cero, guion blando, BOM, inversión de texto). Cadena vacía devuelve `""` (el «falta el correo» lo valida el formulario). El registro la usa y, si lanza, muestra el mensaje de correo inválido conservando lo escrito. Se mantienen sin cambio el límite de 254 y la regex de D-010, aplicados al resultado.
+- **Archivo nuevo:** `app/correo.py` no figura en `ARCHITECTURE.md` (que no puedo editar): se crea para que el login (T-04) y `create-professional` usen exactamente la misma normalización sin importar `auth.py`.
+- **`ß` y `ss`:** colisionan a propósito (`casefold("ß") == "ss"`); `straße@x.cl` y `strasse@x.cl` son el mismo correo. Es el comportamiento estándar de comparación sin distinguir mayúsculas y evita dos cuentas «iguales». Costo: dos correos que existen por separado (muy improbable) no pueden coexistir. Lo fijan pruebas.
+- **Riesgo aceptado:** una «е» cirílica (U+0435) visualmente idéntica a la «e» latina NO se une con NFKC y da un correo distinto. No se usa una lista de homoglifos: es larga, incompleta y mantenerla excede el alcance. Sin verificación por correo en v1, quien lo explote solo consigue otra cuenta con ese correo distinto (que no recibirá nada); una prueba documenta que no se resuelve.
+- **Alternativas descartadas:** devolver una tupla (valor, error) en vez de lanzar (más torpe para quien la llame); `lower()` (no cubre `ß`); permitir los caracteres invisibles y solo recortarlos (permiten correos indistinguibles a la vista); la regex de D-010 como única defensa (`\s` no cubre ancho cero).
+
+## D-014 — `MAX_CONTENT_LENGTH` de 16 kB
+- **Fecha:** 2026-10-08
+- **Decisión:** La fábrica fija `MAX_CONTENT_LENGTH = 16 * 1024` bytes (constante `TAMANO_MAX_PETICION`); `test_config` puede sobrescribirlo. Una petición mayor responde 413 y no llega a la vista.
+- **Porqué:** Los formularios son cortos (nombre ≤ 100, correo ≤ 254, contraseña ≤ 128 caracteres); sin límite, un POST enorme se lee entero en memoria. En Flask el 413 se produce al leer el cuerpo, es decir al acceder a `request.form`; eso ocurre ya en el `before_request` del CSRF (D-009), de modo que un cuerpo grande da 413 también sin token (antes que el 400). Si una función futura necesita subir archivos, tendrá que subir el límite en su ruta o con una decisión nueva.
+- **Pendiente:** el cuerpo del 413 por defecto de Werkzeug es en inglés; se anotó para T-13 (mensajes en español), no se cambia ahora.
+- **Alternativas descartadas:** límite solo en el proxy inverso (la app no debe depender de él); 64 kB o más (sin necesidad).
 
 ## Plantilla para nuevas decisiones
 

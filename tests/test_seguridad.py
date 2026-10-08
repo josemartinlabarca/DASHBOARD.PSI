@@ -40,6 +40,23 @@ def test_post_a_cualquier_ruta_exige_token(app):
     )
 
 
+@pytest.mark.parametrize("metodo", ["put", "patch", "delete"])
+def test_put_patch_delete_exigen_token(app, metodo):
+    """CSRF vale para todo método que modifica estado, no solo POST."""
+
+    @app.route("/recurso-futuro", methods=["PUT", "PATCH", "DELETE"])
+    def recurso_futuro():
+        return "ok"
+
+    client = app.test_client()
+    token = extraer_token(client.get("/registro").text)
+    enviar = getattr(client, metodo)
+    assert enviar("/recurso-futuro").status_code == 400
+    assert enviar("/recurso-futuro", headers={"X-CSRFToken": "0" * 64}).status_code == 400
+    assert enviar("/recurso-futuro", headers={"X-CSRFToken": token}).status_code == 200
+    assert enviar("/recurso-futuro", data={"csrf_token": token}).status_code == 200
+
+
 def test_get_no_exige_token(client):
     assert client.get("/").status_code == 200
 
@@ -66,3 +83,9 @@ def test_exigencia_de_secret_key_corre_antes_que_csrf(tmp_path, monkeypatch, cap
     r = app.test_client().post("/registro", data={})
     assert r.status_code == 500
     assert "SECRET_KEY" in caplog.text
+
+
+def test_post_a_ruta_inexistente_da_400_no_404(client):
+    """El CSRF corre antes del enrutamiento (D-009)."""
+    assert client.post("/no-existe").status_code == 400
+    assert client.get("/no-existe").status_code == 404

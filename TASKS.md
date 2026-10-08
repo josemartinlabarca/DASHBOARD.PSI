@@ -51,7 +51,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Término:** Pruebas: registro válido, correo duplicado rechazado, contraseña guardada con hash.
 
 ### T-03b — Endurecer el registro (hallazgos de la revisión de T-03)
-- **Estado:** PENDIENTE
+- **Estado:** HECHA
 - **Depende de:** T-03
 - **Qué:**
   1. **Windows sin `tzdata` (media):** `ZoneInfo("America/Santiago")` falla al importar `auth.py` en Windows sin el paquete, rompiendo incluso `init-db`. Añadir `tzdata; sys_platform == "win32"` a `requirements.txt` (D-012) y no crear el `ZoneInfo` al importar el módulo, sino en el momento de usarlo.

@@ -3,8 +3,9 @@ import sqlite3
 from datetime import datetime
 
 import pytest
-from werkzeug.security import check_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 
+from app import auth
 from app.db import init_db
 from tests.test_seguridad import extraer_token
 
@@ -102,13 +103,29 @@ def test_correo_duplicado_rechazado_sin_500(app, client, variante):
     assert len(usuarios(app)) == 1
 
 
-def test_correo_duplicado_lo_detecta_la_restriccion_unique(app, client):
-    """El código no consulta antes: solo la restricción UNIQUE (sin carrera) da el aviso."""
+def test_correo_duplicado_lo_detecta_la_restriccion_unique(app, client, monkeypatch):
+    """Sin consulta previa: el INSERT se ejecuta y solo UNIQUE da el aviso.
+
+    Se registran las sentencias SQL del segundo intento: no debe haber ningún
+    SELECT (una consulta previa tendría carrera) y sí el INSERT rechazado.
+    """
     registrar(client)
+    sentencias = []
+    get_db_real = auth.get_db
+
+    def get_db_con_traza():
+        con = get_db_real()
+        con.set_trace_callback(sentencias.append)
+        return con
+
+    monkeypatch.setattr(auth, "get_db", get_db_con_traza)
     r = registrar(client, nombre="Intrusa", password="otra-clave-123")
     assert r.status_code == 200
     assert "No pudimos registrarte con ese correo" in r.text
     assert "Traceback" not in r.text
+    assert sentencias, "la traza no registró ninguna sentencia"
+    assert not [s for s in sentencias if s.lstrip().upper().startswith("SELECT")]
+    assert [s for s in sentencias if s.lstrip().upper().startswith("INSERT INTO USUARIOS")]
     (u,) = usuarios(app)
     assert u["nombre"] == "Ana Pérez"
 
@@ -195,3 +212,74 @@ def test_comillas_y_sql_en_campos_no_rompen_nada(app, client):
 
 def test_inicio_enlaza_al_registro(client):
     assert 'href="/registro"' in client.get("/").text
+
+
+def test_correo_con_comillas_y_html_se_escapa_en_el_atributo_value(client):
+    peligroso = "a\"b'c\"><script>alert(1)</script>"
+    r = registrar(client, email=peligroso)  # formato inválido: se vuelve a mostrar
+    assert r.status_code == 200
+    assert "<script>alert(1)</script>" not in r.text
+    assert '"><script>' not in r.text
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in r.text
+    assert 'value="a&#34;b&#39;c&#34;&gt;' in r.text
+
+
+def test_hash_usa_scrypt_con_al_menos_los_parametros_por_defecto(app, client):
+    """Los mínimos se leen de lo que la versión instalada de werkzeug genera."""
+    registrar(client)
+    (u,) = usuarios(app)
+
+    def parametros(hash_):
+        metodo, n, r, p = hash_.split("$")[0].split(":")
+        return metodo, int(n), int(r), int(p)
+
+    referencia = parametros(generate_password_hash("x"))
+    assert referencia[0] == "scrypt", "werkzeug ya no usa scrypt por defecto: revisar D-010"
+    metodo, n, r, p = parametros(u["password_hash"])
+    assert metodo == "scrypt"
+    assert n >= referencia[1] and r >= referencia[2] and p >= referencia[3]
+
+
+def test_correo_en_ancho_completo_se_guarda_normalizado(app, client):
+    registrar(client, email="\uff21na@Example.cl")
+    (u,) = usuarios(app)
+    assert u["email"] == "ana@example.cl"
+
+
+def test_variante_unicode_del_correo_cuenta_como_duplicado(app, client):
+    assert registrar(client).status_code == 302
+    r = registrar(client, email="\uff41na@EXAMPLE.cl", nombre="Otra")
+    assert r.status_code == 200
+    assert "No pudimos registrarte con ese correo" in r.text
+    assert len(usuarios(app)) == 1
+
+
+def test_sz_y_ss_son_el_mismo_correo(app, client):
+    assert registrar(client, email="stra\u00dfe@example.cl").status_code == 302
+    r = registrar(client, email="strasse@example.cl")
+    assert "No pudimos registrarte con ese correo" in r.text
+    assert [u["email"] for u in usuarios(app)] == ["strasse@example.cl"]
+
+
+@pytest.mark.parametrize("email", ["ana\u200b@example.cl", "ana\x00@example.cl", "an a@example.cl"])
+def test_correo_con_invisibles_control_o_espacios_se_rechaza(app, client, email):
+    r = registrar(client, email=email)
+    assert r.status_code == 200
+    assert "correo válido" in r.text
+    assert usuarios(app) == []
+
+
+def test_peticion_mayor_a_16_kb_da_413_y_no_crea_usuario(app, client):
+    assert app.config["MAX_CONTENT_LENGTH"] == 16 * 1024
+    # Con token válido y sin él: el 413 ocurre al leer el cuerpo (request.form),
+    # que ya hace el before_request del CSRF, antes que la vista.
+    token = extraer_token(client.get("/registro").text)
+    grande = dict(VALIDO, nombre="x" * (16 * 1024 + 1), csrf_token=token)
+    assert client.post("/registro", data=grande).status_code == 413
+    assert client.post("/registro", data={"nombre": "x" * 20000}).status_code == 413
+    assert usuarios(app) == []
+
+
+def test_peticion_justo_bajo_el_limite_sigue_funcionando(app, client):
+    assert registrar(client).status_code == 302
+    assert len(usuarios(app)) == 1
