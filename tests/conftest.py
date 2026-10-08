@@ -73,6 +73,12 @@ def client(app):
 ZONAS_DE_SISTEMA = ["UTC", "Asia/Tokyo", "America/Santiago"]
 
 
+def hay_tzset():
+    # `time.tzset` no existe en Windows (R-01 de la revisión de T-08). Se consulta
+    # al usarlo, no al importar, para que una prueba pueda simular su ausencia.
+    return hasattr(time, "tzset")
+
+
 def fijar_zona_sistema(nombre):
     os.environ["TZ"] = nombre
     time.tzset()
@@ -80,6 +86,11 @@ def fijar_zona_sistema(nombre):
 
 @pytest.fixture(autouse=True)
 def zona_del_sistema_fija():
+    if not hay_tzset():
+        # Windows: no se puede cambiar la zona del proceso; la fixture no hace nada
+        # y las demás pruebas corren con la zona del equipo.
+        yield
+        return
     anterior = os.environ.get("TZ")
     fijar_zona_sistema("UTC")
     yield
@@ -92,6 +103,11 @@ def zona_del_sistema_fija():
 
 @pytest.fixture(params=ZONAS_DE_SISTEMA)
 def zona_sistema(request):
-    """Repite la prueba con el sistema en UTC, Tokio y Chile (la de Chile es la que escondía R-05)."""
+    """Repite la prueba con el sistema en UTC, Tokio y Chile (la de Chile es la que escondía R-05).
+
+    Sin `time.tzset` (Windows) la prueba se salta, no falla.
+    """
+    if not hay_tzset():
+        pytest.skip("este sistema no tiene time.tzset (Windows): no se puede cambiar la zona del proceso")
     fijar_zona_sistema(request.param)
     return request.param
