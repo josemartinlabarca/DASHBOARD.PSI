@@ -222,9 +222,9 @@ Autorizas a que se modifique `ARCHITECTURE.md` (que `CLAUDE.md` reserva al human
 - **Implementación:** T-02g. Autorizada a modificar `app/schema.sql` y la línea `inicio` del "Modelo de datos" de `ARCHITECTURE.md` **solo** para esto. Consecuencia ya conocida (D-006): borrar `agenda.db` y volver a ejecutar `init-db`.
 - **Implementada:** T-02g, 2026-10-08 01:21
 
-## D-020 — Alcance de la política de caracteres del correo (PROPUESTA, pendiente del humano)
+## D-020 — Alcance de la política de caracteres del correo — **APROBADA por el humano (2026-10-08 19:18): opción B (letras y números fuera de ASCII + lista corta de rellenos)**
 - **Fecha:** 2026-10-08
-- **Estado:** PROPUESTA. No bloquea T-04. Origen: revisión de T-03c, R-01.
+- **Estado:** APROBADA el 2026-10-08 19:18 (hora de Chile): el humano eligió **opción B (letras y números fuera de ASCII + lista corta de rellenos)**. Implementación: T-08e (cambia `app/correo.py` y sus pruebas).
 - **Problema:** D-015 (opción 2) rechaza las categorías `C*` y las marcas `Mn/Mc/Me`, pero aún se aceptan caracteres visualmente vacíos o engañosos que no pertenecen a esas categorías: relleno hangul (U+3164, U+115F), braille en blanco (U+2800), U+FFFD, U+FFFC, símbolos U+2400–U+2422, guiones y puntos medios no ASCII (U+2010, U+00B7). Permiten crear cuentas que se ven iguales a otras. No es un vector nuevo (D-013 ya aceptó los homoglifos cirílicos).
 - **Opciones:**
   - **A.** Aceptar y documentar que es una clase de casos, no tres.
@@ -240,18 +240,18 @@ Autorizas a que se modifique `ARCHITECTURE.md` (que `CLAUDE.md` reserva al human
 - **Porqué:** mensajes y tiempos iguales impiden enumerar cuentas; leer el rol de la base evita roles obsoletos en una cookie firmada de larga vida; sin `next` se elimina la clase de ataque; el aviso solo al servir evita ruido en los comandos de mantenimiento.
 - **Alternativas descartadas:** 401 para el login fallido (rompe el flujo de formulario de D-010); guardar el rol en la sesión; un `next` validado contra una lista (más código y superficie, la tarea no lo pide); `--password` u `--password-file` en `create-professional`; un `errorhandler(403)` global (es trabajo de T-13); detectar el comando por `sys.argv`.
 
-## D-022 — Revocar la sesión al cerrar sesión (PROPUESTA, pendiente del humano)
+## D-022 — Revocar la sesión al cerrar sesión — **APROBADA por el humano (2026-10-08 19:18): opción B (`sesion_version` en la base)**
 - **Fecha:** 2026-10-08
-- **Estado:** PROPUESTA. No bloquea T-04b ni T-05. Origen: revisión de T-04, R-02.
+- **Estado:** APROBADA el 2026-10-08 19:18 (hora de Chile): el humano eligió **opción B (`sesion_version` en la base)**. Implementación: T-08d (autorizada a modificar `app/schema.sql` y la tabla `usuarios` de `ARCHITECTURE.md` solo para esto).
 - **Problema:** la sesión de Flask va en una cookie firmada. Tras `POST /logout` el navegador la borra, pero **quien tenga una copia de la cookie anterior** (robada o guardada) sigue autenticado hasta 31 días, porque el servidor no guarda nada que se pueda invalidar. Reproducido con el cliente de pruebas.
 - **Opciones:**
   - **A.** Aceptar y documentar (riesgo bajo en una app de práctica, sin HTTPS aún) y acortar `PERMANENT_SESSION_LIFETIME` (p. ej. 8 horas). Sin cambios de esquema.
   - **B (recomendada).** Columna `sesion_version INTEGER NOT NULL DEFAULT 0` en `usuarios`; la cookie guarda `(id, version)`; el logout y el cambio de contraseña la incrementan. Cambia `schema.sql` y `ARCHITECTURE.md` (autorización del humano).
   - **C.** Tabla de sesiones en el servidor (más compleja; no recomendada aquí).
 
-## D-023 — Un solo profesional (PROPUESTA, pendiente del humano)
+## D-023 — Un solo profesional — **APROBADA por el humano (2026-10-08 19:18): opción A (un solo profesional + índice único parcial)**
 - **Fecha:** 2026-10-08
-- **Estado:** PROPUESTA. No bloquea T-04b; conviene decidirla antes de T-05. Origen: revisión de T-04, R-04.
+- **Estado:** APROBADA el 2026-10-08 19:18 (hora de Chile): el humano eligió **opción A (un solo profesional + índice único parcial)**. Implementación: T-08d (autorizada a modificar `app/schema.sql` y `ARCHITECTURE.md` solo para esto).
 - **Problema:** `create-professional` permite crear varios profesionales (el revisor creó 4). D-004 y D-007 suponen uno solo para cubrir la regla §4.5 (no solapar sesiones del mismo profesional).
 - **Opciones:**
   - **A (recomendada).** El comando se niega si ya existe un profesional (mensaje en español) y se añade un índice único parcial `CREATE UNIQUE INDEX ... ON usuarios (rol) WHERE rol='profesional'` (cambia `schema.sql`, `ARCHITECTURE.md` y la comparación exacta de `tests/test_esquema.py`).
@@ -293,9 +293,9 @@ Autorizas a que se modifique `ARCHITECTURE.md` (que `CLAUDE.md` reserva al human
 - **Límites conocidos:** si otra escritura mantiene el bloqueo más de 5 s (tiempo de espera por defecto de SQLite) `BEGIN IMMEDIATE` lanza `OperationalError` y la petición da 500 (igual que al crear horas, D-025). No se crean notificaciones (T-09), no se cancela (T-08) ni se lista «mis reservas» (T-08/T-12). D-020, D-022 y D-023 siguen como propuestas sin implementar.
 - **Alternativas descartadas:** solo el UPDATE sin transacción previa (no resuelve la regla 5 entre dos clics del mismo paciente); `UNIQUE (paciente_id, inicio)` (cambia el esquema y no cubre solapes parciales); `reservada_en` en UTC o sin zona (distinto de `creado_en`); 404 para hora ajena/eliminada (distingue casos y es peor experiencia); `INSERT OR REPLACE` (prohibido: borraría la fila).
 
-## D-029 — Reservar una hora que empieza en menos de 24 h (PROPUESTA, pendiente del humano)
+## D-029 — Reservar una hora que empieza en menos de 24 h — **APROBADA por el humano (2026-10-08 19:18): opción B (reservar solo con más de 24 h de anticipación; regla 5 = solape de intervalos)**
 - **Fecha:** 2026-10-08
-- **Estado:** PROPUESTA. No bloquea T-08. Origen: revisión de T-07, R-08.
+- **Estado:** APROBADA el 2026-10-08 19:18 (hora de Chile): el humano eligió **opción B (reservar solo con más de 24 h de anticipación; regla 5 = solape de intervalos)**. Implementación: T-08e (autorizada a añadir la regla a `SPEC.md` §4 solo para esto).
 - **Problema:** SPEC no impide reservar una hora que empieza dentro de las próximas 24 h, y la regla de cancelación (US-9) exige 24 h de anticipación: esa reserva **no podría cancelarse nunca**. Además conviene confirmar que la regla 5 («un paciente no puede tener dos reservas a la misma hora») se entiende como **solape de intervalos** (lo implementado), no solo igualdad de inicio.
 - **Evidencia nueva (revisión de T-08, R-02):** hoy el paciente recibe «comunícate con el profesional», pero el profesional **tampoco puede** eliminarla (regla 4) y no tiene pantalla para cancelar; la confirmación al reservar no avisa nada. Conviene decidirla antes de T-09.
 - **Opciones:**

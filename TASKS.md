@@ -173,11 +173,25 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Término:** la suite pasa en orden normal, inverso y aleatorio (semillas 1–4) y con `/dev/shm` simulado casi lleno; las mutaciones «quitar la comprobación de espacio» y «dejar la caché poblada» hacen fallar al menos una prueba; mismo nº de pruebas o más. Debe quedar HECHA **antes** de T-09.
 - **Origen:** REVIEW de T-08b (R-01, R-02, R-03, R-04).
 
+### T-08d — Aplicar D-022 y D-023 al esquema y a la aplicación (decisiones aprobadas)
+- **Estado:** PENDIENTE — decisiones humanas **APROBADAS** (D-022 opción B, D-023 opción A, 2026-10-08 19:18). Autorizada a modificar `app/schema.sql` y la tabla `usuarios` de `ARCHITECTURE.md` **solo** para esto.
+- **Depende de:** T-08c
+- **Qué:** (1) **D-022:** columna `sesion_version INTEGER NOT NULL DEFAULT 0` en `usuarios`; la sesión guarda `(id, versión)`; `usuario_actual()` rechaza si la versión no coincide con la de la base; el logout incrementa la versión (invalida cualquier copia anterior de la cookie); el login guarda la versión vigente. Pruebas: una cookie copiada antes del logout deja de valer; cookies de otro usuario/versión rechazadas; tipos raros en la sesión. (2) **D-023:** `create-professional` se niega con mensaje en español si ya existe un profesional, e índice único parcial `CREATE UNIQUE INDEX IF NOT EXISTS ... ON usuarios (rol) WHERE rol = 'profesional'` en el esquema; pruebas con SQL directo (segundo profesional rechazado por la base). (3) Actualizar `tests/test_esquema.py` (SQL exacto de T-02e, lista de objetos permitidos: ahora hay un índice declarado) y `tests/test_db.py`; mutaciones: quitar el índice, no incrementar la versión en logout, no comparar la versión. (4) Nota D-006: `init-db` no altera tablas existentes → borrar `agenda.db` tras el cambio; documentarlo en README y en una advertencia si es posible.
+- **Término:** las 3 mutaciones anteriores hacen fallar al menos una prueba; `python3 -m pytest` pasa. Debe quedar HECHA **antes** de T-09.
+- **Origen:** D-022 y D-023 (revisiones de T-04 y de T-07).
+
+### T-08e — Aplicar D-020 y D-029 (decisiones aprobadas)
+- **Estado:** PENDIENTE — decisiones humanas **APROBADAS** (D-020 opción B, D-029 opción B, 2026-10-08 19:18). Autorizada a añadir la regla de anticipación al reservar en `SPEC.md` §4 **solo** para esto.
+- **Depende de:** T-08c
+- **Qué:** (1) **D-029:** reservar solo con más de 24 h de anticipación (mismo criterio que cancelar: instantes absolutos, borde exacto documentado y probado en las dos noches de cambio de horario); mensaje en español claro; `/paciente/horas` no ofrece el botón «Reservar» a las horas con menos de 24 h (o las muestra marcadas «ya no se puede reservar»); regla 5 = solape de intervalos (ya implementada: dejarla documentada en SPEC). Añadir la regla a SPEC §4. Ajustar las pruebas de T-07/T-08 que reservaban a <24 h. (2) **D-020:** `normalizar_email`: fuera de ASCII solo letras y números (categorías `L*` y `N*`) más una lista corta de rellenos explícitamente rechazados (U+3164, U+115F, U+1160, U+2800, U+FFFD, U+FFFC, símbolos U+2400–U+2422, guiones y puntos medios no ASCII U+2010–U+2015, U+00B7); sigue rechazando `C*` y `Mn/Mc/Me` y espacios; `señor@`, tildes, `ü` siguen válidos. Pruebas exhaustivas sobre todos los puntos de código con la lista; D-013/D-015 con nota visible de actualización. (3) Mutaciones: quitar `L*`/`N*`, quitar un relleno, borde de 24 h con `<=`, botón visible a <24 h.
+- **Término:** las mutaciones anteriores hacen fallar al menos una prueba; `python3 -m pytest` pasa. Debe quedar HECHA **antes** de T-09.
+- **Origen:** D-020 (revisión de T-03c) y D-029 (revisión de T-07/T-08).
+
 ## Fase 4 — Notificaciones
 
 ### T-09 — Notificaciones de confirmación y cancelación
 - **Estado:** PENDIENTE
-- **Depende de:** T-08, T-08b, T-08c
+- **Depende de:** T-08, T-08b, T-08c, T-08d, T-08e
 - **Qué:** `notificaciones.py`; crear registros y escribir `outbox.log` al reservar y cancelar (US-11, US-13).
 - **Nota de revisión de T-02f (`hora_id` puede ser NULL, D-016):** T-09: el mensaje de la notificación debe bastarse solo (fecha, hora y contraparte), porque `hora_id` queda NULL si la hora se elimina (D-016); prueba con la hora eliminada.
 - **Notas de la revisión de T-07 (R-09):** el `SELECT` de la hora en `reservar_hora` no trae `profesional_id` (añadirlo si hace falta); las notificaciones se insertan **dentro** de la transacción, antes del `commit`, para que reserva y aviso sean atómicos; en T-11/T-12 no ordenar por `reservada_en` (texto con offset: no ordena bien en la noche de cambio de hora).
