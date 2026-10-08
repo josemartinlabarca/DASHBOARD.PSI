@@ -1,7 +1,18 @@
+import importlib
+import pkgutil
+import sys
+
 import pytest
 from werkzeug import security
 
+import app as paquete_app
 from app import auth, create_app
+
+# Se importan todos los módulos de `app` para que la fixture los encuentre: así
+# un módulo nuevo que haga `from werkzeug.security import generate_password_hash`
+# queda cubierto sin tocar este archivo (R-07).
+for _modulo in pkgutil.iter_modules(paquete_app.__path__):
+    importlib.import_module(f"app.{_modulo.name}")
 
 # Hash rápido para toda la suite (D-019). Sigue siendo scrypt con sal propia,
 # pero con costo mínimo; las pruebas que verifican el hash real llevan
@@ -18,12 +29,27 @@ def generate_password_hash_rapido(password, method="scrypt", salt_length=16):
     return _generate_real(password, method=method, salt_length=salt_length)
 
 
+def _modulos_de_la_app_con_hash():
+    return [
+        modulo
+        for nombre, modulo in list(sys.modules.items())
+        if (nombre == "app" or nombre.startswith("app."))
+        and modulo is not None
+        and hasattr(modulo, "generate_password_hash")
+    ]
+
+
 @pytest.fixture(autouse=True)
 def hash_rapido(request, monkeypatch):
-    if request.node.get_closest_marker("hash_real"):
-        return
-    monkeypatch.setattr(security, "generate_password_hash", generate_password_hash_rapido)
-    monkeypatch.setattr(auth, "generate_password_hash", generate_password_hash_rapido)
+    # El hash falso del login se cachea: se limpia para que no cruce pruebas
+    # con distinto costo (rápido / real).
+    auth.hash_falso.cache_clear()
+    if not request.node.get_closest_marker("hash_real"):
+        monkeypatch.setattr(security, "generate_password_hash", generate_password_hash_rapido)
+        for modulo in _modulos_de_la_app_con_hash():
+            monkeypatch.setattr(modulo, "generate_password_hash", generate_password_hash_rapido)
+    yield
+    auth.hash_falso.cache_clear()
 
 
 @pytest.fixture

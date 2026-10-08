@@ -1,5 +1,6 @@
 import os
 
+import click
 from flask import Flask, render_template
 
 NOMBRE_PROYECTO = "Agenda Psi"
@@ -18,6 +19,11 @@ def create_app(test_config=None):
     app.config.from_mapping(
         SECRET_KEY=os.environ.get("SECRET_KEY"),
         MAX_CONTENT_LENGTH=TAMANO_MAX_PETICION,
+        # Cookie de sesión (T-04). HttpOnly ya es el valor por defecto de Flask;
+        # se fija para que quede explícito y probado. `Secure` exige HTTPS y se
+        # activará con el despliegue (T-14): SESSION_COOKIE_SECURE=True.
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Lax",
         DATABASE=os.environ.get(
             "DATABASE", os.path.join(app.root_path, os.pardir, "agenda.db")
         ),
@@ -31,11 +37,14 @@ def create_app(test_config=None):
 
     db.init_app(app)
 
-    from . import auth, seguridad
+    from . import auth, paciente, profesional, seguridad
 
     # Después de _preparar_secret_key: su before_request (D-008) corre primero.
     seguridad.init_app(app)
     app.register_blueprint(auth.bp)
+    app.register_blueprint(paciente.bp)
+    app.register_blueprint(profesional.bp)
+    app.cli.add_command(auth.create_professional_command)
 
     @app.route("/")
     def inicio():
@@ -60,7 +69,22 @@ def _preparar_secret_key(app):
         app.config["SECRET_KEY"] = SECRET_KEY_DESARROLLO
         return
     app.config["SECRET_KEY"] = None  # ausente, vacía o solo espacios
+    if _se_va_a_servir():
+        app.logger.warning(MENSAJE_SIN_SECRET_KEY)
 
     @app.before_request
     def exigir_secret_key():
         raise RuntimeError(MENSAJE_SIN_SECRET_KEY)
+
+
+def _se_va_a_servir():
+    """True si esta app se está cargando para atender peticiones.
+
+    Es así con `flask run` (comando `run`) y con un servidor WSGI como gunicorn
+    (no hay contexto de click). Los demás comandos CLI (`init-db`,
+    `create-professional`, ...) cargan la app sin servir, así que no avisan.
+    Solo decide si se muestra un aviso: la exigencia real de la clave sigue
+    siendo el `before_request` (D-008), que no depende de esto.
+    """
+    contexto = click.get_current_context(silent=True)
+    return contexto is None or contexto.command.name == "run"

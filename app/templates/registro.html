@@ -14,7 +14,7 @@
 
     <p>
       <label for="email">Correo</label><br>
-      <input type="email" id="email" name="email" value="{{ email }}"
+      <input type="text" inputmode="email" id="email" name="email" value="{{ email }}"
              maxlength="254" required autocomplete="email">
       {% if errores.email %}<br><span class="error" role="alert">{{ errores.email }}</span>{% endif %}
     </p>

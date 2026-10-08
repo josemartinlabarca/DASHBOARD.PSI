@@ -1,6 +1,12 @@
+import logging
+import os
+import subprocess
+import sys
+
+import click
 import pytest
 
-from app import create_app
+from app import MENSAJE_SIN_SECRET_KEY, create_app
 
 
 @pytest.fixture(autouse=True)
@@ -87,3 +93,95 @@ def test_flask_debug_funciona_sin_secret_key(tmp_path, monkeypatch):
     app = create_app(_config(tmp_path))
     assert app.debug
     assert app.config["SECRET_KEY"]
+
+
+# --- T-02d #3: la exigencia de SECRET_KEY cubre todo tipo de ruta ---------------
+
+
+@pytest.mark.parametrize(
+    "ruta",
+    ["/", "/registro", "/login", "/paciente", "/profesional", "/static/x.css", "/no-existe"],
+)
+@pytest.mark.parametrize("metodo", ["get", "post"])
+def test_sin_secret_key_toda_ruta_da_500(tmp_path, ruta, metodo):
+    """Blueprints, estáticos y rutas inexistentes, por GET y por POST."""
+    app = create_app(_config(tmp_path))
+    assert getattr(app.test_client(), metodo)(ruta).status_code == 500
+
+
+def test_con_secret_key_las_mismas_rutas_responden_normal(tmp_path):
+    app = create_app(_config(tmp_path, SECRET_KEY="una-clave"))
+    cliente = app.test_client()
+    assert cliente.get("/no-existe").status_code == 404
+    assert cliente.get("/static/x.css").status_code == 404
+    assert cliente.get("/login").status_code == 200
+    assert cliente.get("/paciente").status_code == 302
+
+
+# --- T-02d #2: aviso al arrancar sin SECRET_KEY ----------------------------------
+
+
+def _avisos_de_clave(caplog):
+    return [r for r in caplog.records if MENSAJE_SIN_SECRET_KEY in r.getMessage()]
+
+
+def test_aviso_al_cargar_la_app_sin_secret_key_como_servidor(tmp_path, caplog):
+    """Sin contexto de click (gunicorn, etc.): se carga para servir, así que avisa."""
+    with caplog.at_level(logging.WARNING):
+        create_app(_config(tmp_path))
+    (registro,) = _avisos_de_clave(caplog)
+    assert registro.levelno == logging.WARNING
+
+
+def test_aviso_con_flask_run_y_una_sola_vez(tmp_path, caplog):
+    with click.Context(click.Command("run")), caplog.at_level(logging.WARNING):
+        create_app(_config(tmp_path))
+    assert len(_avisos_de_clave(caplog)) == 1
+
+
+@pytest.mark.parametrize("comando", ["init-db", "create-professional", "flask", "routes"])
+def test_sin_aviso_en_los_demas_comandos(tmp_path, caplog, comando):
+    with click.Context(click.Command(comando)), caplog.at_level(logging.WARNING):
+        create_app(_config(tmp_path))
+    assert _avisos_de_clave(caplog) == []
+
+
+@pytest.mark.parametrize("extra", [{"SECRET_KEY": "clave"}, {"TESTING": True}, {"DEBUG": True}])
+def test_sin_aviso_si_hay_clave_testing_o_debug(tmp_path, caplog, extra):
+    with click.Context(click.Command("run")), caplog.at_level(logging.WARNING):
+        create_app(_config(tmp_path, **extra))
+    assert _avisos_de_clave(caplog) == []
+
+
+def _entorno_sin_clave(tmp_path):
+    entorno = {k: v for k, v in os.environ.items() if k not in ("SECRET_KEY", "FLASK_DEBUG")}
+    entorno["DATABASE"] = str(tmp_path / "cli.db")
+    return entorno
+
+
+def test_init_db_real_no_hace_ruido_sin_secret_key(tmp_path):
+    r = subprocess.run(
+        [sys.executable, "-m", "flask", "--app", "app", "init-db"],
+        env=_entorno_sin_clave(tmp_path), capture_output=True, text=True,
+    )
+    assert r.returncode == 0
+    assert r.stderr == "" and "SECRET_KEY" not in r.stdout
+
+
+def test_flask_run_real_avisa_al_arrancar_sin_secret_key(tmp_path):
+    proceso = subprocess.Popen(
+        [sys.executable, "-m", "flask", "--app", "app", "run", "--port", "0"],
+        env=_entorno_sin_clave(tmp_path), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        # `--port 0` no sirve en todos los sistemas; basta con que arranque o falle
+        # tras haber cargado la app, que es cuando se emite el aviso.
+        try:
+            _, error = proceso.communicate(timeout=3)
+        except subprocess.TimeoutExpired:
+            proceso.terminate()
+            _, error = proceso.communicate(timeout=10)
+    finally:
+        if proceso.poll() is None:
+            proceso.kill()
+    assert "Falta la variable de entorno SECRET_KEY" in error

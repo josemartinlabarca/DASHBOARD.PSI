@@ -70,12 +70,35 @@ En desarrollo con `flask --app app run --debug` y en las pruebas **no hace
 falta**: se usa un valor de desarrollo inseguro. Los comandos de mantenimiento
 (`flask --app app init-db`) tampoco la necesitan. Fuera de debug, si falta
 `SECRET_KEY` (o solo tiene espacios), la app **no atiende ninguna petición**:
-cada una responde error 500 y el log indica qué falta.
+cada una responde error 500 y el log indica qué falta. Con `flask run` (o un
+servidor WSGI) sin clave, el log muestra además un aviso al arrancar; `init-db`
+y `create-professional` no lo muestran.
 
 > **Advertencia:** no actives `FLASK_DEBUG` (ni `--debug`) en un entorno
 > expuesto. En debug la clave es un valor público fijo (está en el código), así
 > que cualquiera podría falsificar sesiones y tokens CSRF; además el modo debug
 > expone un depurador interactivo.
+
+### Crear la cuenta del profesional
+
+```bash
+flask --app app create-professional --email profesional@ejemplo.cl --nombre "Nombre Apellido"
+```
+
+El comando pide la contraseña en pantalla **sin mostrarla** y la repite para
+confirmar. No existe una opción `--password`: así la contraseña no queda en la
+lista de procesos ni en el historial del intérprete de comandos. Límite: solo
+queda oculta cuando la terminal es interactiva. Si alimentas la entrada
+estándar con una tubería (`printf 'clave\nclave\n' | flask ...`), la
+contraseña queda escrita en esa línea (y en el historial del intérprete) y Click
+avisa "Password input may be echoed"; hazlo solo en pruebas. Después inicia
+sesión en `/login`.
+
+### Cookie de sesión
+
+La cookie de sesión es `HttpOnly` y `SameSite=Lax`. No lleva `Secure` porque
+eso exige HTTPS; se activará con `SESSION_COOKIE_SECURE=True` al desplegar
+(tarea T-14).
 
 > Estos comandos se vuelven reales a medida que los agentes completan las
 > tareas de `TASKS.md`. Si algo no existe todavía, mira `PROGRESS.md`.

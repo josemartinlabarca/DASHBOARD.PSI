@@ -1,15 +1,30 @@
-"""Autenticación. Por ahora solo el registro de pacientes (T-03)."""
+"""Autenticación: registro (T-03), login, logout y control de rol (T-04)."""
 import re
+import secrets
 import sqlite3
 from datetime import datetime
-from functools import lru_cache
+from functools import lru_cache, wraps
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from flask import Blueprint, flash, redirect, render_template, request, url_for
-from werkzeug.security import generate_password_hash
+import click
+from flask import (
+    Blueprint,
+    abort,
+    flash,
+    g,
+    make_response,
+    redirect,
+    render_template,
+    request,
+    session,
+    url_for,
+)
+from flask.cli import with_appcontext
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from .correo import normalizar_email
 from .db import get_db
+from .seguridad import generar_token
 
 bp = Blueprint("auth", __name__)
 
@@ -28,6 +43,8 @@ MENSAJE_DUPLICADO = (
     "No pudimos registrarte con ese correo. Si ya tienes una cuenta, inicia "
     "sesión; si no, prueba con otro correo."
 )
+MENSAJE_LOGIN_INVALIDO = "Correo o contraseña incorrectos."
+CLAVE_SESION_USUARIO = "usuario_id"
 
 
 @lru_cache(maxsize=1)
@@ -54,6 +71,27 @@ def es_correo_duplicado(error):
         getattr(error, "sqlite_errorcode", None) == sqlite3.SQLITE_CONSTRAINT_UNIQUE
         and "UNIQUE constraint failed: usuarios.email" in str(error)
     )
+
+
+def crear_usuario(db, nombre, email, password, rol):
+    """Inserta un usuario y confirma. `email` ya viene normalizado.
+
+    Lanza `sqlite3.IntegrityError` si la base rechaza la fila; quien llama
+    decide qué hacer (ver `es_correo_duplicado`). Es el único lugar que hashea
+    contraseñas al crear cuentas.
+    """
+    db.execute(
+        "INSERT INTO usuarios (nombre, email, password_hash, rol, creado_en)"
+        " VALUES (?, ?, ?, ?, ?)",
+        (
+            nombre,
+            email,
+            generate_password_hash(password),
+            rol,
+            datetime.now(zona_chile()).isoformat(timespec="seconds"),
+        ),
+    )
+    db.commit()
 
 
 def validar_registro(nombre, email, password):
@@ -95,17 +133,7 @@ def registro():
     if not errores:
         db = get_db()
         try:
-            db.execute(
-                "INSERT INTO usuarios (nombre, email, password_hash, rol, creado_en)"
-                " VALUES (?, ?, ?, 'paciente', ?)",
-                (
-                    nombre,
-                    email,
-                    generate_password_hash(password),
-                    datetime.now(zona_chile()).isoformat(timespec="seconds"),
-                ),
-            )
-            db.commit()
+            crear_usuario(db, nombre, email, password, "paciente")
         except sqlite3.IntegrityError as error:
             db.rollback()
             if not es_correo_duplicado(error):
@@ -116,3 +144,164 @@ def registro():
             return redirect(url_for("inicio"))
 
     return render_template("registro.html", nombre=nombre, email=email, errores=errores)
+
+
+# ---------------------------------------------------------------- login ----
+
+
+@lru_cache(maxsize=1)
+def hash_falso():
+    """Hash de una contraseña aleatoria que nadie conoce, con el costo normal.
+
+    Se verifica cuando el usuario no existe (o el correo es inaceptable) para
+    que esa respuesta tarde lo mismo que la de una contraseña errónea. Se crea
+    al usarlo (no al importar) con el mismo `generate_password_hash` que usa el
+    registro, de modo que siempre tiene el mismo costo que los hashes reales.
+    """
+    return generate_password_hash(secrets.token_urlsafe(16))
+
+
+def buscar_usuario_por_credenciales(email_bruto, password):
+    """Devuelve la fila del usuario si las credenciales son correctas; si no, `None`.
+
+    Siempre se ejecuta exactamente un `check_password_hash`, exista o no el
+    correo y sea aceptable o no, y no se distingue el motivo del rechazo.
+    Una contraseña más larga que `PASSWORD_MAX` nunca puede ser la correcta
+    (el registro no las admite): se verifica una cadena vacía para no pagar el
+    costo de hashear texto arbitrariamente largo, y se rechaza igualmente.
+    """
+    try:
+        email = normalizar_email(email_bruto)
+    except ValueError:
+        email = ""
+    fila = None
+    if email and len(email) <= EMAIL_MAX:
+        fila = get_db().execute(
+            "SELECT id, password_hash, rol FROM usuarios WHERE email = ?", (email,)
+        ).fetchone()
+    demasiado_larga = len(password) > PASSWORD_MAX
+    candidata = "" if demasiado_larga else password
+    hash_guardado = fila["password_hash"] if fila else hash_falso()
+    correcta = check_password_hash(hash_guardado, candidata)
+    if fila is None or demasiado_larga or not correcta:
+        return None
+    return fila
+
+
+def iniciar_sesion(usuario_id):
+    """Sesión nueva solo con el id y token CSRF nuevo (evita fijación de sesión)."""
+    session.clear()
+    session[CLAVE_SESION_USUARIO] = usuario_id
+    generar_token()
+
+
+def cerrar_sesion():
+    session.clear()
+    generar_token()
+
+
+@bp.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "GET":
+        return render_template("login.html", email="", error=None)
+
+    email_bruto = request.form.get("email", "")
+    password = request.form.get("password", "")  # sin recortar
+    usuario = buscar_usuario_por_credenciales(email_bruto, password)
+    if usuario is None:
+        return render_template(
+            "login.html", email=email_bruto.strip(), error=MENSAJE_LOGIN_INVALIDO
+        )
+    iniciar_sesion(usuario["id"])
+    return redirect(url_for(f"{usuario['rol']}.dashboard"))
+
+
+# ----------------------------------------------------------- decoradores ----
+
+
+def _es_id_valido(valor):
+    """Un entero positivo que cabe en un INTEGER de SQLite (no `bool`)."""
+    return isinstance(valor, int) and not isinstance(valor, bool) and 0 < valor < 2**63
+
+
+def usuario_actual():
+    """Fila (id, nombre, rol) del usuario de la sesión, o `None`.
+
+    La sesión guarda solo el id; el rol se lee siempre de la base, así que un
+    cambio de rol o un usuario borrado surte efecto en la siguiente petición.
+    """
+    if "usuario_actual" not in g:
+        usuario_id = session.get(CLAVE_SESION_USUARIO)
+        g.usuario_actual = None
+        if _es_id_valido(usuario_id):
+            g.usuario_actual = get_db().execute(
+                "SELECT id, nombre, rol FROM usuarios WHERE id = ?", (usuario_id,)
+            ).fetchone()
+    return g.usuario_actual
+
+
+def _exigir(rol=None):
+    """Decorador: sin sesión redirige a /login; con otro rol responde 403."""
+
+    def decorador(vista):
+        @wraps(vista)
+        def envoltura(*args, **kwargs):
+            usuario = usuario_actual()
+            if usuario is None:
+                return redirect(url_for("auth.login"))
+            if rol is not None and usuario["rol"] != rol:
+                abort(make_response(render_template("acceso_denegado.html"), 403))
+            return vista(*args, **kwargs)
+
+        return envoltura
+
+    return decorador
+
+
+login_requerido = _exigir()
+solo_paciente = _exigir("paciente")
+solo_profesional = _exigir("profesional")
+
+
+@bp.route("/logout", methods=["POST"])
+@login_requerido
+def logout():
+    cerrar_sesion()
+    return redirect(url_for("inicio"))
+
+
+# ------------------------------------------------- create-professional ----
+
+
+@click.command("create-professional")
+@click.option("--email", required=True, help="Correo del profesional.")
+@click.option("--nombre", required=True, help="Nombre del profesional.")
+@with_appcontext
+def create_professional_command(email, nombre):
+    """Crea la cuenta del profesional. La contraseña se pide sin eco.
+
+    La contraseña no se acepta como opción: así no queda en la lista de
+    procesos ni en el historial del intérprete de comandos. Se escribe en el
+    aviso interactivo (sin mostrarse) y se pide dos veces.
+    """
+    nombre = nombre.strip()
+    try:
+        email = normalizar_email(email)
+        email_rechazado = False
+    except ValueError:
+        email_rechazado = True
+    password = click.prompt("Contraseña", hide_input=True, confirmation_prompt=True)
+    errores = validar_registro(nombre, "" if email_rechazado else email, password)
+    if email_rechazado:
+        errores["email"] = MENSAJE_EMAIL_INVALIDO
+    if errores:
+        raise click.ClickException(" ".join(errores.values()))
+    db = get_db()
+    try:
+        crear_usuario(db, nombre, email, password, "profesional")
+    except sqlite3.IntegrityError as error:
+        db.rollback()
+        if not es_correo_duplicado(error):
+            raise
+        raise click.ClickException("Ya existe un usuario con ese correo.") from error
+    click.echo(f"Profesional creado: {email}")

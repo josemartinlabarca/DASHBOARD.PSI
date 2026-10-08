@@ -102,7 +102,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Origen:** REVIEW de T-03b (ver historial git de `REVIEW.md`).
 
 ### T-04 — Login, logout y control de rol
-- **Estado:** PENDIENTE
+- **Estado:** HECHA
 - **Depende de:** T-03b, T-03c, T-02c
 - **Qué:** `/login`, `/logout`, decoradores `solo_paciente` y `solo_profesional`, comando `create-professional`. Debe además: (a) usar `normalizar_email()` de T-03b; (b) llamar a `session.clear()` y regenerar el token CSRF al iniciar y cerrar sesión (evita fijación de sesión); (c) guardar en la sesión **solo el id del usuario**; (d) fijar `SESSION_COOKIE_SAMESITE="Lax"`; (e) un mensaje **único** para credenciales inválidas, sin distinguir correo inexistente de contraseña errónea; (f) absorber los ítems del backlog T-02d #2 y #3. **Añadidos por la revisión de T-03c:** (g) el login captura el `ValueError` de `normalizar_email` y responde con el **mismo** mensaje genérico, calculando un hash falso para igualar tiempos (R-07); (h) `create-professional` reutiliza `es_correo_duplicado` de `app/auth.py` (R-08); (i) la fixture de hash rápido (D-019) debe cubrir cualquier módulo nuevo que importe `generate_password_hash`/`check_password_hash`, añadir `--strict-markers` a `pytest.ini` y una prueba que falle si el hash rápido no está activo (R-06); (j) el campo de correo de `registro.html` y de `login.html` no puede usar `type="email"` con validación del navegador si bloquea `señor@…` (R-04): usar `type="text"` con `inputmode="email"` y `autocomplete="email"`, y comprobarlo en un navegador.
 - **Término:** Pruebas: login correcto/incorrecto, paciente no accede a `/profesional` (US-3), el token CSRF cambia tras el login, el mensaje de error es idéntico para correo inexistente y contraseña errónea.
@@ -193,8 +193,6 @@ en qué tarea conviene absorberlo.
 | Origen | Hallazgo | Absorber en |
 |---|---|---|
 | T-02d #1 | `FLASK_DEBUG=1` heredado en un servidor real usa la clave pública de desarrollo sin aviso | T-14 (revisión final de seguridad) |
-| T-02d #2 | Aviso visible al arrancar si falta `SECRET_KEY` (el 500 solo aparece al llegar la primera petición); `app.logger.warning` una vez, sin molestar en `init-db` | T-04 |
-| T-02d #3 | Las pruebas de D-008 solo hacen `GET /`; añadir `/static`, un 404 y un blueprint | T-04 (primer blueprint real) |
 | T-02d #6 | README: aclarar "solo en tu máquina" junto a `--debug`; `FLASK_DEBUG=off` cuenta como verdadero en Flask | T-14 |
 | T-01 #3–4 | `base.html` aún no enlaza `style.css` | T-13 |
 | T-03 #2 | Cookie de sesión sin `Secure` (hace falta HTTPS para activarla) | T-14 |
