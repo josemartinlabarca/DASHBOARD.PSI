@@ -184,6 +184,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Estado:** PENDIENTE — decisiones humanas **APROBADAS** (D-020 opción B, D-029 opción B, 2026-10-08 19:18). Autorizada a añadir la regla de anticipación al reservar en `SPEC.md` §4 **solo** para esto.
 - **Depende de:** T-08c
 - **Qué:** (1) **D-029:** reservar solo con más de 24 h de anticipación (mismo criterio que cancelar: instantes absolutos, borde exacto documentado y probado en las dos noches de cambio de horario); mensaje en español claro; `/paciente/horas` no ofrece el botón «Reservar» a las horas con menos de 24 h (o las muestra marcadas «ya no se puede reservar»); regla 5 = solape de intervalos (ya implementada: dejarla documentada en SPEC). Añadir la regla a SPEC §4. Ajustar las pruebas de T-07/T-08 que reservaban a <24 h. (2) **D-020:** `normalizar_email`: fuera de ASCII solo letras y números (categorías `L*` y `N*`) más una lista corta de rellenos explícitamente rechazados (U+3164, U+115F, U+1160, U+2800, U+FFFD, U+FFFC, símbolos U+2400–U+2422, guiones y puntos medios no ASCII U+2010–U+2015, U+00B7); sigue rechazando `C*` y `Mn/Mc/Me` y espacios; `señor@`, tildes, `ü` siguen válidos. Pruebas exhaustivas sobre todos los puntos de código con la lista; D-013/D-015 con nota visible de actualización. (3) Mutaciones: quitar `L*`/`N*`, quitar un relleno, borde de 24 h con `<=`, botón visible a <24 h.
+- **Añadidos por la revisión de T-08d:** (4) **R-01 (media):** una prueba que fije que `create-professional` abre `BEGIN IMMEDIATE` *antes* de comprobar si ya hay profesional (cambiarlo por `BEGIN` sobrevive hoy a toda la suite y con él dos `create-professional` simultáneos terminan con traceback `database is locked` en 6 de 6 rondas); la prueba debe ser de comportamiento (dos procesos reales) y no solo de caja blanca; (5) **R-06:** el README debe decir que `create-professional` se niega a crear un segundo profesional (D-023).
 - **Término:** las mutaciones anteriores hacen fallar al menos una prueba; `python3 -m pytest` pasa. Debe quedar HECHA **antes** de T-09.
 - **Origen:** D-020 (revisión de T-03c) y D-029 (revisión de T-07/T-08).
 
@@ -283,6 +284,9 @@ en qué tarea conviene absorberlo.
 | T-08 R-08 | En Windows las pruebas con `zona_sistema` se saltan (sin `tzset`): los bordes por zona solo corren en Linux/macOS | T-14 |
 | T-08b R-05 | La caché de URL de las pruebas usa API privada de Werkzeug y la plantilla no es segura entre hilos | si se actualiza Werkzeug |
 | T-08b | `pytest-xdist` funciona (1135 OK en 17,7 s) pero emite avisos de `fork`; no se adopta sin decisión (dependencia nueva) | si la suite vuelve a pasar de 60 s |
+| T-08d R-02 | Con una base antigua (sin `sesion_version`) `init-db` dice «OK», crea el índice pero no la columna y luego `POST /login` da 500; con 2+ profesionales `init-db` revienta con traceback. Aviso claro o migración (`PRAGMA user_version`) | T-14 |
+| T-08d R-04 | Un login simultáneo a un logout en otro navegador puede nacer ya revocado | T-14 |
+| T-08d R-08 | T-09 debe notificar usando `horas.profesional_id`, no «el profesional» por rol; el futuro cambio de contraseña deberá incrementar `sesion_version` | T-09 / cuando exista |
 | T-02c #9 | En `tests/test_esquema.py` la cobertura de NOT NULL y FK es triplemente redundante y la rama `usuarios` de `test_not_null_rechaza_null` es poco legible | cuando se toque ese archivo |
 
 ---
