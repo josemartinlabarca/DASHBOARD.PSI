@@ -397,3 +397,251 @@ def test_foreign_key_list_declara_cada_fk(db, tabla, columna, destino):
         f"PRAGMA foreign_key_list({tabla})"
     )}
     assert (columna, destino, "id") in fks
+
+
+# --- D-016: ON DELETE SET NULL en notificaciones.hora_id (T-02f) ----------------
+# Estas pruebas dependen de que las claves foráneas estén ACTIVAS (get_db() hace
+# PRAGMA foreign_keys = ON): con ellas apagadas, ON DELETE SET NULL no se ejecuta.
+
+RESERVAR = (
+    "UPDATE horas SET estado='reservada', paciente_id=?, reservada_en=?"
+    " WHERE id=? AND estado='libre'"
+)
+CANCELAR = (
+    "UPDATE horas SET estado='libre', paciente_id=NULL, reservada_en=NULL WHERE id=?"
+)
+
+
+def _notificaciones_de(db, hora):
+    return db.execute(
+        "SELECT id, usuario_id, tipo, mensaje, hora_id FROM notificaciones"
+        " ORDER BY id"
+    ).fetchall()
+
+
+def test_las_pruebas_de_fk_corren_con_claves_foraneas_activas(db):
+    assert db.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+
+
+def test_reservar_cancelar_y_eliminar_la_hora_deja_notificaciones_con_hora_id_null(db, ids):
+    hora = insertar_hora(db, profesional_id=ids["prof"])
+    assert db.execute(RESERVAR, (ids["pac"], RESERVADA_EN, hora)).rowcount == 1
+    insertar_notificacion(
+        db, usuario_id=ids["pac"], tipo="confirmacion", mensaje="Reservada", hora_id=hora
+    )
+    insertar_notificacion(
+        db, usuario_id=ids["prof"], tipo="confirmacion", mensaje="Te reservaron", hora_id=hora
+    )
+    assert db.execute(CANCELAR, (hora,)).rowcount == 1
+    insertar_notificacion(
+        db, usuario_id=ids["pac"], tipo="cancelacion", mensaje="Cancelada", hora_id=hora
+    )
+    insertar_notificacion(
+        db, usuario_id=ids["prof"], tipo="cancelacion", mensaje="Te cancelaron", hora_id=hora
+    )
+
+    assert db.execute("DELETE FROM horas WHERE id=?", (hora,)).rowcount == 1
+
+    filas = [tuple(f) for f in _notificaciones_de(db, hora)]
+    assert filas == [
+        (1, ids["pac"], "confirmacion", "Reservada", None),
+        (2, ids["prof"], "confirmacion", "Te reservaron", None),
+        (3, ids["pac"], "cancelacion", "Cancelada", None),
+        (4, ids["prof"], "cancelacion", "Te cancelaron", None),
+    ]
+    assert db.execute("SELECT COUNT(*) FROM horas").fetchone()[0] == 0
+
+
+def test_eliminar_hora_no_toca_notificaciones_de_otras_horas(db, ids):
+    h1 = insertar_hora(db, profesional_id=ids["prof"], inicio="2026-10-20T10:00:00")
+    h2 = insertar_hora(db, profesional_id=ids["prof"], inicio="2026-10-20T11:00:00")
+    insertar_notificacion(db, usuario_id=ids["pac"], hora_id=h1)
+    insertar_notificacion(db, usuario_id=ids["pac"], hora_id=h2)
+    db.execute("DELETE FROM horas WHERE id=?", (h1,))
+    assert [f["hora_id"] for f in _notificaciones_de(db, None)] == [None, h2]
+
+
+def test_eliminar_hora_sin_notificaciones_funciona(db, ids):
+    hora = insertar_hora(db, profesional_id=ids["prof"])
+    assert db.execute("DELETE FROM horas WHERE id=?", (hora,)).rowcount == 1
+    assert db.execute("SELECT COUNT(*) FROM horas").fetchone()[0] == 0
+
+
+def test_eliminar_hora_reservada_con_notificaciones_tambien_deja_hora_id_null(db, ids):
+    """El esquema lo permite. Que la aplicación prohíba eliminar una hora reservada
+    (SPEC, US-5) es una regla de T-05, no de la base de datos."""
+    hora = _hora_reservada(db, ids)
+    insertar_notificacion(db, usuario_id=ids["pac"], mensaje="Reservada", hora_id=hora)
+    assert db.execute("DELETE FROM horas WHERE id=?", (hora,)).rowcount == 1
+    fila = _notificaciones_de(db, hora)[0]
+    assert (fila["hora_id"], fila["mensaje"], fila["tipo"]) == (None, "Reservada", "confirmacion")
+
+
+def test_sin_claves_foraneas_la_prueba_no_pasaria_por_casualidad(db, ids):
+    """Control: con las FK desactivadas, ON DELETE SET NULL no actúa y hora_id queda
+    apuntando a una hora que ya no existe. Por eso las pruebas anteriores exigen FK activas."""
+    hora = insertar_hora(db, profesional_id=ids["prof"])
+    insertar_notificacion(db, usuario_id=ids["pac"], hora_id=hora)
+    db.commit()
+    db.execute("PRAGMA foreign_keys = OFF")
+    db.execute("DELETE FROM horas WHERE id=?", (hora,))
+    assert _notificaciones_de(db, hora)[0]["hora_id"] == hora  # colgando
+
+
+def test_el_esquema_declara_on_delete_set_null_solo_en_hora_id(db):
+    reglas = {
+        (tabla, f["from"]): f["on_delete"]
+        for tabla in ("horas", "notificaciones")
+        for f in db.execute(f"PRAGMA foreign_key_list({tabla})")
+    }
+    assert reglas == {
+        ("horas", "profesional_id"): "NO ACTION",
+        ("horas", "paciente_id"): "NO ACTION",
+        ("notificaciones", "usuario_id"): "NO ACTION",
+        ("notificaciones", "hora_id"): "SET NULL",
+    }
+
+
+def test_no_se_puede_eliminar_el_profesional_con_horas(db, ids):
+    insertar_hora(db, profesional_id=ids["prof"])
+    rechazada(
+        lambda: db.execute("DELETE FROM usuarios WHERE id=?", (ids["prof"],)),
+        "FOREIGN KEY constraint failed",
+    )
+
+
+def test_no_se_puede_eliminar_el_paciente_con_hora_reservada(db, ids):
+    _hora_reservada(db, ids)
+    rechazada(
+        lambda: db.execute("DELETE FROM usuarios WHERE id=?", (ids["pac"],)),
+        "FOREIGN KEY constraint failed",
+    )
+
+
+def test_no_se_puede_eliminar_el_usuario_con_notificaciones(db, ids):
+    insertar_notificacion(db, usuario_id=ids["pac"])
+    rechazada(
+        lambda: db.execute("DELETE FROM usuarios WHERE id=?", (ids["pac"],)),
+        "FOREIGN KEY constraint failed",
+    )
+
+
+def test_notificacion_con_hora_id_inexistente_sigue_rechazada(db, ids):
+    rechazada(
+        lambda: insertar_notificacion(db, usuario_id=ids["pac"], hora_id=999),
+        "FOREIGN KEY constraint failed",
+    )
+
+
+# --- D-017: formato canónico de horas.inicio (T-02f) ----------------------------
+
+CANONICO = "2026-12-01T10:00:00"
+
+FORMATOS_DE_LA_REVISION = [
+    "2026-12-01T10:00",
+    "2026-12-01 10:00",
+    "2026-12-01T10:00:00-03:00",
+    "2026-12-01T10:00:00-04:00",
+    "2026-12-01T10:00:00Z",
+]
+OTROS_FORMATOS_INVALIDOS = [
+    "",
+    "2026-12-01",
+    " 2026-12-01T10:00:00",
+    "2026-12-01T10:00:00 ",
+    "2026-12-01T10:00:00.000",
+    "2026-12-01T10:00:00.5",
+    "2026-12-01T1O:00:00",  # letra O en lugar de cero
+    "abcd-ef-ghTij:kl:mn",
+    "2026-12-01t10:00:00",  # GLOB distingue mayúsculas: la T es literal
+    "2026-12-01T10:00:000",  # un carácter de más al final
+    "x2026-12-01T10:00:00",  # un carácter de más al principio
+    "2026-12-01T10:00:0",  # un carácter de menos
+    "26-12-01T10:00:00",
+    "2026/12/01T10:00:00",
+    "2026-12-01T10:00:00\n",  # salto de línea al final
+    "\n2026-12-01T10:00:00",
+    "2026-12-01\nT10:00:00",
+    "2026-12-01\x00T10:00:00",  # NUL en medio
+    "\x002026-12-01T10:00:00",  # NUL al principio
+    "٢٠٢٦-١٢-٠١T١٠:٠٠:٠٠",  # dígitos árabe-índicos
+    "２０２６-１２-０１T１０:００:００",  # dígitos de ancho completo
+    "2026-12-01T10:00:00²",  # superíndice
+]
+
+
+@pytest.mark.parametrize("inicio", FORMATOS_DE_LA_REVISION)
+def test_formato_de_la_revision_rechazado(db, ids, inicio):
+    rechazada(
+        lambda: insertar_hora(db, profesional_id=ids["prof"], inicio=inicio),
+        "CHECK constraint failed",
+    )
+
+
+@pytest.mark.parametrize("inicio", OTROS_FORMATOS_INVALIDOS)
+def test_otro_formato_invalido_rechazado(db, ids, inicio):
+    rechazada(
+        lambda: insertar_hora(db, profesional_id=ids["prof"], inicio=inicio),
+        "CHECK constraint failed",
+    )
+    assert db.execute("SELECT COUNT(*) FROM horas").fetchone()[0] == 0
+
+
+def test_inicio_que_no_es_texto_rechazado(db, ids):
+    """Un número o un BLOB no encajan con el GLOB (se comparan como texto o no coinciden)."""
+    for valor in (20261201, 2026.1201, b"2026-12-01T10:00:00"):
+        with pytest.raises(sqlite3.IntegrityError):
+            insertar_hora(db, profesional_id=ids["prof"], inicio=valor)
+
+
+def test_formato_canonico_aceptado(db, ids):
+    hora = insertar_hora(db, profesional_id=ids["prof"], inicio=CANONICO)
+    assert db.execute("SELECT inicio FROM horas WHERE id=?", (hora,)).fetchone()[0] == CANONICO
+
+
+def test_duplicado_en_formato_canonico_rechazado_por_la_unique(db, ids):
+    insertar_hora(db, profesional_id=ids["prof"], inicio=CANONICO)
+    rechazada(
+        lambda: insertar_hora(db, profesional_id=ids["prof"], inicio=CANONICO),
+        "UNIQUE constraint failed: horas.profesional_id, horas.inicio",
+    )
+
+
+def test_las_variantes_ya_no_eluden_la_unique(db, ids):
+    """Antes de D-017 las cinco variantes de la revisión entraban junto al canónico."""
+    insertar_hora(db, profesional_id=ids["prof"], inicio=CANONICO)
+    for variante in FORMATOS_DE_LA_REVISION:
+        with pytest.raises(sqlite3.IntegrityError):
+            insertar_hora(db, profesional_id=ids["prof"], inicio=variante)
+    assert db.execute("SELECT COUNT(*) FROM horas").fetchone()[0] == 1
+
+
+def test_fecha_con_forma_valida_pero_inexistente_se_acepta_en_la_base(db, ids):
+    """Limitación conocida (D-017): el CHECK valida la FORMA, no que la fecha exista.
+    Mes 13, día 45 u hora 25 pasan la base de datos; la aplicación (T-05) debe
+    validar que la fecha exista y no sea pasada antes de insertar."""
+    for inicio in ("2026-13-45T25:61:61", "2026-02-31T00:00:00", "0000-00-00T00:00:00"):
+        insertar_hora(db, profesional_id=ids["prof"], inicio=inicio)
+
+
+def test_update_a_un_formato_invalido_tambien_se_rechaza(db, ids):
+    hora = insertar_hora(db, profesional_id=ids["prof"], inicio=CANONICO)
+    rechazada(
+        lambda: db.execute(
+            "UPDATE horas SET inicio='2026-12-01 10:00' WHERE id=?", (hora,)
+        ),
+        "CHECK constraint failed",
+    )
+
+
+def test_limitacion_conocida_nul_tras_el_prefijo_canonico_pasa_el_check(db, ids):
+    """LIMITACIÓN REAL del CHECK (comprobada con SQLite 3.45.1): GLOB trabaja sobre
+    cadenas C, así que un NUL (\\x00) corta la comparación. `2026-12-01T10:00:00\\x00basura`
+    se ACEPTA y es un valor distinto del canónico, por lo que también elude la UNIQUE.
+    El esquema aprobado (D-017) no lo impide; la aplicación (T-05) debe guardar solo
+    el resultado de formatear un datetime, nunca el texto crudo del formulario."""
+    insertar_hora(db, profesional_id=ids["prof"], inicio=CANONICO)
+    for inicio in (CANONICO + "\x00", CANONICO + "\x00basura"):
+        hora = insertar_hora(db, profesional_id=ids["prof"], inicio=inicio)
+        assert db.execute("SELECT length(inicio) FROM horas WHERE id=?", (hora,)).fetchone()[0] == 19
+    assert db.execute("SELECT COUNT(*) FROM horas").fetchone()[0] == 3

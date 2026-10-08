@@ -45,7 +45,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 ## Fase 2 — Usuarios
 
 ### T-02f — Aplicar al esquema las decisiones D-016 y D-017 (aprobadas 2026-10-08 01:04)
-- **Estado:** PENDIENTE — decisiones humanas **APROBADAS** (D-016 opción 1, D-017 opción 2). Autorizada a modificar `app/schema.sql` y el "Modelo de datos" de `ARCHITECTURE.md` **solo** para estos dos cambios.
+- **Estado:** HECHA — decisiones humanas **APROBADAS** (D-016 opción 1, D-017 opción 2). Autorizada a modificar `app/schema.sql` y el "Modelo de datos" de `ARCHITECTURE.md` **solo** para estos dos cambios.
 - **Depende de:** T-02c
 - **Qué:** (1) `notificaciones.hora_id INTEGER REFERENCES horas (id) ON DELETE SET NULL` (D-016). (2) En `horas`: `CHECK (inicio GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]')` (D-017). (3) Reflejarlos en `ARCHITECTURE.md` y añadir en el README/PROGRESS la recomendación de borrar `agenda.db` (ya explicada por D-006). (4) Pruebas: reservar → cancelar → eliminar la hora funciona y deja las notificaciones con `hora_id` NULL y su mensaje intacto; eliminar una hora **sin** notificaciones sigue funcionando; los cinco formatos de la revisión (`...T10:00`, `... 10:00`, `...T10:00:00`, `...-03:00`, `...-04:00`) se rechazan salvo el canónico; el canónico se acepta y su duplicado lo rechaza la UNIQUE; una fecha con forma válida pero inexistente (p. ej. mes 13) **se acepta** a nivel de base de datos (lo valida la aplicación en T-05) y eso queda documentado en una prueba. Ninguna prueba existente se debilita; las que insertaban `inicio` en otro formato se corrigen a datos válidos.
 - **Término:** Pruebas nuevas fallan si se quita el `ON DELETE SET NULL` o el CHECK del formato; `python3 -m pytest` pasa.

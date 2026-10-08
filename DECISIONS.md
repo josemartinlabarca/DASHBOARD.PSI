@@ -181,6 +181,7 @@ Autorizas a que se modifique `ARCHITECTURE.md` (que `CLAUDE.md` reserva al human
 - **Aprobada por:** el humano (usuario de la sesión), respuesta a la pregunta de la sesión.   **Fecha:** 2026-10-08 01:04
 - **Se recomendaba esta opción.**
 - **Implementación:** T-02f. Cambia el esquema aprobado en D-007: `notificaciones.hora_id INTEGER REFERENCES horas (id) ON DELETE SET NULL`. Autorizada a editar `schema.sql` y `ARCHITECTURE.md` (modelo de datos) solo para esto. Consecuencia ya conocida (D-006): hay que borrar `agenda.db` y volver a ejecutar `init-db`. Prueba requerida: reservar → cancelar → eliminar la hora funciona y las notificaciones quedan con `hora_id` NULL y su mensaje intacto.
+- **Implementada:** T-02f, 2026-10-08 01:09
 
 
 ## D-017 — Formato canónico del campo `horas.inicio` (T-05) — **APROBADA por el humano (2026-10-08 01:04)**
@@ -199,6 +200,7 @@ Autorizas a que se modifique `ARCHITECTURE.md` (que `CLAUDE.md` reserva al human
 - **Aprobada por:** el humano (usuario de la sesión), respuesta a la pregunta de la sesión.   **Fecha:** 2026-10-08 01:04
 - **Se recomendaba esta opción.**
 - **Implementación:** T-02f (el CHECK en `horas.inicio` y su prueba) y T-05 (validación en la aplicación: la fecha debe existir, no ser pasada, y se guarda siempre en este formato). Cambia el esquema aprobado en D-007. Autorizada a editar `schema.sql` y `ARCHITECTURE.md` (modelo de datos) solo para esto. Consecuencia ya conocida (D-006): hay que borrar `agenda.db` y volver a ejecutar `init-db`. Pruebas requeridas: los 5 formatos del hallazgo de la revisión son rechazados por la base excepto el canónico; el canónico se acepta; un duplicado en formato canónico lo rechaza la UNIQUE. La limitación del horario de verano (hora ambigua o inexistente) sigue pendiente de revisar en T-10 y T-14.
+- **Implementada:** T-02f, 2026-10-08 01:09
 
 
 ## D-00X — Título

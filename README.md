@@ -36,7 +36,7 @@ pytest                           # corre las pruebas
 
 `init-db` solo crea las tablas que faltan (`CREATE TABLE IF NOT EXISTS`, D-006):
 **no modifica tablas ya existentes**. Si ya tienes un `agenda.db` creado con un
-esquema anterior (por ejemplo, antes de T-02c, que agregó restricciones), seguirá
+esquema anterior (por ejemplo, antes de T-02c o de T-02f, que agregaron restricciones: `ON DELETE SET NULL` en `notificaciones.hora_id` y el formato de `horas.inicio`), seguirá
 funcionando pero **sin las restricciones nuevas**. Mientras sea una base de
 práctica, bórrala y vuelve a ejecutar `init-db`:
 

@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS horas (
         (estado = 'libre' AND paciente_id IS NULL AND reservada_en IS NULL)
         OR (estado = 'reservada' AND paciente_id IS NOT NULL AND reservada_en IS NOT NULL)
     ),
+    CHECK (inicio GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]'),
     UNIQUE (profesional_id, inicio)
 );
 
@@ -28,7 +29,7 @@ CREATE TABLE IF NOT EXISTS notificaciones (
     usuario_id INTEGER NOT NULL REFERENCES usuarios (id),
     tipo TEXT NOT NULL CHECK (tipo IN ('confirmacion', 'recordatorio', 'cancelacion')),
     mensaje TEXT NOT NULL,
-    hora_id INTEGER REFERENCES horas (id),
+    hora_id INTEGER REFERENCES horas (id) ON DELETE SET NULL,
     leida INTEGER NOT NULL DEFAULT 0 CHECK (leida IN (0, 1)),
     creada_en TEXT NOT NULL
 );
