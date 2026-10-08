@@ -145,7 +145,8 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Depende de:** T-06
 - **Qué:** `POST /horas/<id>/reservar` con UPDATE atómico (D-003) y reglas 1 y 5.
 - **Nota (revisión de T-04b, R-10):** acotar el `id` de la ruta (`<int:id>`) a un máximo razonable (< 2**63) para que un id gigante dé 404 y no un 500; con prueba.
-- **Nota (revisión de T-05b, R-06):** las reglas de anticipación (24 h, §4) se calculan con instantes absolutos (aware → UTC), nunca con el reloj de pared; pruebas en las noches de cambio de horario.
+- **Nota (revisión de T-05b, R-06):** las reglas de anticipación (24 h, §4) se calculan con instantes absolutos (aware → UTC), nunca con el reloj de pared; pruebas en las noches de cambio de horario. **Nota (revisión de T-06, R-02):** `a_segundos_utc` con `fold=0` no está fijado por ninguna prueba (cambiarlo a `fold=1` no rompe nada): añadir esa prueba en esta tarea.
+- **Notas de la revisión de T-06 para esta tarea:** formulario POST por fila con el id de la hora y token CSRF; ruta con `<int>` acotado; doble reserva resuelta con `UPDATE ... WHERE estado='libre'` y revisión de `rowcount`, todo dentro de `BEGIN IMMEDIATE`; volver a comprobar que la hora sea futura con instantes absolutos; la regla 5 (paciente sin dos reservas solapadas) por solape de intervalos; considerar la carrera «el profesional elimina la hora» / «el paciente la reserva» (rowcount = 0 → mensaje amable, no 500).
 - **Término:** Pruebas: reserva exitosa; segunda reserva de la misma hora falla; paciente no puede tener dos a la misma hora.
 
 ### T-08 — Cancelar reserva
@@ -153,7 +154,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Depende de:** T-07
 - **Qué:** `POST /horas/<id>/cancelar` con anticipación mínima de 24 h (US-9); la hora vuelve a `libre`.
 - **Nota (revisión de T-04b, R-10):** acotar el `id` de la ruta (`<int:id>`) a un máximo razonable (< 2**63) para que un id gigante dé 404 y no un 500; con prueba.
-- **Nota (revisión de T-05b, R-06):** las reglas de anticipación (24 h, §4) se calculan con instantes absolutos (aware → UTC), nunca con el reloj de pared; pruebas en las noches de cambio de horario.
+- **Nota (revisión de T-05b, R-06):** las reglas de anticipación (24 h, §4) se calculan con instantes absolutos (aware → UTC), nunca con el reloj de pared; pruebas en las noches de cambio de horario. **Nota (revisión de T-06):** el UPDATE de cancelación filtra por paciente y estado y se revisa `rowcount`; anticipación con instantes absolutos.
 - **Término:** Pruebas: cancelar con >24 h funciona, con <24 h se rechaza, la hora queda libre.
 
 ## Fase 4 — Notificaciones
@@ -243,6 +244,9 @@ en qué tarea conviene absorberlo.
 | T-05 R-07 | El panel oculta las horas ya iniciadas pero aún no terminadas; decidir si se muestran | T-06/T-08 |
 | T-05 R-12 | La suite supera 35 s; el umbral de acción es 60 s | cuando supere 60 s |
 | T-05b R-02 | `buscar_solape` lee todas las horas del profesional (también las pasadas) dentro del bloqueo de escritura; con 50 000 filas y 12 procesos aparece «database is locked». Limitar a una ventana de fechas alrededor del candidato (0,16 ms medido) | T-14 |
+| T-06 R-01 | `/paciente/horas` sin tope ni paginación: con 50 000 horas libres tarda 1,28 s y pesa 6,55 MB; ventana de fechas o tope de N filas | T-13/T-14 |
+| T-06 R-04 | Tabla sin `caption`/`scope`, sin hora de término ni día de la semana, página sin cierre de sesión | T-13 |
+| T-06 R-07 | Hora inventada en PROGRESS por el implementador (segunda vez, regla 8): si se repite, endurecer con una comprobación automática (script que compare con el commit) | si reincide |
 | T-02c #9 | En `tests/test_esquema.py` la cobertura de NOT NULL y FK es triplemente redundante y la rama `usuarios` de `test_not_null_rechaza_null` es poco legible | cuando se toque ese archivo |
 
 ---

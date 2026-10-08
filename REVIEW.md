@@ -1,83 +1,73 @@
-# REVIEW.md — Revisión de T-05b (commit `f867530`)
+# REVIEW.md — Revisión de T-06 (commit `b372bb6`)
 
-Revisor, 2026-10-08. Python 3.13, SQLite 3.45.1, journal_mode `delete`. Todo experimento y mutación se hizo en copias bajo el scratchpad (`.../scratchpad/{r2,rbase,mutx*,mutc}` y scripts `r2_common.py`, `r2_matriz.py`, `r2_dst.py`, `r2_perf.py`, `r2_carrera.py`, `r2_mut.py`, más `r2/tests/test_rev{,2,3}.py` solo en la copia). El repo no se tocó (`git status` limpio).
-Leído: `git show f867530` (código, DECISIONS, PROGRESS, TASKS, el diff de `tests/test_horas.py`), la revisión anterior (R-01, R-03, R-04, R-05), D-025 con su corrección, D-026, `app/profesional.py` completo.
+Revisor, 2026-10-08. Todo experimento y mutación se hizo en copias bajo el scratchpad (`.../scratchpad/r` = `git archive b372bb6`, `m` = copia mutada, scripts `e1.py`, `mut.py`, y `r/tests/test_rev.py` solo en la copia). El repo no se tocó. Leído: `git show b372bb6` completo, SPEC US-7 y §4, T-06 en TASKS, D-025, D-026, D-027, la entrada de PROGRESS (con la corrección de hora del orquestador, ignorada), `app/paciente.py`, `app/tiempo.py`, `app/profesional.py`, plantillas.
 
 ## Veredicto: APROBADA
 
-No hay hallazgos de severidad alta ni media. Los cuatro hallazgos de T-05 (R-01, R-03, R-04, R-05) quedan cerrados y el criterio de término se cumple (las tres mutaciones exigidas hacen fallar pruebas: 11, 18 y 2). Lo que sigue son bordes y deuda de pruebas para T-06.
+No hay hallazgos de severidad alta ni media. El filtro «futuras» es correcto, independiente de la zona del servidor, y las dos mutaciones exigidas por la nota de T-05b (R-01) hacen fallar pruebas. Quedan deuda menor de pruebas, escala y UX (todo bajo o informativo), más notas para T-07.
 
 ## Qué se verificó ejecutando
 
-- `pytest`: **881 passed en 36,8 s** (coincide con PROGRESS; `test_horas.py` pasó de 138 a 214 casos recolectados = +76; 805 + 76 = 881).
-- **Solape con instantes absolutos**: 400 casos clásicos (5 x 5 x 16 desfases) contra un modelo independiente (`datetime.timestamp()` con `ZoneInfo`): 0 discrepancias. Matriz de cambio de horario: 49 inicios base (alrededor de las 6 transiciones de 2026 a 2028: 22:00, 22:30, 23:00, 23:30, 23:59 del sábado y 00:00, 01:00, 02:00 del domingo) x 6 duraciones x 6 duraciones x 16 desfases = **17 748 casos, 0 discrepancias**. Casos pedidos: septiembre, 50 min a las 23:30 contra 01:00 -> solape; contra 01:19 -> solape; contra 01:20 -> libre (pegada). Abril, 120 min desde las 22:30 contra 00:00 -> libre; 210 min -> solape; 150 min -> pegada, libre. Otro profesional nunca bloquea.
-- **Tope de fecha**: 14 casos con reloj fijo (día exacto, +1 día, 29-feb-2028 -> límite 28-feb-2030 y 01-mar rechazado, 31-dic y 1-ene, 2024-02-29 -> 2026-02-28, 00:00:01 y 23:59) y un caso con `TZ=UTC` en el proceso (22:30 de Chile = 01:30 UTC del día siguiente): el tope usa el día de Chile. En `app/` el único uso de `datetime.now` fuera de `ahora_chile` es `creado_en` del registro (`auth.py:97`), ajeno al tope.
-- **Entradas raras**: 178 envíos (fechas como `9999-12-31`, `10000-01-01`, `+2028-10-09`, dígitos de ancho completo y arábigo-índicos, `2028-10-09\n`, `\x00`, barras, ISO semanal, 5000 caracteres, SQL, `<script>`; horas `24:00`, `10:00:00`, `１０:００`; duraciones `1e2`, `٥٠`, `0x10`, `9`*400; campos repetidos `fecha=2028-10-08&fecha=9999-12-31`, ausentes, JSON, bytes no UTF-8): ninguno dio 500 (solo 200, 302 o 400) y todo lo guardado casó con `^\d{4}-\d\d-\d\dT\d\d:\d\d:00$` y fecha <= límite. No encontré formato que eluda el tope (el valor que se compara es el `date` ya interpretado; con campos repetidos `request.form.get` toma el primero).
-- **Carrera real**: 12 procesos contra un archivo SQLite llamando a `crear_hora` con inicios solapados: 5 corridas, siempre **1 aceptada, 11 rechazadas, 0 transacciones abiertas**. `BEGIN IMMEDIATE` sigue siendo la primera sentencia de `crear_hora` (lectura del código y mutante M07 "solape antes del BEGIN" muere).
-- **Ya publicada vs solape**: doble envío -> «Esa hora ya está publicada.»; mismo inicio con otra duración -> «se solapa»; 10:30 -> «se solapa»; con una fila solapada anterior y una idéntica posterior se elige la idéntica; 10:00/31 -> «se solapa» con la otra. **Otro profesional**: misma hora de otro -> se acepta (302) y no se menciona; el mensaje solo describe filas del propio profesional.
-- **Mutaciones**: 16 propias (R-01 abajo); las 3 del criterio reproducidas (sin tope 11 fallos, solape en reloj de pared 18, sin CSRF en «Eliminar» 2: coinciden con PROGRESS).
-- **Rendimiento**: `buscar_solape` con 50 000 filas de un profesional en archivo SQLite: **0,56 a 0,63 s** (el implementador dice ~0,5 s; coincide); con 5 000 filas, 72 ms; `crear_hora` completo, 0,63 s.
-- **Veracidad**: 76 pruebas nuevas, las 4 líneas eliminadas de `tests/test_horas.py` son: un `import` reemplazado, un `import` local movido arriba, una línea en blanco, y el caso `("10:00", "50", "idéntica")` de la parametrización de solapes, que pasó a la prueba de «ya publicada». Quedan los **9 casos** de solape restantes (conté: 10:25, 09:30, 10:49, 09:11, 10:00/10, 10:00/120, 10:10, 09:00/180, 09:59/52). No se perdió cobertura (el caso idéntico sigue probado, ahora con el mensaje nuevo). D-025 (5): el texto original está **íntegro** (comprobado con una búsqueda de la subcadena original dentro de la línea nueva) y la corrección va añadida después, visible, con fecha y referencia a D-026.
+- `pytest` sobre `b372bb6`: **902 passed en 41,2 s** (coincide con PROGRESS; 881 + 21 = 902, y `tests/test_horas_libres.py` tiene 21 pruebas).
+- **Filtro «futuras»** (`listar_horas_libres_futuras` con base en memoria, mismo script con `TZ=UTC`, `TZ=Asia/Tokyo` y `TZ=America/Santiago`: salidas idénticas byte a byte):
+  - Límite con ahora = 12:00:00: 11:59:59 y 12:00:00 no salen; 12:00:01 sale. Con ahora = 12:00:00,5 sale 12:00:01 y no 12:00:00. Medianoche (ahora 23:59:59): sale 00:00:00 del día siguiente, no 23:59:59 ni 23:59:58.
+  - Franja «ahora .. ahora en UTC» (ahora 12:00 Chile = 15:00Z): salen 13:00 y 15:00 de hoy.
+  - Cambio de horario: abril 2026 (hora repetida) y septiembre 2026 (hora inexistente): no hay excepción; la hora inexistente 00:30 no sale, 01:45 sí.
+  - `tiempo.ahora_chile()` real con `TZ=UTC`, `Asia/Tokyo` y `Pacific/Kiritimati` da la misma hora de Chile (15:13:40 -03:00) y el mismo `timestamp()`.
+  - Margen SQL de 1 día: no excluye ninguna hora válida. Una hora futura tiene reloj de pared >= ahora - 1 h (solo en la hora repetida de abril); el margen de 24 h cubre de sobra. Una hora de ayer (12:00:01) no sale aunque «dure» hasta hoy: solo salen las que empiezan en el futuro, como decide la tarea. Una hora ya iniciada nunca se muestra.
+- **Contenido y privacidad** (cliente de pruebas): la respuesta solo lleva fecha, duración y nombre; no hay correos (probé con `x@x.cl`), ni ids, ni estado. Nombre de profesional `<script>alert(1)</script>"'&` sale escapado (`&lt;script&gt;...&#34;&#39;&amp;`). Cabeceras: `Cache-Control: no-store`, `Pragma: no-cache`, `Vary: Cookie`. Acceso: sin sesión 302 a `/login`, profesional 403, paciente 200. `HEAD` 200, `OPTIONS` 200; `POST` con CSRF válido 405; `PUT/PATCH/DELETE/POST` sin token 400 (la comprobación de CSRF global va antes que el 405; es el comportamiento de toda la app). Parámetros de consulta se ignoran (200). `/paciente/horas/` da 404. Con 2 profesionales el nombre de cada uno aparece en su fila.
+- **Empates**: dos profesionales con el mismo instante salen por id de hora (Beto, id menor, primero). Las mutaciones de desempate (M6) mueren.
+- **Escala**: 50 000 horas libres futuras de un profesional: **1,28 s y 6,55 MB** en una respuesta (cliente de pruebas, base en archivo). Ver R-01.
+- **Refactor `app/tiempo.py`**: el diff de `profesional.py` es solo mover `ahora_chile`, `a_segundos_utc`, `mostrar_inicio` y las dos constantes; cuerpos idénticos; las llamadas pasaron a `tiempo.…`. Sin funciones duplicadas (`grep` de las cinco definiciones: una sola en `tiempo.py`), sin importaciones no usadas (comprobado con `ast` en los tres módulos) y sin ciclo: `tiempo` importa `auth`; `auth` importa `correo`, `db`, `seguridad`, no `tiempo`; `profesional` y `paciente` importan ambos. La suite completa (881 anteriores adaptadas + 21) pasa, así que el comportamiento del profesional (T-05/T-05b) no cambió.
+- **`tests/test_horas.py`**: el diff real es **10 líneas eliminadas y 10 añadidas** (no 11): el `import` de `tiempo`, `AHORA_REAL`, los dos `monkeypatch.setattr(tiempo, "ahora_chile", …)` y las 8 llamadas a `a_segundos_utc`. Ninguna prueba ni aserción se perdió.
+- **Mutaciones propias (16, distintas de las 21 del implementador)**, cada una en copia limpia; primero `tests/test_horas_libres.py`, y las que sobrevivieron, la suite completa:
+  - Mueren (12): M1 tolerancia de 60 s (se muestra una hora ya iniciada), M3 duración sin « min», M4 `|safe` en el nombre (XSS), M6 desempate por id descendente, M8 sin `try/except` de fecha imposible, M9 sin comprobación de `None` (año 9999), M11 día/mes invertidos, M12 `JOIN … ON 1=1`, M13 sin filtro de estado, M14 margen SQL negativo, M16 duración fija 50.
+  - Sobreviven (5): M2 `int(ahora.timestamp())` (equivalente: `inicio_s` es entero, `x > 12,5` y `x > 12` coinciden); M5 `fold=0` -> `fold=1` en `a_segundos_utc` (**sobrevive la suite completa**, R-02); M7 ordenar por el texto de `inicio` en vez del instante (solo difiere en horas repetidas que la app no crea); M10 quitar el enlace «Volver a mi panel» (sin prueba); M15 truncar a 100 filas (sin prueba de tope; R-01).
+- **PROGRESS.md**: 902 pruebas y 21 nuevas, verificado. El resto de lo declarado (recorrido con `flask run`, 21 mutaciones del implementador, `mut_t06.py`) no lo repetí; las que sí reproduje coinciden en dirección con lo declarado (las tres de filtro y orden mueren). La afirmación «11 líneas eliminadas» es en rigor 10 (R-07). La hora de la entrada la corrigió el orquestador (15:12 -> 15:07; segunda vez que ocurre).
 
 ## Qué NO se verificó
 
-- Navegador real, recorrido manual con `flask run` (PROGRESS lo declara honestamente como no hecho).
-- gunicorn con varios workers y WAL.
-- Las 30 mutaciones del implementador, salvo las 3 del criterio: `mut_t05b.py` no está en el repo. Mis 16 son distintas.
-- Otras versiones de Python o de los datos de zona (`tzdata`).
+- Recorrido real con `flask run` y navegador (usé el cliente de pruebas; la respuesta HTML se leyó completa).
+- Concurrencia real (T-06 solo lee).
+- Las 21 mutaciones del implementador y su script (no está en el repo).
+- Lector de pantalla, diseño responsive (HTML sin estilos; T-13).
+- gunicorn / varios workers.
 
 ## Hallazgos
 
-### R-01 — Tres mutaciones propias sobreviven a la suite completa (baja)
-De 16 mutaciones propias (distintas de las 30), 13 mueren y **3 sobreviven con 881 pruebas OK** (corridas con la suite completa):
-- **M11 (la que importa):** `listar_horas_futuras` compara `inicio > ahora` con el «ahora» pasado a UTC ingenuo (`ahora.astimezone(timezone.utc).replace(tzinfo=None)` en vez de `ahora.replace(tzinfo=None)`). Con el reloj fijo a las 12:00 de Chile (15:00 UTC) el panel ocultaría las horas de 12:00 a 15:00 de hoy y nadie lo detecta. No hay prueba con una hora libre del mismo día entre «ahora» y «ahora en UTC». T-06 usará el mismo patrón para la lista de pacientes.
-  Reproducir: en una copia, cambiar la línea `ahora_local = formatear_inicio(...)` como arriba; `pytest` -> 881 passed.
-- **M06:** quitar `ORDER BY inicio` de `buscar_solape`: solo cambia cuál de varias horas solapadas se nombra en el mensaje. Cosmético; la docstring promete «la primera por fecha» y ninguna prueba lo exige.
-- **M04:** aceptar `float` como duración guardada (`isinstance(valor, (int, float))`): la fila REAL pasa a bloquear. No lo produce la aplicación; el comportamiento «la fila con duración REAL no bloquea» (PROGRESS) no tiene prueba que lo fije.
-Mueren: 29-feb -> 1-mar (M01), tope con día de UTC (M02), offset fijo -3 en vez de la zona (M03), `es_la_misma` con `<=` (M05), solape antes del `BEGIN` (M07), fecha de tope en formato ISO (M08), fin del mensaje en UTC (M09), tope +1 día (M10), «ya publicada» devuelve la primera (M12), `inicio_s <= intervalo[1]` (M13), tope solo si hay hora (M14), segundos en el mensaje (M15), sin `rollback` tras solape (M16).
-**Recomendación:** tarea nueva dentro de T-06 (o backlog inmediato): una prueba del panel con una libre a las 13:00 de hoy y reloj a las 12:00 que pase a UTC distinto de Chile; la misma prueba debe existir para la lista de T-06. M06 y M04: ignorar o una prueba de una línea cada una.
+### R-01 — Sin tope ni paginación en la lista — baja
+La consulta trae todas las horas libres futuras y la plantilla las pinta todas. Reproducción: 50 000 filas libres de un profesional, `GET /paciente/horas` con paciente: **1,28 s y 6,55 MB** (lineal). SPEC no pide paginación. Realismo: el tope de 2 años (D-026) y la duración mínima de 1 minuto permiten en teoría ~1 millón de filas por profesional, pero una agenda real tiene unas pocas miles (~0,1-0,5 s y < 1 MB). Además la lista se vuelve inútil para el paciente mucho antes de eso (T-07 necesitará elegir una).
+Recomendación: **backlog** (T-13/T-14). Opciones, de menor a mayor costo: ventana por fecha (p. ej. próximos 60 días con enlace «ver más»), o tope de N filas (100) con aviso «Mostrando las primeras N». Si se pone tope, ordenar con SQL por `inicio` y `LIMIT N + margen` y recién después decidir en Python (el texto ordena el reloj de pared, no el instante, solo en la hora repetida que la app no crea). Añadir la prueba que M15 deja sin cubrir.
 
-### R-02 — La lectura de todas las horas del profesional ocurre dentro del bloqueo de escritura y crece con la historia (baja)
-`buscar_solape` hace `SELECT ... WHERE profesional_id = ?` sin acotar fecha y recorre en Python **todas** las filas, también las pasadas, con `BEGIN IMMEDIATE` ya tomado. Medido: 5 000 filas 72 ms, 50 000 filas 0,6 s. Con 12 procesos simultáneos y 50 000 filas, la cola de bloqueos sobrepasa los 5 s por defecto de `sqlite3` y varios reciben `OperationalError: database is locked` (en mi corrida: «EXC OperationalError database is locked» en ambas repeticiones); con 20 000 filas no ocurrió. Es el R-02 de la revisión anterior, agravado por el barrido en Python. Realista en v1: unas 2 500 filas por año por profesional; 0,6 s tardaría ~20 años. Es aceptable hoy.
-El tiempo de espera de la carrera no depende del número de pacientes, solo de las horas del profesional y de la concurrencia en la **misma** base (un solo escritor global en SQLite).
-¿Conviene limitar a un rango? Sí, a futuro: `inicio BETWEEN` (texto canónico ordenable) del día anterior al día siguiente al candidato lo deja en < 1 ms (medido: 0,16 ms), pero hay que decidir qué hacer con filas insertadas por otro camino con duración enorme (el esquema no pone tope, D-007; la aplicación sí: 480 min).
-**Recomendación:** backlog (T-14, junto con el manejo de «database is locked» con 503 en español); no bloquea T-06.
+### R-02 — `fold` de `a_segundos_utc` sin prueba que lo fije — baja
+La mutación `fold=0` -> `fold=1` en `app/tiempo.py` pasa la suite completa (902). Las pruebas de `a_segundos_utc` con hora inexistente o repetida solo exigen «no es `None`» (`tests/test_horas.py`, heredadas de T-05b). No es un defecto de T-06: la app no guarda horas ambiguas (D-025 4) y solo afectaría filas insertadas por otro camino. Pero T-07/T-08 usarán la función para las reglas de 24 h.
+Recomendación: **backlog** o incluir en T-07: una prueba que fije el valor exacto (`datetime(2027, 4, 3, 23, 30)` -> instante con desfase -03:00 si `fold=0`). Mismo criterio para el enlace «Volver» (M10): una aserción de una línea, **ignorar** si no se toca el archivo.
 
-### R-03 — Filas guardadas en hora ambigua o inexistente, y filas raras (informativa)
-La aplicación no las crea (D-025 4), pero si existen por otro camino se interpretan con `fold=0` (primer pasaje) y el cálculo es coherente: una fila en 23:30 de la noche de abril (+60) ocupa el primer pasaje (hasta la «segunda» 23:30) y deja libre 00:15 y 00:30; una fila en 00:30 de la noche de septiembre (hora que no existe) se toma con el desfase anterior (04:30 UTC, es decir 01:30 en pared) y solapa con 01:15 y no con 23:45 del sábado. Coincide con el modelo (`fold=0`).
-Filas raras con `buscar_solape` y `_describir`: duración 0, -5, `'abc'`, 0.5, 1e30, NULL no se comparan y no lanzan; `2**62` bloquea las horas posteriores (el esquema lo permite) y `_describir` no lanza; `0001-01-01T00:00:00` y `9999-12-31T23:59:59` no lanzan (en 9999 se muestra solo el inicio); `2027-02-30T10:00:00`, `2027-13-01...`, `x` se saltan en la comparación y salen en el mensaje tal cual (`--x `). Candidato en año 9999 (inalcanzable por el tope) lanza `ValueError` dentro del `try`, con `rollback` y re-lanzamiento: no hay transacción abierta.
-**Recomendación:** ignorar.
+### R-03 — Hora repetida guardada por otro camino: la segunda pasada puede ocultarse — informativa
+Con ahora = 04-abr-2026 23:30 en la segunda pasada (`fold=1`, -04:00), una fila `23:45` se interpreta con `fold=0` (primera pasada, -03:00) y se considera pasada, aunque su segunda ocurrencia es futura. No hay forma de crear esa fila desde la app (D-025 4). Documentado en `a_segundos_utc` y D-027. **Ignorar.**
 
-### R-04 — Tope de fecha: detalles de diseño (informativa)
-- El 29 de febrero pasa al 28 de febrero del año destino (si hoy es 29-feb-2028 el límite es 28-feb-2030 y el 1-mar-2030 se rechaza): un día menos que «2 años justos». Coherente con D-026; ningún error.
-- La comparación es por día de Chile (`ahora.date()` del reloj con zona) y el último día se acepta completo, a cualquier hora; una sesión de 480 min que empieza el último día puede terminar pasado el tope: aceptado y documentado en la prueba.
-- Mensaje claro y en español, bajo «Fecha». El tope usa la misma fecha de «ahora» que la comprobación del pasado, un único punto de tiempo (`ahora_chile`).
-**Recomendación:** ignorar.
+### R-04 — La lista y el panel: UX mínima — baja
+Español de Chile correcto («Horas disponibles», «Por ahora no hay horas disponibles. Vuelve a revisar más tarde.», «Volver a mi panel», «Ver horas disponibles»). Con 0 horas se muestra el mensaje y no la tabla. Observaciones para T-13 (diseño), no para esta tarea: la tabla no lleva `<caption>` ni `scope="col"` en los `<th>`; no se muestra la hora de término ni el día de la semana (con una duración de 50 min el paciente no ve a qué hora termina); la página no tiene el botón de cerrar sesión (solo el panel); sin estilos, como se esperaba. **Backlog** (T-13).
 
-### R-05 — «Ya publicada» es correcta y no filtra datos ajenos (informativa)
-La comparación usa solo las filas del `profesional_id` de la sesión; una hora idéntica de otro profesional no produce ese mensaje ni se nombra. Un detalle: el mensaje también aparece si el profesional ve repetida una hora que publicó hace días (no solo un doble clic); es verdadero y suficiente. Si la hora idéntica ya fue reservada por un paciente, el mensaje sigue siendo «ya publicada» (no revela el paciente).
-**Recomendación:** ignorar.
+### R-05 — Respuesta 400 en vez de 405 para métodos con efecto sin token — informativa
+`PUT/PATCH/DELETE/POST` sin `csrf_token` dan 400; con token, `POST` da 405. Es el comportamiento global (CSRF antes del enrutado) ya aceptado en T-04. **Ignorar.**
 
-### R-06 — Interacción con T-06, T-07, T-08 y T-10 (informativa, para quien tome esas tareas)
-- **Regla 5 del SPEC (paciente con dos reservas a la misma hora)**: si T-07 la comprueba por solape de intervalos (no solo mismo `inicio`), debe usar instantes absolutos como aquí; hoy `a_segundos_utc` y `_intervalo_guardado` son funciones «privadas» de `profesional.py`. Conviene moverlas a un módulo compartido (p. ej. `app/horario.py`, con entrada en DECISIONS si es archivo nuevo) en vez de volver a escribir `strftime('%s', ...)` en SQL, que sería el «reloj de pared» corregido aquí.
-- **T-06**: la lista de horas libres y futuras debe comparar texto de reloj de Chile ingenuo (como hace `listar_horas_futuras`) y, ver R-01, tener una prueba de la franja «entre ahora y ahora-UTC».
-- **T-07/T-08**: `UPDATE ... WHERE estado='libre' AND inicio > ?` con el mismo «ahora» de `ahora_chile`; y tratar «la hora ya no existe» (el profesional la eliminó mientras el paciente miraba) igual que «ya no está libre», no como 404. T-08 (cancelar con 24 h) debe usar instantes absolutos (la diferencia de 24 h con reloj de pared falla las dos noches de cambio de horario, igual que R-03 anterior); T-10 igual.
-- **Eliminar, estados**: sin cambios con T-05b; `DELETE` con `estado='libre'` y `ON DELETE SET NULL` siguen siendo la defensa.
-- **Suite**: ~37 s; la proyección de la revisión anterior (70-90 s con T-06..T-13) sigue vigente; el umbral de acción de PROGRESS (60 s) es razonable.
-**Recomendación:** pasar estas notas a las tareas T-06..T-10 (el orquestador).
+### R-06 — El margen SQL (`MARGEN_SQL_DIAS = 1`) es mucho mayor de lo necesario — informativa
+Como se mostró, bastaría 1 hora; un día es inocuo (trae algunas filas de más, ninguna pasa a la lista). La mutación «margen 0» que el implementador dejó viva es defendible: sin margen solo se perdería la segunda pasada de la hora repetida (R-03). No requiere acción.
 
-### R-07 — Veracidad de PROGRESS.md y D-026 (informativa)
-Cuadra con lo ejecutado: 881 pruebas, +76, cuatro líneas eliminadas de `tests/` sin pérdida de cobertura, 9 casos de solape conservados, 11/18/2 fallos en las tres mutaciones del criterio, ~0,5 s con 50 000 filas, suite ~37 s (dice 34 a 38). La corrección de D-025 (5) conserva el texto original. Reservas: (a) el recuento «30 mutantes, 29 muertos» no es reproducible porque `mut_t05b.py` vive en el scratchpad; (b) D-025 (5) y D-026 llevan la hora 13:54 y la entrada de PROGRESS 14:21 (el commit dice 14:21): plausible por haber escrito la decisión antes, no verificable; (c) PROGRESS declara honestamente que no se repitió el recorrido manual ni la concurrencia real tras el cambio. Yo sí repetí la concurrencia (arriba): correcta.
-**Recomendación:** ignorar.
+### R-07 — Precisión de PROGRESS.md — informativa
+«Las 11 líneas eliminadas de `tests/test_horas.py`»: son 10 eliminadas y 10 añadidas, todas adaptaciones (no pérdida de cobertura). La entrada declaró una hora (15:12) posterior al reloj real; el orquestador la corrigió a 15:07. Es la segunda vez (regla 8 de CLAUDE.md). **Decisión humana** (opcional): si se repite, que el implementador pegue la salida de `TZ=America/Santiago date` en la entrada o que la hora la escriba el orquestador al integrar.
 
-## Resumen para el orquestador
+## Notas para T-07 (reservar) y T-08
 
-| ID | Sev. | Qué | Destino |
-|---|---|---|---|
-| R-01 | baja | M11 (listado con «ahora» en UTC), M06 y M04 sobreviven a 881 pruebas | Prueba de listado con franja ahora..ahora-UTC en T-06 (tarea) |
-| R-02 | baja | Barrido completo de horas bajo `BEGIN IMMEDIATE`; 50 000 filas = 0,6 s, 12 procesos = «database is locked» | Backlog T-14 (ventana por fecha + 503) |
-| R-03 | info | Filas ambiguas/inexistentes/raras: comportamiento coherente (`fold=0`) | Ignorar |
-| R-04 | info | Detalles del tope (29-feb, último día entero) | Ignorar |
-| R-05 | info | «Ya publicada» correcta, sin fuga entre profesionales | Ignorar |
-| R-06 | info | Reutilizar instantes absolutos en regla 5 (T-07), 24 h (T-08/T-10); mover funciones a módulo compartido | Notas a T-06..T-10 |
-| R-07 | info | PROGRESS y D-025/D-026 veraces; mutaciones del implementador no reproducibles | Ignorar |
+La lista de T-06 no trae nada para reservar: `listar_horas_libres_futuras` devuelve `id`, `inicio` ya formateado, `duracion_min` y `profesional`. Lo que T-07 necesita y las carreras que aparecerán:
+
+1. **Formulario por fila**: `<form method="post" action="{{ url_for('paciente.reservar', id=hora.id) }}">` con `<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">` y un botón («Reservar»). Quitar la prueba `test_no_hay_boton_de_reservar_todavia` o adaptarla (hoy exige que no haya `<form` ni `reservar`). Ruta `<int(min=1, max=2**63-1):id>` (nota de T-04b R-10) con 404 para id inexistente o gigante.
+2. **Doble reserva (regla 1)**: dos pacientes con la misma hora en pantalla. `UPDATE horas SET estado='reservada', paciente_id=?, reservada_en=? WHERE id=? AND estado='libre'` y mirar `rowcount`: el segundo recibe 0 filas; mostrar «Esa hora ya fue reservada por otra persona. Elige otra.» (200 o 302 a la lista con aviso, no 500 ni 404). Probar con dos procesos reales como en T-05b (una aceptada, el resto rechazadas).
+3. **Hora que ya empezó entre la carga de la lista y el clic**: el UPDATE debe repetir el criterio «futura» con instantes (`tiempo.a_segundos_utc` y `tiempo.ahora_chile().timestamp()`), no confiar en que la lista era reciente. Como el filtro es en Python, o se hace dentro de `BEGIN IMMEDIATE` (leer la fila, comprobar, actualizar) o se acota con el texto canónico en el UPDATE y se confirma en Python; la nota de T-05b R-06 pide instantes absolutos.
+4. **El profesional elimina la hora mientras el paciente la ve** (`DELETE … WHERE estado='libre'` vs `UPDATE … WHERE estado='libre'`): ambas sentencias son atómicas; solo una ve la fila libre. La perdedora debe dar un mensaje, no un 500. Si el paciente pierde, es 404/«esa hora ya no existe»; distinguir de «reservada» exige un `SELECT` posterior (cualquiera sirve, pero que el texto no revele datos de otros pacientes).
+5. **Regla 5 (un paciente no puede tener dos reservas a la misma hora)**: ojo, es por **solape de intervalos** de sus propias reservas (duraciones distintas, distintos profesionales con D-023), no solo por igualdad de `inicio`; hay que calcularlo con instantes y dentro de la misma transacción que reserva (lectura de las reservas del paciente + UPDATE bajo `BEGIN IMMEDIATE`), o dos clics del mismo paciente en dos horas solapadas de dos profesionales pasarían ambos. Con un solo profesional (D-023 pendiente) basta la unicidad de la hora, pero la implementación debe ser correcta si hay más.
+6. **Doble clic del mismo paciente en la misma hora**: el segundo UPDATE da 0 filas; el mensaje correcto es «Ya reservaste esta hora» (distinguir comprobando `paciente_id = sesión`), no «otra persona».
+7. **Después de reservar**: la lista (que filtra `libre`) ya no muestra la hora; redirigir a una confirmación (US-8) y no re-renderizar con POST (recarga reenvía). `Cache-Control: no-store` ya está, así que «atrás» no muestra una lista vieja de forma persistente.
+8. **Reloj**: usar `tiempo.ahora_chile()` (único parcheable); la prueba `test_el_reloj_es_un_unico_punto_parcheable` ya impide un segundo reloj.
+9. **T-08 (cancelar con 24 h)**: la comparación es `inicio_s - ahora_s >= 24*3600` con `a_segundos_utc` (fijar `fold` con R-02 antes, para que la hora repetida tenga resultado determinista).
