@@ -143,9 +143,21 @@ git conserva cada revisión aunque `REVIEW.md` se sobrescriba.
 - **Un error mío, corregido:** el revisor detectó que la fila de `seguridad.py` en `ARCHITECTURE.md` decía "ni acceso a la base de datos", algo que tú no habías aprobado en D-007. La frase la puse yo en las instrucciones al implementador. La eliminé y quedó exactamente lo aprobado.
 - **Lección:** un esquema puede estar perfecto y aun así chocar con una historia de usuario que todavía no se ha implementado. Preguntarle al revisor "¿cómo interactúa esto con las tareas futuras?" encontró más que revisar la tarea sola.
 
+### Vuelta 8 — T-02f Aplicar D-016 y D-017 al esquema
+- **Implementador:** `ON DELETE SET NULL` y el CHECK de formato de `inicio`; 45 pruebas nuevas (232 en total), 9 mutaciones detectadas, flujo reservar → cancelar → eliminar comprobado con claves foráneas activas. **Encontró por su cuenta un defecto de su propio trabajo**: un valor con un carácter nulo (`\x00`) pasa el `GLOB` y elude la UNIQUE. Lo reportó con claridad en vez de ocultarlo.
+- **Pero afirmó algo falso:** sugirió `CHECK (length(inicio) = 19)` como arreglo "que lo cerraría" sin ejecutarlo. Lo probé: **no funciona**, porque `length()` se detiene en el primer NUL. Probé cuatro candidatos y dos sí funcionan.
+- **Mi verificación:** el diff coincidía exactamente con lo aprobado, 232 pruebas en tres entornos, y tres mutaciones propias detectadas (en `ON DELETE` de otras claves y en el GLOB).
+- **Revisor: APROBADO**, y confirmó mi hallazgo. Además descubrió dos consecuencias de D-016 que cambian las tareas futuras:
+  1. `INSERT OR REPLACE` sobre `horas` borra y reinserta la fila, lo que **dispara `ON DELETE SET NULL` y pierde el vínculo de las notificaciones sin avisar**. Quedó prohibido en T-05.
+  2. Como `hora_id` puede ser NULL, T-09, T-10, T-11 y T-12 deben tolerarlo (`LEFT JOIN`, mensajes autosuficientes). Quedó anotado en cada una.
+- **Tu decisión (D-018):** añadir `instr(inicio, char(0)) = 0`, la opción recomendada. Como cambia lo que aprobaste en D-017, la dejé como tarea nueva (**T-02g**) y corregí en `PROGRESS.md` la afirmación falsa, con una nota visible.
+- **Lección:** el mismo agente que encontró el defecto propuso un arreglo que no funcionaba. Encontrar un problema y arreglarlo bien son dos verificaciones distintas.
+
 ### Historial git resultante
 
 ```
+D-018 aprobada, T-02g y notas de hora_id NULL (revisión de T-02f)
+T-02f: aplicar D-016 (ON DELETE SET NULL) y D-017 (formato canónico de inicio) al esquema
 D-016 y D-017 aprobadas por el humano: nueva tarea T-02f
 T-02c revisión: REVIEW.md aprobado, tarea T-02e y propuestas D-016/D-017
 T-02c: reforzar integridad del esquema (D-007 A-F)
@@ -171,12 +183,12 @@ docs: documentación base del proyecto Agenda Psi
 
 ## 4. Estado actual y qué sigue
 
-- Hecho: **T-01, T-02, T-02b, T-02d, T-03, T-03b, T-02c** (187 pruebas pasando).
-- **Decisiones tuyas ya tomadas:** D-007 (esquema), D-015 (correo), D-016 (borrar horas), D-017 (formato de fecha). No hay ninguna pendiente.
-- Siguiente, todas sin decisión tuya: **T-02f** (aplicar D-016 y D-017 al esquema) → **T-02e** (pruebas con el conjunto exacto de valores) → **T-03c** (hallazgos de T-03b, incluye tu política de correo) → **T-04** (login) → **T-05**.
-- Orden: lo impone `TASKS.md` con las dependencias; T-04 no necesita a T-02f ni T-02e, pero T-05 sí.
+- Hecho: **T-01, T-02, T-02b, T-02d, T-03, T-03b, T-02c, T-02f** (232 pruebas pasando).
+- **Decisiones tuyas ya tomadas:** D-007 (esquema), D-015 (correo), D-016 (borrar horas), D-017 (formato de fecha), D-018 (carácter nulo). No hay ninguna pendiente.
+- Siguiente, todas sin decisión tuya: **T-02g** (cerrar el hueco del NUL) → **T-02e** (pruebas con el conjunto exacto de valores) → **T-03c** (hallazgos de T-03b) → **T-04** (login) → **T-05**.
+- Pendiente solo tuyo: autorizar (o no) que `app/correo.py` figure en `ARCHITECTURE.md`; es una línea de documentación.
 
-**Tu primer ejercicio:** lanza tú mismo la vuelta de T-02f con el prompt del Paso B y revisa el resultado con la lista del Paso C. Antes de dar por buena cualquier tarea, haz cuatro preguntas extra: *¿esto rompió algo que ya estaba documentado?*, *¿estas pruebas fallarían si quitara la protección?*, *¿el reporte del agente afirma algo que no ejecutó?* y *¿cómo interactúa esto con las tareas que todavía no existen?*
+**Tu primer ejercicio:** lanza tú mismo la vuelta de T-02g con el prompt del Paso B y revisa el resultado con la lista del Paso C. Antes de dar por buena cualquier tarea, haz cinco preguntas extra: *¿rompió algo documentado?*, *¿las pruebas fallarían si quitara la protección?*, *¿el reporte afirma algo que no ejecutó?*, *¿cómo interactúa esto con las tareas futuras?* y *¿el arreglo propuesto realmente funciona?*
 
 ## 5. Consejos profesionales (lo que hace la diferencia)
 
@@ -208,6 +220,10 @@ docs: documentación base del proyecto Agenda Psi
 26. **Una prueba que acepta lo válido y rechaza lo inválido todavía no fija el conjunto.** Si el CHECK permite un cuarto valor, nada falla. Para restricciones cerradas, prueba el conjunto exacto.
 27. **Si un cambio toca algo ya aprobado, es una tarea nueva con su propia decisión.** No lo escondas dentro de otra tarea; deja la trazabilidad (qué decidiste, cuándo, qué cambió).
 28. **Revisa también tu propio trabajo de orquestador.** La frase no aprobada en `ARCHITECTURE.md` salió de mis instrucciones, no del agente. Cuando el revisor señala algo, comprueba de dónde viene.
+29. **Encontrar un defecto y arreglarlo bien son dos verificaciones distintas.** El implementador halló el NUL y propuso un arreglo que no funcionaba. Prueba el arreglo antes de proponerlo, y prueba varios candidatos.
+30. **Una prueba que "documenta" un defecto aceptándolo es frágil.** Si el defecto se corrige, la prueba falla sin explicar por qué. Mejor una prueba que exija el comportamiento correcto o una marca `xfail(strict=True)` con instrucciones.
+31. **Cada decisión de diseño tiene efectos laterales en el código futuro.** `ON DELETE SET NULL` hace peligroso `INSERT OR REPLACE`. Anota esas consecuencias en las tareas que las sufrirán.
+32. **Conoce los límites de tu herramienta.** `length()` y `GLOB` de SQLite se detienen en un NUL; en otras bases de datos o lenguajes el mismo problema tiene otro nombre.
 
 ## 6. Trampas de principiante que ya viste en acción
 
