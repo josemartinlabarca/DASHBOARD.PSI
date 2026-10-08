@@ -4,9 +4,9 @@ Los agentes agregan aquí una entrada al final de cada vuelta. Lo más reciente 
 
 ## Estado actual
 
-- Fase: 1 (Base) en curso
-- Última tarea hecha: T-02d
-- Próxima tarea: T-03 (T-02c sigue pendiente y requiere decisión humana antes de T-05)
+- Fase: 2 (Usuarios) en curso
+- Última tarea hecha: T-03
+- Próxima tarea: T-04 (T-02c sigue pendiente y requiere decisión humana antes de T-05)
 
 ## Bloqueos y dudas abiertas
 
@@ -43,3 +43,9 @@ _(ninguno)_
 - Cómo se verificó: `pytest` 25 pruebas pasan. Con `app/__init__.py` anterior (git stash) fallan 11 pruebas nuevas; se restauró. Recorrido literal del README en copia temporal con venv nuevo y sin `SECRET_KEY` (pip con red, sin `--system-site-packages`): pip install, `init-db` OK, `run --debug` respondió 200 por curl, `pytest` 25 OK; `run` sin debug ni clave respondió 500 con el mensaje en el log. Copia borrada, sin procesos ni `.db` en el repo.
 - Problemas / dudas: con `flask run` sin clave el servidor arranca y falla en cada petición (500) en lugar de abortar al inicio; costo aceptado en D-008. CLAUDE.md no contradice el README. `FLASK_DEBUG=off` no cuenta como falso para Flask (solo `0`, `false`, `no`).
 - Siguiente paso sugerido: T-03 (registro de pacientes). T-02c sigue requiriendo decisión humana.
+
+### [2026-10-08 00:14] T-03 — Registro de pacientes — Implementador
+- Qué se hizo: `app/auth.py` (blueprint `auth`, GET/POST `/registro`; validación, hash con werkzeug, rol fijo `paciente`, correo normalizado, `creado_en` con zona de Chile, duplicado vía `sqlite3.IntegrityError`); `app/seguridad.py` con CSRF propio y global (D-009); `registro.html`; `base.html` muestra mensajes flash; `inicio.html` enlaza a `/registro`; registro mínimo en la fábrica (después de la exigencia de `SECRET_KEY`). Tras registrar: 302 a `/` con flash de éxito. Decisiones D-009 (CSRF), D-010 (validaciones) y D-011 (`pytest.ini`, absorbe backlog T-02d #4, fila quitada de TASKS.md). D-007 sigue reservada para T-02c.
+- Cómo se verificó: `python3 -m pytest -q` pasa (62 pruebas: las 25 anteriores + 37 nuevas en `tests/test_registro.py` y `tests/test_seguridad.py`). Pruebas de mutación ejecutadas y revertidas: sin `before_request` CSRF fallan 5; con el rol leído del formulario falla 1; sin hash fallan 2; sin capturar `IntegrityError` fallan 4; con `|safe` en el nombre falla 1. Manual con curl en directorio y base temporales (`flask --app app run --debug`, puerto libre): GET `/registro` 200 con token; POST válido (con `rol=profesional` y correo `Ana@Example.cl`) 302 hacia `/`; mismo POST repetido 200 con mensaje de duplicado, sin 500; POST sin token 400 con el mensaje CSRF; en la base: 1 usuario, hash con prefijo `scrypt:`, rol `paciente`, `creado_en` `...-03:00`. Servidor cerrado, temporales borrados, sin `.db` en el repo.
+- Problemas / dudas: el mensaje de duplicado no puede ocultar del todo la existencia del correo sin verificación por correo (aceptado, D-010). `zoneinfo` puede requerir el paquete `tzdata` en Windows; no se agregó dependencia (funciona en Linux/macOS). Los backlog T-02d #2 y #3 siguen para T-04.
+- Siguiente paso sugerido: T-04 (login, logout, decoradores de rol y `create-professional`); usar `seguridad.py` para el formulario de login.

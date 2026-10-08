@@ -29,6 +29,12 @@ def create_app(test_config=None):
 
     db.init_app(app)
 
+    from . import auth, seguridad
+
+    # Después de _preparar_secret_key: su before_request (D-008) corre primero.
+    seguridad.init_app(app)
+    app.register_blueprint(auth.bp)
+
     @app.route("/")
     def inicio():
         return render_template("inicio.html", nombre_proyecto=NOMBRE_PROYECTO)

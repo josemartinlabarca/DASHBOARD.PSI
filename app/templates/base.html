@@ -7,6 +7,11 @@
 </head>
 <body>
   <main>
+    {% with mensajes = get_flashed_messages(with_categories=true) %}
+      {% for categoria, mensaje in mensajes %}
+        <p class="mensaje {{ categoria }}" role="status">{{ mensaje }}</p>
+      {% endfor %}
+    {% endwith %}
     {% block contenido %}{% endblock %}
   </main>
 </body>

@@ -46,6 +46,25 @@ decisión técnica que no esté ya cubierta, en lugar de tomarla en silencio.
 - **Porqué:** La clave solo hace falta para firmar sesiones y CSRF, es decir, al servir peticiones; los comandos CLI (`init-db` y los futuros `create-professional`, `send-reminders`) crean la app pero no atienden peticiones, así que heredan la regla sin trabajo extra. `before_request` vive en la app, no en `flask run`: gunicorn u otro servidor WSGI también pasa por él, de modo que una app sin clave fuera de debug/testing nunca atiende una petición (se ejecuta antes de cualquier vista, también 404 y estáticos). No depende de `sys.argv`. Costo aceptado: con `flask run` sin clave el servidor arranca y falla en cada petición en vez de abortar al inicio.
 - **Alternativas descartadas:** detectar el comando por `sys.argv` (frágil, no cubre WSGI); validar solo en `flask run` (no protege gunicorn); validar al primer request (más estado y no cubre todos los casos que `before_request`); una fábrica separada para la CLI (duplica configuración).
 
+## D-009 — CSRF propio y centralizado en `app/seguridad.py` (sin dependencias)
+- **Fecha:** 2026-10-08
+- **Decisión:** Token aleatorio (`secrets.token_hex(32)`) guardado en la sesión firmada de Flask; las plantillas lo obtienen con `{{ csrf_token() }}` (global de Jinja) y lo envían en el campo `csrf_token` (o en la cabecera `X-CSRFToken`). Un `before_request` verifica con `hmac.compare_digest` en todo método que no sea GET/HEAD/OPTIONS/TRACE y responde 400 con un mensaje claro si falta o no coincide. Se registra después del `before_request` de D-008, así que sin `SECRET_KEY` el error sigue siendo el de la clave (hay prueba).
+- **Porqué:** Son unas 40 líneas, sin dependencia nueva, y al ser global los formularios futuros (login, reservas, horas) no pueden olvidar la verificación. Se crea el archivo `app/seguridad.py` (no previsto en ARCHITECTURE.md) para que sea reutilizable y no quede dentro de `auth.py`.
+- **Alternativas descartadas:** Flask-WTF (dependencia nueva con versión fija; trae formularios y validadores que no usamos); verificar en cada vista (fácil de olvidar).
+
+## D-010 — Validaciones y mensajes del registro
+- **Fecha:** 2026-10-08
+- **Decisión:** Nombre recortado, 1 a 100 caracteres. Correo recortado y en minúsculas, máximo 254 caracteres, con formato `algo@dominio.tld` (regex simple `^[^@\s]+@[^@\s]+\.[^@\s]+$`; sin verificación por correo, fuera de alcance v1). Contraseña de 8 a 128 caracteres, sin recortar (los espacios cuentan). Rol fijado en el servidor a `paciente`; el formulario nunca se lee para el rol. Los errores de formulario responden 200 con el formulario y mensajes junto a cada campo, conservando nombre y correo, nunca la contraseña. `creado_en` con `datetime.now(ZoneInfo("America/Santiago")).isoformat(timespec="seconds")`.
+- **Porqué:** Límites suficientes para personas reales y que acotan el costo del hash (máximo 128). El correo se normaliza antes de guardar para que la restricción UNIQUE cubra variantes de mayúsculas y espacios.
+- **Correo duplicado:** no hay consulta previa; se captura `sqlite3.IntegrityError` del INSERT (sin condición de carrera). El mensaje es "No pudimos registrarte con ese correo. Si ya tienes una cuenta, inicia sesión; si no, prueba con otro correo.": no afirma explícitamente que exista, aunque sin verificación por correo es inevitable que quien lo prueba lo deduzca. Se acepta para v1.
+- **Alternativas descartadas:** validar el correo con una librería (dependencia); exigir confirmación de contraseña (SPEC no lo pide); 409 para el duplicado (se prefiere el mismo flujo de formulario).
+
+## D-011 — `pytest.ini` con `pythonpath = .` y `testpaths = tests`
+- **Fecha:** 2026-10-08
+- **Decisión:** Mantener `pytest.ini` (agregado en T-02d) con `pythonpath = .` y `testpaths = tests`.
+- **Porqué:** Sin `pythonpath = .`, el comando literal `pytest` del README falla en un venv limpio con `ModuleNotFoundError: app`, porque `app` no está instalado como paquete. `testpaths = tests` evita que pytest recorra otras carpetas (venv, etc.). Registra el ítem de backlog "T-02d #4".
+- **Alternativas descartadas:** `pip install -e .` con `pyproject.toml` (más archivos y empaquetado innecesario en v1); `conftest.py` en la raíz (más implícito).
+
 ## Plantilla para nuevas decisiones
 
 ```
