@@ -624,9 +624,10 @@ def peticion_que_espera_el_bloqueo(app, monkeypatch, cliente, ruta_post, ahora_t
 
 
 def test_reservar_usa_el_ahora_posterior_a_la_espera_del_bloqueo(app, pro_id, ana, monkeypatch):
-    """La hora empieza 30 s después de AHORA. La petición espera 0,3 s el bloqueo; tras la
-    espera «ahora» es AHORA + 1 h: ya empezó. Con el reloj leído antes de esperar se reservaría."""
-    hora = insertar(app, pro_id, "2026-10-08T12:00:30")
+    """La hora empieza 24,5 h después de AHORA (T-08e: se puede reservar). La petición espera
+    0,3 s el bloqueo; tras la espera «ahora» es AHORA + 1 h: faltan 23,5 h. Con el reloj leído
+    antes de esperar se reservaría."""
+    hora = insertar(app, pro_id, "2026-10-09T12:30:00")
     peticion_que_espera_el_bloqueo(app, monkeypatch, ana, f"/horas/{hora}/reservar", AHORA + timedelta(hours=1))
     assert fila(app, hora) == ("libre", None, None)
 
@@ -675,6 +676,7 @@ def _rechazos(app, pro_id, beto):
     casos["reservar: ya es tuya"] = ("reservar", reservada(app, pro_id, "2026-10-13T10:00:00"), False)
     casos["reservar: fecha ilegible"] = ("reservar", insertar(app, pro_id, "2026-13-45T99:99:99"), False)
     casos["reservar: ya empezó"] = ("reservar", insertar(app, pro_id, "2026-10-08T11:00:00"), False)
+    casos["reservar: menos de 24 h"] = ("reservar", insertar(app, pro_id, "2026-10-09T11:00:00"), False)
     casos["reservar: solape"] = ("reservar", poner_solape(app, pro_id, "2026-10-14T10:00:00"), False)
     casos["reservar: éxito"] = ("reservar", insertar(app, pro_id, "2026-10-15T10:00:00"), True)
     casos["cancelar: no existe"] = ("cancelar", 998, False)
@@ -688,7 +690,7 @@ def _rechazos(app, pro_id, beto):
 
 def test_cada_salida_de_reservar_y_cancelar_cierra_la_transaccion(app, pro_id, ana, beto):
     casos = _rechazos(app, pro_id, beto)
-    assert len(casos) == 13
+    assert len(casos) == 14
     for nombre, (que, hora, ok_esperado) in casos.items():
         with app.app_context():
             db = get_db()

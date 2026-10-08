@@ -102,6 +102,12 @@ contraseña queda escrita en esa línea (y en el historial del intérprete) y Cl
 avisa "Password input may be echoed"; hazlo solo en pruebas. Después inicia
 sesión en `/login`.
 
+En esta versión solo puede haber **un** profesional: si ya existe uno,
+`create-professional` se niega a crear un segundo, muestra el mensaje «Ya existe
+un profesional; en esta versión solo puede haber uno.» y termina con código 1
+(la base de datos también lo impide con un índice único; D-023). Si dos
+ejecuciones coinciden, una crea la cuenta y la otra recibe ese mensaje.
+
 ### Cookie de sesión
 
 La cookie de sesión es `HttpOnly` y `SameSite=Lax`. No lleva `Secure` porque

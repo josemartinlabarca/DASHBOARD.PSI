@@ -15,6 +15,21 @@ import unicodedata
 GRUPOS_PROHIBIDOS = frozenset({"C"})
 MARCAS_PROHIBIDAS = frozenset({"Mn", "Mc", "Me"})
 
+# D-020 (opción B, T-08e): fuera de ASCII solo se aceptan letras (L*) y números
+# (N*), y además se rechazan de forma explícita los rellenos que se ven como un
+# espacio, un guion o un símbolo: relleno hangul (U+3164, U+115F, U+1160, letras
+# `Lo` que la categoría deja pasar), braille en blanco (U+2800), U+FFFD, U+FFFC,
+# los símbolos de control gráficos U+2400-U+2422, los guiones y rayas
+# U+2010-U+2015 y el punto medio U+00B7. Algunos ya los frena la regla de
+# categorías (no son L ni N): la lista los nombra para que la intención quede
+# escrita y siga valiendo si cambia la versión de Unicode. Lo ASCII no cambia.
+LETRAS_Y_NUMEROS = frozenset({"L", "N"})
+RELLENOS_RECHAZADOS = frozenset(
+    {0x3164, 0x115F, 0x1160, 0x2800, 0xFFFD, 0xFFFC, 0x00B7}
+    | set(range(0x2400, 0x2423))
+    | set(range(0x2010, 0x2016))
+)
+
 
 def normalizar_email(valor):
     """Devuelve el correo normalizado o lanza `ValueError` si es inaceptable.
@@ -29,6 +44,10 @@ def normalizar_email(valor):
     encarga la validación. Si `valor` no es `str` lanza `ValueError` (no
     `TypeError`), de modo que quien la llame solo atrape un tipo de error.
 
+    D-020: un carácter no ASCII debe ser letra o número (`L*`, `N*`) y no estar
+    en `RELLENOS_RECHAZADOS`; `señor@`, tildes, `ü`, kanji y cirílico siguen
+    valiendo. Lo ASCII se juzga como antes (solo espacios, `C*` y marcas).
+
     No resuelve homoglifos de otros alfabetos (D-013, riesgo aceptado).
     """
     if not isinstance(valor, str):
@@ -40,5 +59,9 @@ def normalizar_email(valor):
             raise ValueError("el correo no puede contener espacios")
         categoria = unicodedata.category(caracter)
         if categoria[0] in GRUPOS_PROHIBIDOS or categoria in MARCAS_PROHIBIDAS:
+            raise ValueError("el correo contiene caracteres no permitidos")
+        if ord(caracter) > 127 and (
+            categoria[0] not in LETRAS_Y_NUMEROS or ord(caracter) in RELLENOS_RECHAZADOS
+        ):
             raise ValueError("el correo contiene caracteres no permitidos")
     return texto

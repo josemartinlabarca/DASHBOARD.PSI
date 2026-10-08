@@ -1,9 +1,12 @@
-"""T-07: reservar una hora (US-8; SPEC §4 reglas 1 y 5; D-003)."""
+"""T-07: reservar una hora (US-8; SPEC §4 reglas 1 y 5; D-003).
+
+T-08e (D-029): solo se reserva con MÁS de 24 h de anticipación (regla 7 de SPEC §4).
+"""
 import multiprocessing
 import re
 import sqlite3
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -93,13 +96,13 @@ def reservar_y_aviso(client, hora_id, **extra):
 
 
 def test_reserva_exitosa(app, pro_id, ana):
-    hora = insertar(app, pro_id, "2026-10-09T10:00:00")
+    hora = insertar(app, pro_id, "2026-10-10T10:00:00")
     r = reservar(ana, hora)
     assert r.status_code == 302 and r.headers["Location"] == "/paciente"
     assert fila(app, hora) == ("reservada", uid(app, "ana@example.cl"), "2026-10-08T12:00:00-03:00")
     categoria, texto = aviso(ana, r)
     assert categoria == "exito"
-    assert "09-10-2026 10:00" in texto and "Dr. Pro" in texto
+    assert "10-10-2026 10:00" in texto and "Dr. Pro" in texto
 
 
 def test_reservada_en_es_iso_de_chile_con_zona_como_creado_en(app, pro_id, ana, monkeypatch):
@@ -115,21 +118,21 @@ def test_reservada_en_es_iso_de_chile_con_zona_como_creado_en(app, pro_id, ana, 
 
 def test_reservada_en_trae_segundos_sin_fraccion(app, pro_id, ana, monkeypatch):
     fijar_reloj(monkeypatch, datetime(2026, 10, 8, 12, 0, 0, 987654))
-    hora = insertar(app, pro_id, "2026-10-09T10:00:00")
+    hora = insertar(app, pro_id, "2026-10-10T10:00:00")
     reservar(ana, hora)
     assert fila(app, hora)[2] == "2026-10-08T12:00:00-03:00"
 
 
 def test_la_hora_reservada_deja_de_aparecer_en_la_lista(app, pro_id, ana):
-    a = insertar(app, pro_id, "2026-10-09T10:00:00")
-    insertar(app, pro_id, "2026-10-09T12:00:00")
+    a = insertar(app, pro_id, "2026-10-10T10:00:00")
+    insertar(app, pro_id, "2026-10-10T12:00:00")
     ana.get(reservar(ana, a).headers["Location"])  # consume el aviso de confirmación
-    assert inicios_mostrados(ana.get("/paciente/horas").text) == ["09-10-2026 12:00"]
+    assert inicios_mostrados(ana.get("/paciente/horas").text) == ["10-10-2026 12:00"]
 
 
 def test_solo_cambia_la_fila_reservada(app, pro_id, ana):
-    a = insertar(app, pro_id, "2026-10-09T10:00:00")
-    b = insertar(app, pro_id, "2026-10-09T12:00:00")
+    a = insertar(app, pro_id, "2026-10-10T10:00:00")
+    b = insertar(app, pro_id, "2026-10-10T12:00:00")
     antes = todas(app)
     reservar(ana, a)
     despues = todas(app)
@@ -138,7 +141,7 @@ def test_solo_cambia_la_fila_reservada(app, pro_id, ana):
 
 
 def test_el_paciente_de_la_sesion_se_ignora_lo_que_diga_el_formulario(app, pro_id, ana, beto):
-    hora = insertar(app, pro_id, "2026-10-09T10:00:00")
+    hora = insertar(app, pro_id, "2026-10-10T10:00:00")
     reservar(ana, hora, paciente_id=str(uid(app, "beto@example.cl")), reservada_en="2000-01-01")
     assert fila(app, hora) == ("reservada", uid(app, "ana@example.cl"), "2026-10-08T12:00:00-03:00")
 
@@ -147,7 +150,7 @@ def test_el_paciente_de_la_sesion_se_ignora_lo_que_diga_el_formulario(app, pro_i
 
 
 def test_sin_sesion_redirige_a_login(app, pro_id):
-    hora = insertar(app, pro_id, "2026-10-09T10:00:00")
+    hora = insertar(app, pro_id, "2026-10-10T10:00:00")
     client = app.test_client()
     token = extraer_token(client.get("/login").text)
     r = client.post(f"/horas/{hora}/reservar", data={"csrf_token": token})
@@ -156,7 +159,7 @@ def test_sin_sesion_redirige_a_login(app, pro_id):
 
 
 def test_el_profesional_no_puede_reservar(app, pro_id):
-    hora = insertar(app, pro_id, "2026-10-09T10:00:00")
+    hora = insertar(app, pro_id, "2026-10-10T10:00:00")
     client = app.test_client()
     iniciar(client, "pro@example.cl")
     r = reservar(client, hora, panel="/profesional")
@@ -165,14 +168,14 @@ def test_el_profesional_no_puede_reservar(app, pro_id):
 
 
 def test_sin_token_csrf_se_rechaza_y_no_se_reserva(app, pro_id, ana):
-    hora = insertar(app, pro_id, "2026-10-09T10:00:00")
+    hora = insertar(app, pro_id, "2026-10-10T10:00:00")
     assert reservar(ana, hora, token=False).status_code == 400
     assert reservar(ana, hora, token=False, csrf_token="x" * 64).status_code == 400
     assert fila(app, hora) == ("libre", None, None)
 
 
 def test_get_no_reserva(app, pro_id, ana):
-    hora = insertar(app, pro_id, "2026-10-09T10:00:00")
+    hora = insertar(app, pro_id, "2026-10-10T10:00:00")
     assert ana.get(f"/horas/{hora}/reservar").status_code == 405
     assert fila(app, hora)[0] == "libre"
 
@@ -193,7 +196,7 @@ def test_el_id_maximo_de_sqlite_no_revienta(app, ana):
 
 
 def test_la_segunda_reserva_de_la_misma_hora_falla(app, pro_id, ana, beto):
-    hora = insertar(app, pro_id, "2026-10-09T10:00:00")
+    hora = insertar(app, pro_id, "2026-10-10T10:00:00")
     reservar(ana, hora)
     r = reservar(beto, hora)
     assert r.status_code == 302 and r.headers["Location"] == "/paciente/horas"
@@ -204,8 +207,8 @@ def test_la_segunda_reserva_de_la_misma_hora_falla(app, pro_id, ana, beto):
 
 def test_el_mensaje_no_revela_quien_tiene_la_hora_ni_si_existe(app, pro_id, ana, beto):
     """Hora de otra persona, hora eliminada y hora que nunca existió dan el mismo texto."""
-    ocupada = insertar(app, pro_id, "2026-10-09T10:00:00")
-    eliminada = insertar(app, pro_id, "2026-10-09T12:00:00")
+    ocupada = insertar(app, pro_id, "2026-10-10T10:00:00")
+    eliminada = insertar(app, pro_id, "2026-10-10T12:00:00")
     reservar(ana, ocupada)
     with app.app_context():
         db = get_db()
@@ -218,7 +221,7 @@ def test_el_mensaje_no_revela_quien_tiene_la_hora_ni_si_existe(app, pro_id, ana,
 
 
 def test_doble_clic_del_mismo_paciente_dice_ya_reservaste(app, pro_id, ana):
-    hora = insertar(app, pro_id, "2026-10-09T10:00:00")
+    hora = insertar(app, pro_id, "2026-10-10T10:00:00")
     reservar(ana, hora)
     estado = fila(app, hora)
     assert reservar_y_aviso(ana, hora) == ("error", "Ya reservaste esta hora.")
@@ -226,9 +229,9 @@ def test_doble_clic_del_mismo_paciente_dice_ya_reservaste(app, pro_id, ana):
 
 
 def test_hora_eliminada_por_el_profesional_da_mensaje_y_no_500(app, pro_id, ana):
-    hora = insertar(app, pro_id, "2026-10-09T10:00:00")
+    hora = insertar(app, pro_id, "2026-10-10T10:00:00")
     html = ana.get("/paciente/horas").text  # el paciente ya la tenía en pantalla
-    assert "09-10-2026 10:00" in html
+    assert "10-10-2026 10:00" in html
     pro = app.test_client()
     iniciar(pro, "pro@example.cl")
     token = extraer_token(pro.get("/profesional").text)
@@ -241,7 +244,7 @@ def test_hora_eliminada_por_el_profesional_da_mensaje_y_no_500(app, pro_id, ana)
 
 def test_el_update_condicional_decide_y_se_revisa_rowcount(app, pro_id, ana, beto):
     """Si el UPDATE no cambia ninguna fila (otra escritura se coló) no se confirma la reserva."""
-    hora = insertar(app, pro_id, "2026-10-09T10:00:00")
+    hora = insertar(app, pro_id, "2026-10-10T10:00:00")
     otro = uid(app, "beto@example.cl")
 
     class Intruso:
@@ -279,7 +282,7 @@ def test_la_reserva_se_hace_con_update_condicional_sin_replace():
 
 
 def test_la_primera_sentencia_es_begin_immediate(app, pro_id, ana):
-    hora = insertar(app, pro_id, "2026-10-09T10:00:00")
+    hora = insertar(app, pro_id, "2026-10-10T10:00:00")
     sentencias = []
     with app.app_context():
         db = get_db()
@@ -293,7 +296,7 @@ def test_la_primera_sentencia_es_begin_immediate(app, pro_id, ana):
 def test_entre_comprobar_y_actualizar_nadie_mas_puede_escribir(app, pro_id, ana, monkeypatch):
     """Con la comprobación ya hecha, otra conexión intenta reservar la misma hora: BEGIN
     IMMEDIATE la deja fuera (`database is locked`). Sin bloqueo temprano, entraría."""
-    hora = insertar(app, pro_id, "2026-10-09T10:00:00")
+    hora = insertar(app, pro_id, "2026-10-10T10:00:00")
     resultado = {}
     original = tiempo.intervalo_guardado
 
@@ -334,38 +337,152 @@ def test_no_se_reserva_una_hora_que_ya_empezo_o_paso(app, pro_id, ana):
         assert fila(app, hora) == ("libre", None, None)
 
 
-def test_un_segundo_despues_de_ahora_si_se_reserva(app, pro_id, ana):
-    hora = insertar(app, pro_id, "2026-10-08T12:00:01")
+def test_una_hora_que_empieza_en_menos_de_24_h_se_rechaza_con_mensaje_claro(app, pro_id, ana):
+    cercanas = [
+        insertar(app, pro_id, "2026-10-08T12:00:01"),  # 1 s
+        insertar(app, pro_id, "2026-10-08T15:00:00"),
+        insertar(app, pro_id, "2026-10-09T11:00:00"),  # 23 h
+        insertar(app, pro_id, "2026-10-09T11:59:59"),  # 23 h 59 min 59 s
+    ]
+    for hora in cercanas:
+        categoria, texto = reservar_y_aviso(ana, hora)
+        assert categoria == "error"
+        assert "Solo se puede reservar con más de 24 horas de anticipación" in texto
+        assert "Elige otra de la lista" in texto
+        assert fila(app, hora) == ("libre", None, None)
+
+
+def test_a_las_24_h_exactas_no_se_reserva_y_un_segundo_mas_si(app, pro_id, ana):
+    """Reservar exige MÁS de 24 h (cancelar permite 24 h exactas: D-029, nota de borde)."""
+    exacta = insertar(app, pro_id, "2026-10-09T12:00:00")
+    un_segundo_mas = insertar(app, pro_id, "2026-10-09T12:00:01")
+    assert reservar_y_aviso(ana, exacta)[0] == "error"
+    assert fila(app, exacta) == ("libre", None, None)
+    reservar(ana, un_segundo_mas)
+    assert fila(app, un_segundo_mas)[0] == "reservada"
+
+
+def test_una_fraccion_de_segundo_mas_de_24_h_se_reserva_y_menos_o_igual_no(app, pro_id, ana, monkeypatch):
+    hora = insertar(app, pro_id, "2026-10-09T12:00:00")
+    fijar_reloj(monkeypatch, datetime(2026, 10, 8, 12, 0, 0, 0))  # exactamente 24 h
+    assert reservar_y_aviso(ana, hora)[0] == "error"
+    fijar_reloj(monkeypatch, datetime(2026, 10, 8, 11, 59, 59, 999999))  # 24 h y 1 microsegundo
     reservar(ana, hora)
     assert fila(app, hora)[0] == "reservada"
+
+
+def test_lo_que_se_reserva_siempre_se_puede_cancelar_al_instante(app, pro_id, ana):
+    """Coherencia de D-029: al aceptar una reserva faltan más de 24 h, así que cancelar
+    (que permite desde 24 h exactas) nunca deja una reserva atrapada."""
+    hora = insertar(app, pro_id, "2026-10-09T12:00:01")
+    reservar(ana, hora)
+    with app.app_context():
+        ok, _ = modulo_paciente.cancelar_reserva(get_db(), hora, uid(app, "ana@example.cl"))
+    assert ok is True and fila(app, hora) == ("libre", None, None)
 
 
 def test_la_hora_se_juzga_en_chile_y_no_en_utc(app, pro_id, ana):
-    """Chile 12:00 = 15:00 UTC: la de las 13:00 chilenas es futura aunque en UTC ya pasó."""
-    hora = insertar(app, pro_id, "2026-10-08T13:00:00")
+    """Chile 12:00 = 15:00 UTC: la del día 9 a las 13:00 chilenas está a 25 h; contra la hora
+    UTC de pared (15:00) estaría a 22 h y se rechazaría."""
+    hora = insertar(app, pro_id, "2026-10-09T13:00:00")
     reservar(ana, hora)
     assert fila(app, hora)[0] == "reservada"
+    cercana = insertar(app, pro_id, "2026-10-09T11:00:00")  # 23 h en Chile
+    assert reservar_y_aviso(ana, cercana)[0] == "error"
 
 
-def test_la_hora_que_empieza_entre_la_carga_de_la_lista_y_el_clic_se_rechaza(
+def test_la_hora_que_pasa_a_menos_de_24_h_entre_la_carga_de_la_lista_y_el_clic_se_rechaza(
     app, pro_id, ana, monkeypatch
 ):
-    hora = insertar(app, pro_id, "2026-10-08T12:30:00")
-    assert "08-10-2026 12:30" in ana.get("/paciente/horas").text
-    fijar_reloj(monkeypatch, datetime(2026, 10, 8, 12, 31))
-    assert reservar_y_aviso(ana, hora)[0] == "error"
+    hora = insertar(app, pro_id, "2026-10-09T12:30:00")  # 24,5 h: la lista la ofrece
+    assert "09-10-2026 12:30" in ana.get("/paciente/horas").text
+    fijar_reloj(monkeypatch, datetime(2026, 10, 8, 12, 31))  # ahora faltan 23 h 59 min
+    categoria, texto = reservar_y_aviso(ana, hora)
+    assert categoria == "error" and "más de 24 horas de anticipación" in texto
     assert fila(app, hora)[0] == "libre"
+
+
+def test_un_post_forzado_a_una_hora_a_23_h_se_rechaza_aunque_el_boton_no_exista(app, pro_id, ana):
+    hora = insertar(app, pro_id, "2026-10-09T11:00:00")
+    assert f"/horas/{hora}/reservar" not in ana.get("/paciente/horas").text
+    assert reservar_y_aviso(ana, hora)[0] == "error"
+    assert fila(app, hora) == ("libre", None, None)
 
 
 def test_futuro_o_pasado_se_decide_con_instantes_y_no_con_el_reloj_de_pared(
     app, pro_id, ana, monkeypatch
 ):
     """Noche de abril 2027: ahora son las 23:10 de la SEGUNDA vez (UTC-4 = 03:10Z). La hora
-    guardada 23:40 se lee con fold=0 (UTC-3 = 02:40Z): ya pasó, aunque 23:40 > 23:10 en el reloj."""
+    guardada 23:40 se lee con fold=0 (UTC-3 = 02:40Z): ya pasó, aunque 23:40 > 23:10 en el reloj.
+    El mensaje es el de «ya pasó»: con el reloj de pared sería el de «menos de 24 horas»."""
     fijar_reloj(monkeypatch, datetime(2027, 4, 3, 23, 10), fold=1)
     hora = insertar(app, pro_id, "2027-04-03T23:40:00")
-    assert reservar_y_aviso(ana, hora)[0] == "error"
+    categoria, texto = reservar_y_aviso(ana, hora)
+    assert categoria == "error" and "ya empezó o ya pasó" in texto
     assert fila(app, hora)[0] == "libre"
+
+
+# (ahora local, fold, inicio guardado, ¿se reserva?). Regla: inicio - ahora > 24 h, en instantes
+# absolutos. Misma tabla que la de cancelar pero con el borde estricto: 24 h exactas NO.
+CASOS_RESERVA = [
+    # día normal (UTC-3): ahora 12:00
+    (datetime(2026, 10, 8, 12, 0), 0, "2026-10-09T12:00:00", False),  # 24 h exactas
+    (datetime(2026, 10, 8, 12, 0), 0, "2026-10-09T12:00:01", True),
+    (datetime(2026, 10, 8, 12, 0), 0, "2026-10-09T11:59:59", False),
+    (datetime(2026, 10, 8, 12, 0), 0, "2026-10-09T11:00:00", False),  # 23 h
+    (datetime(2026, 10, 8, 12, 0), 0, "2026-10-09T13:00:00", True),  # 25 h
+    (datetime(2026, 10, 8, 12, 0), 0, "2026-10-08T12:30:00", False),
+    (datetime(2026, 10, 8, 12, 0), 0, "2026-10-10T08:00:00", True),
+    # noche de abril 2027: a las 24:00 del sáb 3 el reloj vuelve a las 23:00 (el día dura 25 h)
+    (datetime(2027, 4, 3, 12, 0), 0, "2027-04-04T11:00:00", False),  # 24 h reales (el reloj marca 23 h)
+    (datetime(2027, 4, 3, 12, 0), 0, "2027-04-04T11:00:01", True),
+    (datetime(2027, 4, 3, 12, 0), 0, "2027-04-04T10:59:59", False),
+    (datetime(2027, 4, 3, 12, 0), 0, "2027-04-04T12:00:00", True),  # 25 h reales
+    (datetime(2027, 4, 3, 23, 30), 1, "2027-04-04T23:30:00", False),  # ahora = la SEGUNDA vez: 24 h
+    (datetime(2027, 4, 3, 23, 30), 1, "2027-04-04T23:30:01", True),
+    (datetime(2027, 4, 3, 23, 30), 1, "2027-04-04T23:29:59", False),
+    (datetime(2027, 4, 3, 23, 30), 0, "2027-04-04T22:30:00", False),  # ahora = la PRIMERA vez: 24 h
+    (datetime(2027, 4, 3, 23, 30), 0, "2027-04-04T22:30:01", True),
+    (datetime(2027, 4, 3, 23, 30), 0, "2027-04-04T22:29:59", False),
+    (datetime(2027, 4, 3, 23, 30), 0, "2027-04-04T23:30:00", True),  # 25 h reales
+    # noche de septiembre 2027: a las 24:00 del sáb 4 el reloj salta a 01:00 (el día dura 23 h)
+    (datetime(2027, 9, 4, 12, 0), 0, "2027-09-05T13:00:00", False),  # 24 h reales (el reloj marca 25 h)
+    (datetime(2027, 9, 4, 12, 0), 0, "2027-09-05T13:00:01", True),
+    (datetime(2027, 9, 4, 12, 0), 0, "2027-09-05T12:59:59", False),  # el reloj de pared diría 24 h 59 min
+    (datetime(2027, 9, 4, 12, 0), 0, "2027-09-05T12:00:00", False),  # 23 h reales
+    (datetime(2027, 9, 4, 12, 0), 0, "2027-09-05T14:00:00", True),
+    (datetime(2027, 9, 4, 23, 30), 0, "2027-09-05T23:30:00", False),  # 23 h reales
+    (datetime(2027, 9, 4, 23, 30), 0, "2027-09-06T00:30:00", False),  # 24 h reales
+    (datetime(2027, 9, 4, 23, 30), 0, "2027-09-06T00:30:01", True),
+]
+
+
+def esperado_reserva(ahora_local, fold, inicio):
+    """Referencia independiente: instantes en UTC con zoneinfo y la regla `> 24 h`."""
+    ahora = ahora_local.replace(tzinfo=auth.zona_chile(), fold=fold).astimezone(timezone.utc)
+    ini = datetime.strptime(inicio, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=auth.zona_chile()).astimezone(timezone.utc)
+    return ini - ahora > timedelta(hours=24)
+
+
+@pytest.mark.parametrize("ahora_local, fold, inicio, permitido", CASOS_RESERVA)
+def test_la_tabla_de_reservas_coincide_con_la_referencia_independiente(ahora_local, fold, inicio, permitido):
+    assert esperado_reserva(ahora_local, fold, inicio) is permitido
+
+
+@pytest.mark.parametrize("ahora_local, fold, inicio, permitido", CASOS_RESERVA)
+def test_anticipacion_de_mas_de_24_horas_en_instantes_absolutos(
+    app, pro_id, ana, monkeypatch, zona_sistema, ahora_local, fold, inicio, permitido
+):
+    """Con el sistema en UTC, Tokio y Chile y en las dos noches de cambio de horario."""
+    fijar_reloj(monkeypatch, ahora_local, fold=fold)
+    hora = insertar(app, pro_id, inicio)
+    categoria, texto = reservar_y_aviso(ana, hora)
+    if permitido:
+        assert categoria == "exito" and fila(app, hora)[0] == "reservada"
+    else:
+        assert categoria == "error"
+        assert "más de 24 horas de anticipación" in texto or "ya empezó o ya pasó" in texto
+        assert fila(app, hora) == ("libre", None, None)
 
 
 def test_el_borde_de_hora_futura_no_depende_de_la_zona_del_sistema(app, pro_id, ana, zona_sistema):
@@ -373,12 +490,14 @@ def test_el_borde_de_hora_futura_no_depende_de_la_zona_del_sistema(app, pro_id, 
     sistema (`ahora.replace(tzinfo=None).timestamp()`) coincide con la correcta solo si el
     equipo está en Chile; la prueba corre con el sistema en UTC, Tokio y Chile."""
     pasada = insertar(app, pro_id, "2026-10-08T12:00:00")  # justo ahora
-    futura = insertar(app, pro_id, "2026-10-08T12:00:01")  # un segundo después
-    lejana = insertar(app, pro_id, "2026-10-08T23:00:00")  # futura en Chile y en UTC
-    assert reservar_y_aviso(ana, pasada)[0] == "error"
-    assert fila(app, pasada) == ("libre", None, None)
-    reservar(ana, futura)
-    assert fila(app, futura)[0] == "reservada"
+    cercana = insertar(app, pro_id, "2026-10-08T12:00:01")  # un segundo después: falta casi nada
+    exacta = insertar(app, pro_id, "2026-10-09T12:00:00")  # exactamente 24 h
+    lejana = insertar(app, pro_id, "2026-10-09T12:00:01")  # 24 h y 1 s
+    assert "ya empezó o ya pasó" in reservar_y_aviso(ana, pasada)[1]
+    assert "más de 24 horas" in reservar_y_aviso(ana, cercana)[1]
+    assert "más de 24 horas" in reservar_y_aviso(ana, exacta)[1]
+    for h in (pasada, cercana, exacta):
+        assert fila(app, h) == ("libre", None, None)
     reservar(ana, lejana)
     assert fila(app, lejana)[0] == "reservada"
 
@@ -392,7 +511,7 @@ def dos_profesionales(app):
     )
 
 
-def con_reserva_existente(app, ana, inicio="2026-10-09T10:00:00", duracion=50):
+def con_reserva_existente(app, ana, inicio="2026-10-10T10:00:00", duracion=50):
     a, b = dos_profesionales(app)
     primera = insertar(app, a, inicio, duracion)
     reservar(ana, primera)
@@ -403,14 +522,14 @@ def con_reserva_existente(app, ana, inicio="2026-10-09T10:00:00", duracion=50):
 @pytest.mark.parametrize(
     "inicio, duracion",
     [
-        ("2026-10-09T10:00:00", 50),  # mismo inicio y duración
-        ("2026-10-09T10:00:00", 10),  # mismo inicio, otra duración
-        ("2026-10-09T10:30:00", 50),  # empieza dentro
-        ("2026-10-09T10:49:59", 50),  # empieza un segundo antes del fin
-        ("2026-10-09T09:30:00", 50),  # termina dentro
-        ("2026-10-09T09:59:00", 2),  # termina un minuto después del inicio
-        ("2026-10-09T09:00:00", 180),  # la contiene
-        ("2026-10-09T10:10:00", 10),  # está contenida
+        ("2026-10-10T10:00:00", 50),  # mismo inicio y duración
+        ("2026-10-10T10:00:00", 10),  # mismo inicio, otra duración
+        ("2026-10-10T10:30:00", 50),  # empieza dentro
+        ("2026-10-10T10:49:59", 50),  # empieza un segundo antes del fin
+        ("2026-10-10T09:30:00", 50),  # termina dentro
+        ("2026-10-10T09:59:00", 2),  # termina un minuto después del inicio
+        ("2026-10-10T09:00:00", 180),  # la contiene
+        ("2026-10-10T10:10:00", 10),  # está contenida
     ],
 )
 def test_solapes_del_mismo_paciente_se_rechazan(app, ana, inicio, duracion):
@@ -418,17 +537,17 @@ def test_solapes_del_mismo_paciente_se_rechazan(app, ana, inicio, duracion):
     intento = insertar(app, b, inicio, duracion)  # otro profesional: igualdad de inicio no basta
     categoria, texto = reservar_y_aviso(ana, intento)
     assert categoria == "error" and "se cruza con otra hora que ya reservaste" in texto
-    assert "09-10-2026 10:00" in texto
+    assert "10-10-2026 10:00" in texto
     assert fila(app, intento) == ("libre", None, None)
 
 
 @pytest.mark.parametrize(
     "inicio, duracion",
     [
-        ("2026-10-09T10:50:00", 50),  # empieza justo cuando termina la otra
-        ("2026-10-09T09:10:00", 50),  # termina justo cuando empieza la otra
-        ("2026-10-09T11:00:00", 50),
-        ("2026-10-10T10:00:00", 50),  # otro día, misma hora
+        ("2026-10-10T10:50:00", 50),  # empieza justo cuando termina la otra
+        ("2026-10-10T09:10:00", 50),  # termina justo cuando empieza la otra
+        ("2026-10-10T11:00:00", 50),
+        ("2026-10-11T10:00:00", 50),  # otro día, misma hora
     ],
 )
 def test_horas_adyacentes_o_separadas_se_reservan(app, ana, inicio, duracion):
@@ -440,16 +559,16 @@ def test_horas_adyacentes_o_separadas_se_reservan(app, ana, inicio, duracion):
 
 def test_mismo_inicio_con_el_mismo_profesional_no_existe_pero_con_dos_si_se_rechaza(app, ana):
     a, b = dos_profesionales(app)
-    una = insertar(app, a, "2026-10-09T10:00:00")
-    otra = insertar(app, b, "2026-10-09T10:00:00")
+    una = insertar(app, a, "2026-10-10T10:00:00")
+    otra = insertar(app, b, "2026-10-10T10:00:00")
     reservar(ana, una)
     assert reservar_y_aviso(ana, otra)[0] == "error"
 
 
 def test_las_reservas_de_otros_pacientes_no_bloquean(app, ana, beto):
     a, b = dos_profesionales(app)
-    con_ana = insertar(app, a, "2026-10-09T10:00:00")
-    para_beto = insertar(app, b, "2026-10-09T10:20:00")
+    con_ana = insertar(app, a, "2026-10-10T10:00:00")
+    para_beto = insertar(app, b, "2026-10-10T10:20:00")
     reservar(ana, con_ana)
     reservar(beto, para_beto)  # solapada con la de Ana, pero son personas distintas
     assert fila(app, para_beto) == ("reservada", uid(app, "beto@example.cl"), "2026-10-08T12:00:00-03:00")
@@ -457,8 +576,8 @@ def test_las_reservas_de_otros_pacientes_no_bloquean(app, ana, beto):
 
 def test_una_reserva_liberada_ya_no_bloquea(app, ana):
     a, b = dos_profesionales(app)
-    primera = insertar(app, a, "2026-10-09T10:00:00")
-    segunda = insertar(app, b, "2026-10-09T10:20:00")
+    primera = insertar(app, a, "2026-10-10T10:00:00")
+    segunda = insertar(app, b, "2026-10-10T10:20:00")
     reservar(ana, primera)
     with app.app_context():
         db = get_db()
@@ -473,7 +592,7 @@ def test_una_reserva_liberada_ya_no_bloquea(app, ana):
 
 def test_un_rechazo_no_deja_la_transaccion_abierta(app, ana):
     _, b = con_reserva_existente(app, ana)
-    intento = insertar(app, b, "2026-10-09T10:10:00")
+    intento = insertar(app, b, "2026-10-10T10:10:00")
     with app.app_context():
         db = get_db()
         ok, _ = modulo_paciente.reservar_hora(
@@ -486,7 +605,7 @@ def test_filas_raras_del_paciente_no_rompen_la_comprobacion(app, ana):
     """El CHECK deja pasar fechas imposibles y duraciones de otro tipo; no son 500."""
     a, b = dos_profesionales(app)
     mala = insertar(app, a, "2026-13-45T99:99:99")
-    texto = insertar(app, a, "2026-10-09T08:00:00")
+    texto = insertar(app, a, "2026-10-10T08:00:00")
     with app.app_context():
         db = get_db()
         pid = uid(app, "ana@example.cl")
@@ -496,7 +615,7 @@ def test_filas_raras_del_paciente_no_rompen_la_comprobacion(app, ana):
         )
         db.execute("UPDATE horas SET duracion_min = 1.5 WHERE id = ?", (texto,))
         db.commit()
-    bien = insertar(app, b, "2026-10-09T10:00:00")
+    bien = insertar(app, b, "2026-10-10T10:00:00")
     reservar(ana, bien)
     assert fila(app, bien)[0] == "reservada"
     assert reservar_y_aviso(ana, mala)[0] == "error"  # fecha imposible: no disponible, no 500

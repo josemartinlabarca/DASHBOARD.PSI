@@ -255,14 +255,171 @@ def test_i_con_punto_se_rechaza_porque_casefold_agrega_un_combinante():
     assert normalizar_email("\u0131@x.cl") != normalizar_email("i@x.cl")
 
 
-def test_ni_el_relleno_hangul_ni_braille_ni_fffd_los_cubre_la_categoria():
-    """Documenta el alcance real de D-015 (opción 2): estos NO son C* ni M*.
+# --- Política D-020 (opción B, T-08e): fuera de ASCII solo letras y números ------
 
-    Siguen aceptados y se reportó como duda; si se decide rechazarlos habrá
-    que cambiar esta prueba junto con la política.
+# Lista de la tarea, escrita aquí aparte (no importada de app.correo) para que
+# un cambio en la lista de la aplicación no cambie lo que la prueba espera.
+RELLENOS = (
+    [0x3164, 0x115F, 0x1160, 0x2800, 0xFFFD, 0xFFFC, 0x00B7]
+    + list(range(0x2400, 0x2423))
+    + list(range(0x2010, 0x2016))
+)
+
+
+@pytest.mark.parametrize("cp", RELLENOS, ids=lambda cp: f"U+{cp:04X}")
+def test_los_rellenos_de_d020_se_rechazan_en_cualquier_posicion(cp):
+    c = chr(cp)
+    for entrada in (f"ana{c}@example.cl", f"{c}ana@example.cl", f"ana@exam{c}ple.cl", f"ana@example.cl{c}"):
+        with pytest.raises(ValueError):
+            normalizar_email(entrada)
+
+
+def test_el_relleno_hangul_de_media_anchura_tambien_se_rechaza_por_nfkc():
+    """U+FFA0 pasa por NFKC a U+1160 (relleno de la lista) y ahí se rechaza."""
+    assert unicodedata.normalize("NFKC", "\uffa0") == "\u1160"
+    with pytest.raises(ValueError):
+        normalizar_email("ana\uffa0@example.cl")
+
+
+def test_los_rellenos_hangul_son_letras_y_solo_la_lista_los_frena():
+    """U+3164, U+115F y U+1160 son `Lo`: sin la lista pasarían la regla de categorías."""
+    for cp in (0x3164, 0x115F, 0x1160):
+        assert unicodedata.category(chr(cp)) == "Lo"
+    # Otras letras hangul vecinas siguen siendo letras válidas.
+    assert normalizar_email("\uac00na@example.cl") == "\uac00na@example.cl"
+    assert normalizar_email("ana\u1161@example.cl") == "ana\u1161@example.cl"
+
+
+def test_solo_el_relleno_hangul_necesita_la_lista_el_resto_ya_cae_por_categoria():
+    """Documenta el solape (D-020): U+3164 pasa por NFKC a U+1160, y de los demás rellenos solo
+    U+115F y U+1160 son letras. Los otros no son L ni N: los frena la categoría y quitarlos de la
+    lista de la aplicación no cambia el resultado (mutación equivalente, ver PROGRESS)."""
+    assert unicodedata.normalize("NFKC", "\u3164") == "\u1160"
+    for cp in RELLENOS:
+        categoria = unicodedata.category(chr(cp))
+        if cp in (0x115F, 0x1160):
+            assert categoria == "Lo", hex(cp)
+        elif cp != 0x3164:
+            assert categoria[0] not in "LN", (hex(cp), categoria)
+
+
+@pytest.mark.parametrize(
+    "entrada",
+    [
+        "se\u00f1or@example.cl",
+        "SE\u00d1OR@example.cl",
+        "jos\u00e9@example.cl",
+        "m\u00fcller@example.cl",
+        "\u00fc\u00f1\u00e1\u00e9\u00ed\u00f3\u00fa@example.cl",
+        "\u5c71\u7530@example.jp",  # kanji
+        "\u0438\u0432\u0430\u043d@example.ru",  # cirílico
+        "\u03b1\u03b2\u03b3@example.gr",  # griego
+        "\u0627\u062d\u0645\u062f@example.sa",  # árabe
+        "ana\u0662@example.cl",  # dígito árabe-índico (Nd)
+        "ana\u2160@example.cl",  # numeral romano (Nl): NFKC lo lleva a «i»
+        "ana@\u00e9xample.cl",
+    ],
+)
+def test_letras_y_numeros_no_ascii_siguen_validos(entrada):
+    assert normalizar_email(entrada)  # no lanza
+
+
+@pytest.mark.parametrize(
+    "entrada",
+    [
+        "ana\u20ac@example.cl",  # € (Sc)
+        "ana\u00a9@example.cl",  # © (So)
+        "ana\u2192@example.cl",  # → (Sm)
+        "ana\u00bf@example.cl",  # ¿ (Po)
+        "ana\u00ab@example.cl",  # « (Pi)
+        "ana\u2018@example.cl",  # ' tipográfico (Pi)
+        "ana\u00a2@example.cl",  # ¢ (Sc)
+        "ana\U0001f600@example.cl",  # emoji (So)
+        "ana\u2022@example.cl",  # viñeta (Po)
+        "ana\u2212@example.cl",  # signo menos (Sm)
+        "ana\u00b4@example.cl",  # acento agudo (Sk): NFKC lo lleva a espacio + U+0301
+    ],
+)
+def test_simbolos_y_puntuacion_no_ascii_se_rechazan(entrada):
+    with pytest.raises(ValueError):
+        normalizar_email(entrada)
+
+
+def test_lo_ascii_acepta_lo_mismo_que_antes_de_d020():
+    """T-08e solo restringe lo no ASCII: todo ASCII imprimible sigue aceptado."""
+    for cp in range(0x21, 0x7F):
+        c = chr(cp)
+        assert normalizar_email(f"a{c}b@x.cl") == f"a{c.casefold()}b@x.cl"
+    for cp in list(range(0x00, 0x21)) + [0x7F]:
+        with pytest.raises(ValueError):
+            normalizar_email(f"a{chr(cp)}b@x.cl")
+
+
+def modelo_acepta(texto):
+    """Modelo independiente de la política (D-015 + D-020) sobre el texto ya normalizado.
+
+    No llama a `normalizar_email` ni importa sus constantes: usa rangos y una
+    tabla propia. ASCII: todo imprimible 0x21-0x7E. No ASCII: solo letras y
+    números (categoría que empieza por L o N) fuera de la lista de rellenos.
     """
-    for ch in ("\u3164", "\u2800", "\ufffd", "\u115f"):
-        assert normalizar_email(f"ana{ch}@example.cl").startswith("ana")
+    for ch in texto:
+        cp = ord(ch)
+        if cp < 0x80:
+            if not 0x21 <= cp <= 0x7E:
+                return False
+        else:
+            if unicodedata.category(ch)[0] not in ("L", "N"):
+                return False
+            if cp in (0x3164, 0x115F, 0x1160, 0x2800, 0xFFFD, 0xFFFC, 0x00B7):
+                return False
+            if 0x2400 <= cp <= 0x2422 or 0x2010 <= cp <= 0x2015:
+                return False
+    return True
+
+
+def preparar_para_modelo(valor):
+    """Normalización de referencia: NFKC, recorte, casefold, NFKC (pasos de D-013)."""
+    t = unicodedata.normalize("NFKC", valor).strip()
+    return unicodedata.normalize("NFKC", t.casefold())
+
+
+def revisar_modelo_en_rango(desde, hasta):
+    """Cada punto de código: lo que acepta/rechaza `normalizar_email` coincide con el modelo."""
+    for cp in puntos_de_codigo(desde, hasta):
+        valor = f"a{chr(cp)}b@x.cl"
+        esperado = modelo_acepta(preparar_para_modelo(valor))
+        try:
+            normalizar_email(valor)
+            real = True
+        except ValueError:
+            real = False
+        assert real == esperado, (hex(cp), unicodedata.category(chr(cp)), "esperado", esperado)
+
+
+def repartir_por_procesos(funcion):
+    total = 0x110000
+    nucleos = os.cpu_count() or 1
+    if nucleos < 2 or "fork" not in multiprocessing.get_all_start_methods():
+        funcion(0, total)
+        return
+    nucleos = min(nucleos, 8)
+    cortes = [total * k // nucleos for k in range(nucleos + 1)]
+    with ProcessPoolExecutor(nucleos, mp_context=multiprocessing.get_context("fork")) as pool:
+        futuros = [pool.submit(funcion, a, b) for a, b in zip(cortes, cortes[1:])]
+        for futuro in futuros:
+            futuro.result()
+
+
+def test_exhaustivo_contra_un_modelo_independiente_en_todos_los_puntos_de_codigo():
+    """D-020: los 1 112 064 puntos de código (sin sustitutos), esperado vs. real."""
+    repartir_por_procesos(revisar_modelo_en_rango)
+
+
+def test_el_modelo_acepta_y_rechaza_lo_que_debe():
+    """Control del propio modelo, para que no acepte todo o rechace todo."""
+    aceptados = sum(modelo_acepta(preparar_para_modelo(f"a{chr(cp)}b")) for cp in range(0x80, 0x3000))
+    assert 5000 < aceptados < 0x3000 - 0x80
+    assert modelo_acepta("se\u00f1or") and not modelo_acepta("a\u3164b") and not modelo_acepta("a b")
 
 
 @pytest.mark.parametrize("valor", [None, 5, 1.5, b"ana@example.cl", ["ana@example.cl"], ("a",), object()])

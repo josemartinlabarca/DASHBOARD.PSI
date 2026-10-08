@@ -29,7 +29,7 @@ Los pacientes se registran solos.
 
 **Paciente**
 - US-7: Veo la lista de horas libres futuras, ordenadas por fecha.
-- US-8: Reservo una hora libre y recibo confirmación.
+- US-8: Reservo una hora libre (que empiece en más de 24 horas) y recibo confirmación.
 - US-9: Cancelo mi reserva con al menos 24 horas de anticipación; la hora vuelve a quedar libre.
 - US-10: Veo mi dashboard: próxima sesión, historial.
 
@@ -46,6 +46,8 @@ Los pacientes se registran solos.
 4. No se puede eliminar una hora ya reservada (primero debe cancelarse).
 5. Un paciente no puede tener dos reservas a la misma hora.
 6. Las contraseñas se guardan con hash, nunca en texto plano.
+7. Solo se puede reservar una hora si faltan **más de 24 horas** para su inicio (medido en instantes absolutos, no en hora de pared); a las 24 h exactas ya no se puede reservar. Cancelar (US-9) sí se permite con 24 h exactas, de modo que toda reserva aceptada puede cancelarse en el momento de hacerla. La lista de horas libres solo ofrece las que cumplen esta regla (D-029).
+8. La regla 5 se entiende como **solape de intervalos**: un paciente no puede tener dos reservas cuyos intervalos [inicio, inicio + duración) se crucen, aunque no empiecen a la misma hora; dos horas contiguas (una termina cuando empieza la otra) no se cruzan (D-029).
 
 ## 5. Notificaciones (alcance v1)
 

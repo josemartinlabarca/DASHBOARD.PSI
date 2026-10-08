@@ -22,6 +22,15 @@ MENSAJE_NO_DISPONIBLE = (
 )  # no existe (la eliminó el profesional) o la tiene otra persona: no se distingue
 MENSAJE_YA_ES_TUYA = "Ya reservaste esta hora."
 MENSAJE_YA_PASO = "Esa hora ya empezó o ya pasó. Elige otra de la lista."
+# D-029 (opción B, T-08e): reservar exige MÁS de 24 h de anticipación
+# (inicio - ahora > 24 h, estrictamente, en instantes absolutos). Cancelar permite
+# exactamente 24 h (>=): toda reserva aceptada tiene, al aceptarse, más de 24 h,
+# así que siempre podría cancelarse en ese mismo instante.
+ANTICIPACION_RESERVAR_S = 24 * 3600
+MENSAJE_POCA_ANTICIPACION_RESERVA = (
+    "Solo se puede reservar con más de 24 horas de anticipación, y a esa hora "
+    "le falta menos. Elige otra de la lista."
+)
 MENSAJE_SOLAPE = (
     "No pudimos reservarla: se cruza con otra hora que ya reservaste ({otra}). "
     "Cancela esa reserva o elige otro horario."
@@ -44,9 +53,11 @@ MENSAJE_CANCELADA = (
 
 
 def listar_horas_libres_futuras(db, ahora):
-    """Horas `libre` cuyo instante de inicio es posterior a `ahora` (con zona), por inicio.
+    """Horas `libre` que todavía se pueden reservar, por inicio (T-08e, D-029).
 
-    La decisión «futura» se toma con instantes absolutos (hora de Chile
+    Solo se listan las que empiezan a MÁS de 24 h de `ahora` (con zona): las que
+    faltan menos (o ya pasaron) se ocultan, porque `reservar_hora` las rechazaría.
+    La decisión se toma con instantes absolutos (hora de Chile
     convertida a UTC, contra `ahora.timestamp()`), no con el texto ni con la
     hora UTC en reloj de pared. El SQL solo acota por un margen de un día para
     no leer todo el historial. Una sola consulta con JOIN trae el nombre del
@@ -69,7 +80,7 @@ def listar_horas_libres_futuras(db, ahora):
         except (ValueError, TypeError):
             continue
         inicio_s = tiempo.a_segundos_utc(local)
-        if inicio_s is None or inicio_s <= ahora_s:
+        if inicio_s is None or inicio_s - ahora_s <= ANTICIPACION_RESERVAR_S:
             continue
         horas.append((inicio_s, fila["id"], fila))
     horas.sort(key=lambda t: (t[0], t[1]))
@@ -153,7 +164,9 @@ def reservar_hora(db, hora_id, paciente_id, reloj=None):
     decide la regla 1 sigue siendo el UPDATE condicional de D-003 con revisión
     de `rowcount`. Regla 5: el paciente no puede tener dos reservas cuyos
     intervalos [inicio, fin) se solapen, medidos en instantes absolutos.
-    Los mensajes no dicen quién tiene una hora ocupada.
+    Los mensajes no dicen quién tiene una hora ocupada. D-029: solo se reserva si
+    faltan más de 24 h (`inicio - ahora > 24 h`, en instantes absolutos), con el
+    reloj leído dentro del bloqueo.
     """
     db.execute("BEGIN IMMEDIATE")
     try:
@@ -176,9 +189,13 @@ def reservar_hora(db, hora_id, paciente_id, reloj=None):
             db.rollback()
             return False, MENSAJE_NO_DISPONIBLE
         inicio_s, fin_s = intervalo
-        if inicio_s <= ahora.timestamp():
+        faltan_s = inicio_s - ahora.timestamp()
+        if faltan_s <= 0:
             db.rollback()
             return False, MENSAJE_YA_PASO
+        if faltan_s <= ANTICIPACION_RESERVAR_S:  # D-029: más de 24 h, estrictamente
+            db.rollback()
+            return False, MENSAJE_POCA_ANTICIPACION_RESERVA
         for propia in db.execute(
             "SELECT inicio, duracion_min FROM horas WHERE paciente_id = ? AND estado = 'reservada'"
             " ORDER BY inicio",

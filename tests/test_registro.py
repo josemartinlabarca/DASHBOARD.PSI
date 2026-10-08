@@ -262,6 +262,34 @@ def test_sz_y_ss_son_el_mismo_correo(app, client):
     assert [u["email"] for u in usuarios(app)] == ["strasse@example.cl"]
 
 
+def test_correo_con_enie_se_registra_y_se_guarda_normalizado(app, client):
+    """T-08e (D-020): las letras no ASCII siguen valiendo."""
+    r = registrar(client, email="Se\u00f1or@Example.cl", nombre="Se\u00f1or Soto")
+    assert r.status_code == 302
+    (u,) = usuarios(app)
+    assert u["email"] == "se\u00f1or@example.cl"
+
+
+def test_quien_se_registro_con_enie_puede_iniciar_sesion_con_mayusculas(app, client):
+    from tests.test_login import iniciar
+
+    registrar(client, email="se\u00f1or@example.cl")
+    r = iniciar(app.test_client(), "SE\u00d1OR@Example.CL", password=VALIDO["password"])
+    assert r.status_code == 302 and r.headers["Location"] == "/paciente"
+
+
+@pytest.mark.parametrize(
+    "relleno",
+    ["\u3164", "\u115f", "\u1160", "\u2800", "\ufffd", "\ufffc", "\u2400", "\u2422", "\u2010", "\u2015", "\u00b7"],
+)
+def test_correo_con_rellenos_visualmente_vacios_se_rechaza(app, client, relleno):
+    """T-08e (D-020): relleno hangul, braille en blanco, símbolos y guiones no ASCII."""
+    r = registrar(client, email=f"ana{relleno}@example.cl")
+    assert r.status_code == 200
+    assert "correo válido" in r.text
+    assert usuarios(app) == []
+
+
 @pytest.mark.parametrize("email", ["ana\u200b@example.cl", "ana\x00@example.cl", "an a@example.cl"])
 def test_correo_con_invisibles_control_o_espacios_se_rechaza(app, client, email):
     r = registrar(client, email=email)

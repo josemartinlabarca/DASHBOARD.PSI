@@ -2,6 +2,8 @@ import os
 import sqlite3
 import subprocess
 import sys
+import time
+from pathlib import Path
 
 import pytest
 from werkzeug.security import check_password_hash
@@ -335,3 +337,123 @@ def test_por_la_cli_real_la_segunda_ejecucion_se_niega(tmp_path):
     con = sqlite3.connect(tmp_path / "cli2.db")
     assert con.execute("SELECT email FROM usuarios").fetchall() == [("uno@example.cl",)]
     con.close()
+
+
+# ------------------------------------- T-08e (R-01 de la revisión de T-08d) ----
+
+
+def test_el_comando_abre_begin_immediate_antes_de_comprobar_si_hay_profesional(app, runner, monkeypatch):
+    """Caja blanca: la primera sentencia de la transacción es `BEGIN IMMEDIATE` (no `BEGIN`)
+    y ocurre antes del `SELECT` que busca al profesional existente."""
+    real = auth.get_db
+    espia = {}
+
+    def con_traza():
+        db = espia.get("db") or real()
+        if "db" not in espia:
+            espia["db"] = db
+            espia["sentencias"] = []
+            db.set_trace_callback(espia["sentencias"].append)
+        return db
+
+    monkeypatch.setattr(auth, "get_db", con_traza)
+    assert crear_pro(runner).exit_code == 0
+    sentencias = espia["sentencias"]
+    assert "BEGIN IMMEDIATE" in sentencias
+    assert "BEGIN" not in sentencias
+    comprobacion = next(i for i, s in enumerate(sentencias) if s.startswith("SELECT 1 FROM usuarios WHERE rol"))
+    assert sentencias.index("BEGIN IMMEDIATE") < comprobacion
+    assert not [s for s in sentencias[:comprobacion] if s.startswith(("INSERT", "UPDATE", "SELECT 1 FROM usuarios"))]
+
+
+def test_mientras_comprueba_nadie_mas_puede_tomar_el_bloqueo_de_escritura(app, runner, monkeypatch):
+    """Comportamiento en el mismo proceso: justo cuando el comando hace su `SELECT`, otra conexión
+    intenta `BEGIN IMMEDIATE`. Con `BEGIN IMMEDIATE` ya tiene el bloqueo y la otra espera (`database
+    is locked`); con un `BEGIN` normal el bloqueo de escritura aún está libre y la otra entra."""
+    real = auth.get_db
+    resultado = {}
+
+    class Observador:
+        def __init__(self, con):
+            self._con = con
+
+        def execute(self, sql, *args):
+            if sql.startswith("SELECT 1 FROM usuarios WHERE rol"):
+                rival = sqlite3.connect(app.config["DATABASE"], timeout=0.05)
+                try:
+                    rival.execute("BEGIN IMMEDIATE")
+                    resultado["rival"] = "entró"
+                    rival.rollback()
+                except sqlite3.OperationalError as error:
+                    resultado["rival"] = str(error)
+                finally:
+                    rival.close()
+            return self._con.execute(sql, *args)
+
+        def __getattr__(self, nombre):
+            return getattr(self._con, nombre)
+
+    monkeypatch.setattr(auth, "get_db", lambda: Observador(real()))
+    assert crear_pro(runner).exit_code == 0
+    assert resultado["rival"] == "database is locked"
+
+
+SCRIPT_BARRERA = """
+import sys, time
+import app  # importar antes de la barrera: ambos procesos arrancan el comando a la vez
+from flask.cli import main
+salida, email = float(sys.argv[1]), sys.argv[2]
+sys.argv = ["flask", "--app", "app", "create-professional", "--email", email, "--nombre", "Pro"]
+time.sleep(max(0.0, salida - time.time()))
+main()
+"""
+
+
+def lanzar_dos_create_professional(tmp_path, ronda):
+    """Dos procesos reales de `create-professional` contra la misma base, arrancados a la vez."""
+    entorno = {k: v for k, v in os.environ.items() if k not in ("SECRET_KEY", "FLASK_DEBUG")}
+    ruta = tmp_path / f"carrera{ronda}.db"
+    entorno["DATABASE"] = str(ruta)
+    entorno["PYTHONPATH"] = str(Path(auth.__file__).parent.parent)  # el script vive en otra carpeta
+    subprocess.run(
+        [sys.executable, "-m", "flask", "--app", "app", "init-db"],
+        env=entorno, capture_output=True, text=True, check=True,
+    )
+    script = tmp_path / "con_barrera.py"
+    script.write_text(SCRIPT_BARRERA)
+    salida = time.time() + 1.0
+    procesos = [
+        subprocess.Popen(
+            [sys.executable, str(script), str(salida), email],
+            env=entorno, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        for email in ("uno@example.cl", "dos@example.cl")
+    ]
+    for proceso in procesos:  # la contraseña a los dos antes de esperar a ninguno: si no, se serializan
+        proceso.stdin.write("clave-segura-1\nclave-segura-1\n")
+        proceso.stdin.close()
+    resultados = []
+    for proceso in procesos:
+        out, err = proceso.communicate(timeout=60)
+        resultados.append((proceso.returncode, out, err))
+    con = sqlite3.connect(ruta)
+    try:
+        profesionales = con.execute("SELECT email FROM usuarios WHERE rol = 'profesional'").fetchall()
+    finally:
+        con.close()
+    return resultados, profesionales
+
+
+def test_dos_create_professional_simultaneos_uno_crea_y_el_otro_recibe_el_mensaje(tmp_path):
+    """Comportamiento con dos procesos reales (R-01 de T-08d): con `BEGIN` normal ambos leen «no hay
+    profesional» y uno termina con traceback `database is locked`; con `BEGIN IMMEDIATE` el segundo espera
+    y recibe el mensaje en español con código 1."""
+    resultados, profesionales = lanzar_dos_create_professional(tmp_path, 1)
+    codigos = sorted(r[0] for r in resultados)
+    detalle = repr(resultados)
+    assert codigos == [0, 1], detalle
+    (rechazado,) = [r for r in resultados if r[0] == 1]
+    assert MENSAJE_EXISTE in rechazado[2], detalle
+    for _, _, err in resultados:
+        assert "Traceback" not in err and "database is locked" not in err, detalle
+    assert len(profesionales) == 1
