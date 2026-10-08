@@ -239,6 +239,24 @@ Autorizas a que se modifique `ARCHITECTURE.md` (que `CLAUDE.md` reserva al human
 - **Porqué:** mensajes y tiempos iguales impiden enumerar cuentas; leer el rol de la base evita roles obsoletos en una cookie firmada de larga vida; sin `next` se elimina la clase de ataque; el aviso solo al servir evita ruido en los comandos de mantenimiento.
 - **Alternativas descartadas:** 401 para el login fallido (rompe el flujo de formulario de D-010); guardar el rol en la sesión; un `next` validado contra una lista (más código y superficie, la tarea no lo pide); `--password` u `--password-file` en `create-professional`; un `errorhandler(403)` global (es trabajo de T-13); detectar el comando por `sys.argv`.
 
+## D-022 — Revocar la sesión al cerrar sesión (PROPUESTA, pendiente del humano)
+- **Fecha:** 2026-10-08
+- **Estado:** PROPUESTA. No bloquea T-04b ni T-05. Origen: revisión de T-04, R-02.
+- **Problema:** la sesión de Flask va en una cookie firmada. Tras `POST /logout` el navegador la borra, pero **quien tenga una copia de la cookie anterior** (robada o guardada) sigue autenticado hasta 31 días, porque el servidor no guarda nada que se pueda invalidar. Reproducido con el cliente de pruebas.
+- **Opciones:**
+  - **A.** Aceptar y documentar (riesgo bajo en una app de práctica, sin HTTPS aún) y acortar `PERMANENT_SESSION_LIFETIME` (p. ej. 8 horas). Sin cambios de esquema.
+  - **B (recomendada).** Columna `sesion_version INTEGER NOT NULL DEFAULT 0` en `usuarios`; la cookie guarda `(id, version)`; el logout y el cambio de contraseña la incrementan. Cambia `schema.sql` y `ARCHITECTURE.md` (autorización del humano).
+  - **C.** Tabla de sesiones en el servidor (más compleja; no recomendada aquí).
+
+## D-023 — Un solo profesional (PROPUESTA, pendiente del humano)
+- **Fecha:** 2026-10-08
+- **Estado:** PROPUESTA. No bloquea T-04b; conviene decidirla antes de T-05. Origen: revisión de T-04, R-04.
+- **Problema:** `create-professional` permite crear varios profesionales (el revisor creó 4). D-004 y D-007 suponen uno solo para cubrir la regla §4.5 (no solapar sesiones del mismo profesional).
+- **Opciones:**
+  - **A (recomendada).** El comando se niega si ya existe un profesional (mensaje en español) y se añade un índice único parcial `CREATE UNIQUE INDEX ... ON usuarios (rol) WHERE rol='profesional'` (cambia `schema.sql`, `ARCHITECTURE.md` y la comparación exacta de `tests/test_esquema.py`).
+  - **B.** Solo la negativa en el comando, sin índice (más simple, pero la base no lo garantiza).
+  - **C.** Permitir varios profesionales y generalizar SPEC (cada profesional con su agenda): amplía el alcance de T-06 en adelante.
+
 ## Plantilla para nuevas decisiones
 
 ```

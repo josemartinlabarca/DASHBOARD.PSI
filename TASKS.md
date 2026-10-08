@@ -107,11 +107,18 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Qué:** `/login`, `/logout`, decoradores `solo_paciente` y `solo_profesional`, comando `create-professional`. Debe además: (a) usar `normalizar_email()` de T-03b; (b) llamar a `session.clear()` y regenerar el token CSRF al iniciar y cerrar sesión (evita fijación de sesión); (c) guardar en la sesión **solo el id del usuario**; (d) fijar `SESSION_COOKIE_SAMESITE="Lax"`; (e) un mensaje **único** para credenciales inválidas, sin distinguir correo inexistente de contraseña errónea; (f) absorber los ítems del backlog T-02d #2 y #3. **Añadidos por la revisión de T-03c:** (g) el login captura el `ValueError` de `normalizar_email` y responde con el **mismo** mensaje genérico, calculando un hash falso para igualar tiempos (R-07); (h) `create-professional` reutiliza `es_correo_duplicado` de `app/auth.py` (R-08); (i) la fixture de hash rápido (D-019) debe cubrir cualquier módulo nuevo que importe `generate_password_hash`/`check_password_hash`, añadir `--strict-markers` a `pytest.ini` y una prueba que falle si el hash rápido no está activo (R-06); (j) el campo de correo de `registro.html` y de `login.html` no puede usar `type="email"` con validación del navegador si bloquea `señor@…` (R-04): usar `type="text"` con `inputmode="email"` y `autocomplete="email"`, y comprobarlo en un navegador.
 - **Término:** Pruebas: login correcto/incorrecto, paciente no accede a `/profesional` (US-3), el token CSRF cambia tras el login, el mensaje de error es idéntico para correo inexistente y contraseña errónea.
 
+### T-04b — Cerrar hallazgos de la revisión de T-04 (sin decisiones humanas)
+- **Estado:** PENDIENTE
+- **Depende de:** T-04
+- **Qué:** (1) **R-01 (media):** pruebas de CSRF en `/login` (POST sin token → 400; con token de otra sesión → 400; el token anterior al login ya no sirve); la mutación "eximir `/login` del CSRF" debe hacer fallar una prueba. (2) **R-03 (media):** `Cache-Control: no-store` (y `Pragma: no-cache`) en toda respuesta de páginas privadas y en `/login` tras autenticarse, con pruebas; verificar que el botón «atrás» tras el logout no muestra el panel (documenta lo que se pueda comprobar). (3) **R-05 (baja):** una prueba que compare cabeceras y código de estado entre los distintos fallos de login, y el borde del id de sesión (`2**63 - 1`, `2**63`, `0`, `-1`) sin 500. (4) **R-07 (baja):** el nombre (registro y `create-professional`) rechaza caracteres de control, saltos de línea, ESC y marcas bidi (categorías `C*`), con mensaje en español; pruebas. (5) **R-06 (baja):** crear `hash_falso()` al construir la app (o al primer arranque) para que el primer login de un correo inexistente no sea más lento y no se calcule varias veces en paralelo; prueba que lo fije.
+- **Término:** Las mutaciones "eximir `/login` del CSRF", "quitar `no-store`", "nombre con salto de línea aceptado" y "id `2**63` sin validar" hacen fallar al menos una prueba; `python3 -m pytest` pasa. Debe quedar HECHA **antes** de T-05.
+- **Origen:** REVIEW de T-04 (R-01, R-03, R-05, R-06, R-07).
+
 ## Fase 3 — Horas
 
 ### T-05 — Profesional agrega y elimina horas
 - **Estado:** PENDIENTE
-- **Depende de:** T-04, T-02c, T-02e, T-02f, T-02g
+- **Depende de:** T-04, T-04b, T-02c, T-02e, T-02f, T-02g
 - **Qué:** Formulario y rutas de US-4 y US-5 con reglas 2, 3 y 4.
 - **Requisitos que vienen de las revisiones de T-02c (resolver al implementar):** (a) **D-016 y D-017 ya están decididas** (T-02f las aplica al esquema): la aplicación debe guardar `inicio` siempre en formato canónico `YYYY-MM-DDTHH:MM:SS` hora local de Chile, validar que la fecha exista y no sea pasada, y poder eliminar una hora que fue reservada y cancelada; (b) la comprobación de solape (regla §4.3 y §4.5) debe hacerse dentro de una transacción `BEGIN IMMEDIATE`, porque el esquema solo impide inicios idénticos, no solapes parciales; (c) pruebas del flujo real: reservar → cancelar → eliminar la hora debe funcionar.
 - **Consecuencia de D-016 (revisión de T-02f, hallazgo 3):** `INSERT OR REPLACE` / `REPLACE INTO` sobre `horas` borra y reinserta la fila, lo que **dispara `ON DELETE SET NULL` y pierde el vínculo de las notificaciones sin avisar** (comprobado por el revisor). Prohibido en todo el código sobre `horas`: usar `INSERT`, `UPDATE` o `DELETE` explícitos (una prueba o una comprobación sobre el código fuente debe vigilarlo). `UPDATE` y `ON CONFLICT DO UPDATE` no lo disparan. Además `inicio` solo se guarda como resultado de formatear un `datetime` (nunca texto crudo del formulario).
@@ -209,6 +216,10 @@ en qué tarea conviene absorberlo.
 | T-02e R-05 | Quedan 4 pruebas de rechazo con `IntegrityError` desnudo (2 en `test_esquema.py`, 2 en `test_db.py`), duplicadas por otras que sí exigen el CHECK | cuando se toque ese archivo |
 | T-03c R-11 | La suite no quedó más rápida (≈11 s): `test_esquema.py` gasta ~4 s en crear la base de cada prueba y la prueba exhaustiva de idempotencia 2,4 s. Fixture de módulo/sesión para la base de solo lectura | cuando la suite pase de ~15 s |
 | T-03c R-12 | Los puntos no asignados (Cn) dependen de la versión de Unicode de Python: un Python más antiguo podría rechazar en el login un correo ya registrado | T-14 (fijar versión mínima de Python o revisar) |
+| T-04 R-09 | Mensajes de Click (contraseñas que no coinciden) y la página 400 en inglés; accesibilidad del login sin pruebas | T-13 |
+| T-04 R-08 | Con la clave de desarrollo pública (`FLASK_DEBUG=1`) cualquiera puede forjar una cookie y entrar al panel del profesional (ya anotado en T-02d #1) | T-14 |
+| T-04 R-12 | Prueba de lista blanca de rutas públicas: toda ruta nueva debe exigir sesión salvo las declaradas públicas | T-05 |
+| T-04 | Sin límite de intentos de login ni bloqueo | T-14 |
 | T-02c #9 | En `tests/test_esquema.py` la cobertura de NOT NULL y FK es triplemente redundante y la rama `usuarios` de `test_not_null_rechaza_null` es poco legible | cuando se toque ese archivo |
 
 ---
