@@ -737,3 +737,42 @@ def test_comodines_de_glob_y_otros_separadores_rechazados(db, ids, inicio):
         "CHECK constraint failed",
     )
     assert db.execute("SELECT COUNT(*) FROM horas").fetchone()[0] == 0
+
+
+# --- Dígitos de borde en cada posición (ronda 2 de T-02g) --------------------------
+# Un GLOB que rechazara un dígito legítimo (p. ej. `[0-8]` en vez de `[0-9]`) no lo
+# detectaban las pruebas anteriores. Aquí cada posición de dígito se prueba con 0 y 9.
+# La base solo comprueba la FORMA; que la fecha exista (mes 13, hora 25...) lo valida
+# la aplicación en T-05.
+
+POSICIONES_DE_DIGITO = [pos for pos in range(len(CANONICO)) if pos not in SEPARADORES]
+
+
+def _digitos_de_borde():
+    for pos in POSICIONES_DE_DIGITO:
+        for digito in "90":
+            yield pytest.param(
+                CANONICO[:pos] + digito + CANONICO[pos + 1 :],
+                id=f"pos{pos:02d}-{digito}",
+            )
+
+
+def test_hay_14_posiciones_de_digito():
+    assert len(POSICIONES_DE_DIGITO) == 14
+
+
+@pytest.mark.parametrize("inicio", list(_digitos_de_borde()))
+def test_digito_de_borde_en_cada_posicion_se_acepta_en_la_base(db, ids, inicio):
+    insertar_hora(db, profesional_id=ids["prof"], inicio=inicio)
+    filas = db.execute("SELECT inicio FROM horas").fetchall()
+    assert [f[0] for f in filas] == [inicio]
+
+
+@pytest.mark.parametrize(
+    "inicio",
+    ["0000-00-00T00:00:00", "9999-99-99T99:99:99"],
+    ids=["todo-ceros", "todo-nueves"],
+)
+def test_extremos_de_forma_valida_se_aceptan_en_la_base(db, ids, inicio):
+    insertar_hora(db, profesional_id=ids["prof"], inicio=inicio)
+    assert db.execute("SELECT inicio FROM horas").fetchone()[0] == inicio
