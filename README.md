@@ -32,6 +32,21 @@ flask --app app run --debug      # http://127.0.0.1:5000
 pytest                           # corre las pruebas
 ```
 
+### Cambios de esquema y `agenda.db` existente
+
+`init-db` solo crea las tablas que faltan (`CREATE TABLE IF NOT EXISTS`, D-006):
+**no modifica tablas ya existentes**. Si ya tienes un `agenda.db` creado con un
+esquema anterior (por ejemplo, antes de T-02c, que agregó restricciones), seguirá
+funcionando pero **sin las restricciones nuevas**. Mientras sea una base de
+práctica, bórrala y vuelve a ejecutar `init-db`:
+
+```bash
+rm agenda.db                     # en Windows: del agenda.db
+flask --app app init-db
+```
+
+Esto borra todos sus datos; no lo hagas con datos que quieras conservar.
+
 ### Variable `SECRET_KEY`
 
 `SECRET_KEY` es la clave secreta con la que Flask firma las sesiones y los

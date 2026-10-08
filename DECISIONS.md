@@ -96,6 +96,7 @@ Autorizas a que se modifique `ARCHITECTURE.md` (que `CLAUDE.md` reserva al human
 - **Aprobada por:** el humano (usuario de la sesión), mensaje de las 00:25 del 2026-10-08: "a acepto, b acepto, c acepto, d acepto, e acepto, f acepto".
 - **Resultado:** A, B, C, D, E y F aprobadas sin cambios.
 - T-02c queda desbloqueada y es la siguiente tarea de esquema; debe ejecutarse **antes de T-04** (el login consultará `usuarios.email`, que cambia por la opción E) y en todo caso antes de T-05.
+- **Implementada:** T-02c, 2026-10-08 00:50
 
 ## D-008 — `SECRET_KEY` se exige al atender peticiones, no al crear la app
 - **Fecha:** 2026-10-08

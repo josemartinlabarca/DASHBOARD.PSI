@@ -9,6 +9,7 @@ agenda-psi/
 │   ├── db.py              # conexión SQLite, init-db
 │   ├── schema.sql         # definición de tablas
 │   ├── auth.py            # registro, login, logout, decoradores de rol
+│   ├── seguridad.py       # protección CSRF global (token en sesión, before_request)
 │   ├── paciente.py        # rutas del paciente (dashboard, horas libres, reservar, cancelar)
 │   ├── profesional.py     # rutas del profesional (dashboard, agregar/eliminar horas)
 │   ├── notificaciones.py  # crear notificación, escribir outbox.log, recordatorios
@@ -25,6 +26,7 @@ agenda-psi/
 |---|---|---|
 | `db.py` | Abrir conexión, inicializar esquema | Lógica de negocio |
 | `auth.py` | Usuarios, sesiones, control de rol | Reservas |
+| `seguridad.py` | Token CSRF y verificación en todo método que modifica estado | Reglas de negocio ni acceso a la base de datos |
 | `profesional.py` | CRUD de horas disponibles | Notificar directamente (llama a `notificaciones.py`) |
 | `paciente.py` | Listar, reservar, cancelar | Modificar horas de otros |
 | `notificaciones.py` | Registrar y "enviar" avisos | Decidir reglas de reserva |
@@ -34,7 +36,7 @@ agenda-psi/
 **usuarios**
 - `id` INTEGER PK
 - `nombre` TEXT NOT NULL
-- `email` TEXT NOT NULL UNIQUE
+- `email` TEXT NOT NULL UNIQUE COLLATE NOCASE (no distingue mayúsculas ASCII; no sustituye a la normalización de la aplicación)
 - `password_hash` TEXT NOT NULL
 - `rol` TEXT NOT NULL CHECK (rol IN ('paciente','profesional'))
 - `creado_en` TEXT NOT NULL
@@ -43,20 +45,22 @@ agenda-psi/
 - `id` INTEGER PK
 - `profesional_id` INTEGER NOT NULL → usuarios.id
 - `inicio` TEXT NOT NULL (ISO 8601, hora local de Chile)
-- `duracion_min` INTEGER NOT NULL DEFAULT 50
+- `duracion_min` INTEGER NOT NULL DEFAULT 50 CHECK (duracion_min > 0)
 - `estado` TEXT NOT NULL CHECK (estado IN ('libre','reservada')) DEFAULT 'libre'
   (al cancelar, la hora vuelve a `libre` y se limpian `paciente_id` y `reservada_en`)
 - `paciente_id` INTEGER NULL → usuarios.id
 - `reservada_en` TEXT NULL
-- `recordatorio_enviado` INTEGER NOT NULL DEFAULT 0
+- `recordatorio_enviado` INTEGER NOT NULL DEFAULT 0 CHECK (recordatorio_enviado IN (0,1))
+- restricción de tabla: `CHECK ((estado = 'libre' AND paciente_id IS NULL AND reservada_en IS NULL) OR (estado = 'reservada' AND paciente_id IS NOT NULL AND reservada_en IS NOT NULL))`
+- restricción de tabla: `UNIQUE (profesional_id, inicio)` (impide inicios idénticos; el solape parcial lo controla la aplicación)
 
 **notificaciones**
 - `id` INTEGER PK
 - `usuario_id` INTEGER NOT NULL → usuarios.id
-- `tipo` TEXT NOT NULL ('confirmacion','recordatorio','cancelacion')
+- `tipo` TEXT NOT NULL CHECK (tipo IN ('confirmacion','recordatorio','cancelacion'))
 - `mensaje` TEXT NOT NULL
 - `hora_id` INTEGER NULL → horas.id
-- `leida` INTEGER NOT NULL DEFAULT 0
+- `leida` INTEGER NOT NULL DEFAULT 0 CHECK (leida IN (0,1))
 - `creada_en` TEXT NOT NULL
 
 ## Flujo clave: reservar una hora

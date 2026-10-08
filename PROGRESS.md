@@ -5,13 +5,14 @@ Los agentes agregan aquí una entrada al final de cada vuelta. Lo más reciente 
 ## Estado actual
 
 - Fase: 2 (Usuarios) en curso
-- Última tarea hecha: T-03b
-- Próxima tarea: T-04 (T-02c sigue pendiente y requiere decisión humana antes de T-05)
+- Última tarea hecha: T-02c (esquema reforzado, D-007)
+- Próxima tarea: T-03c (debe quedar HECHA antes de T-04)
 
 ## Bloqueos y dudas abiertas
 
 - Para T-13: el 413 por defecto de Werkzeug (`MAX_CONTENT_LENGTH`, D-014) responde en inglés ("Request Entity Too Large"). Falta una página de error en español; no se arregló en T-03b.
-- T-02c sigue esperando la decisión humana sobre D-007 (propuesta sin aprobar); no se tocó.
+- `app/correo.py` (D-013) tampoco figura en `ARCHITECTURE.md` (árbol ni tabla de módulos); T-02c solo estaba autorizada a añadir `seguridad.py`, así que no se añadió. El humano decide si se agrega.
+- Aviso por esquema antiguo: `init-db` sobre un `agenda.db` con el esquema anterior termina con éxito y el mensaje "Base de datos inicializada." sin avisar que las tablas siguen sin las restricciones nuevas (comprobado, ver T-02c). Propuesta (no implementada, fuera de alcance): que `init-db` compare el esquema existente con `schema.sql` y avise, o un sistema de migraciones; decide el humano. Mientras tanto solo lo cubre el README.
 
 ## Bitácora
 
@@ -57,3 +58,8 @@ Los agentes agregan aquí una entrada al final de cada vuelta. Lo más reciente 
 - Problemas / dudas: el 413 de Werkzeug está en inglés (anotado para T-13). Un POST sobrecargado da 413 incluso sin token porque el CSRF lee `request.form` primero. El homoglifo cirílico queda sin resolver (D-013). T-02c sigue pendiente de decisión humana.
 - Siguiente paso sugerido: T-04 (login, logout, roles, `create-professional`) usando `normalizar_email()`.
 
+### [2026-10-08 00:50] T-02c — Reforzar integridad del esquema — Implementador
+- Qué se hizo: `app/schema.sql` con exactamente lo aprobado en D-007: A (CHECK de coherencia estado/paciente_id/reservada_en en `horas`), B (CHECK de `notificaciones.tipo`), C (`duracion_min > 0`, `recordatorio_enviado` y `leida` en (0,1)), D (`UNIQUE (profesional_id, inicio)`), E (`usuarios.email ... UNIQUE COLLATE NOCASE`); sin tocar columnas ni otras restricciones y manteniendo `CREATE TABLE IF NOT EXISTS` (D-006). F: `ARCHITECTURE.md` actualizado solo en el árbol (`seguridad.py` tras `auth.py`), la tabla de módulos (fila de `seguridad.py`) y el "Modelo de datos" (A–E); no se añadió `correo.py` ni nada más. README: sección "Cambios de esquema y `agenda.db` existente" (borrar `agenda.db` y repetir `init-db`). D-007: añadida al final la línea "Implementada". Pruebas: nuevo `tests/test_esquema.py` (78 pruebas: rechazo y aceptación de A–E, cancelar con y sin limpiar, `NOT NULL` de las 15 columnas por comportamiento y por `PRAGMA table_info`, las 4 FK por comportamiento y por `PRAGMA foreign_key_list`) y `test_comando_init_db` en `tests/test_db.py` ahora compara (nombre, tipo, notnull, defecto, pk) de cada columna y usa `==` para las tablas. Ninguna prueba existente tuvo que cambiarse por las restricciones nuevas (ninguna insertaba filas incoherentes); no cambió ninguna prueba de registro, correo ni seguridad. Archivos nuevos no pedidos: ninguno aparte del archivo de pruebas permitido.
+- Cómo se verificó: `python3 -m pytest -q` da 187 pruebas OK (109 anteriores + 78 nuevas) sin `SECRET_KEY`/`FLASK_DEBUG`, con `SECRET_KEY=abc` y con `FLASK_DEBUG=1`. Mutaciones REALES en una copia temporal del proyecto (modificando solo su `schema.sql`, suite completa; copia borrada); pruebas que fallan de 187: quitar A 7; B 4; C `duracion_min` 2; C `recordatorio_enviado` 3; C `leida` 2; D 1; `COLLATE NOCASE` 2; FK `horas.paciente_id` 2; FK `notificaciones.hora_id` 2; FK `horas.profesional_id` 3; FK `notificaciones.usuario_id` 3; cada uno de los 15 `NOT NULL` (probados uno por uno) 3. Control sin mutar: 187 OK. Ninguna mutación quedó en verde. Esquema antiguo (`git show HEAD:app/schema.sql`) en una base temporal con 1 usuario, luego `init-db` con el esquema nuevo: sale con código 0 y "Base de datos inicializada."; el usuario sigue ahí, `notificaciones` sin ningún CHECK, `horas` solo con el de `estado`, `usuarios` sin NOCASE y una hora reservada con `duracion_min=-5` y sin paciente se aceptó. Es decir, las tablas antiguas quedan sin las restricciones nuevas y sin ningún aviso. Manual con curl, base temporal (`DATABASE`) y `flask --app app run --debug --no-reload` (agregué `--no-reload` para que el PID sea el del servidor) en puerto libre: GET `/registro` con token; POST válido `Ana@Example.cl` -> 302 a `/`; POST `ANA@EXAMPLE.CL` -> 200 con el mensaje de duplicado, sin 500 ni traceback en el log; con `sqlite3` de Python: 1 usuario (`ana@example.cl`). Servidor cerrado por PID, base y archivos temporales borrados, sin `.db` en el repo.
+- Problemas / dudas: ver "Bloqueos y dudas abiertas" (`correo.py` fuera de ARCHITECTURE.md; aviso por esquema antiguo). `NOCASE` solo cubre ASCII (hay una prueba que lo documenta). El solape parcial sigue sin control de esquema (T-05). La mutación de `UNIQUE` solo la detecta 1 prueba (la de rechazo directo).
+- Siguiente paso sugerido: T-03c (cerrar los hallazgos de la revisión de T-03b), luego T-04.

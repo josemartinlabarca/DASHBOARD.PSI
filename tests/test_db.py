@@ -80,15 +80,57 @@ def test_valores_por_defecto(db):
     assert db.execute("SELECT leida FROM notificaciones").fetchone()["leida"] == 0
 
 
+# (nombre, tipo, notnull, valor por defecto, pk) tal como lo entrega PRAGMA table_info.
+COLUMNAS_ESPERADAS = {
+    "usuarios": [
+        ("id", "INTEGER", 0, None, 1),
+        ("nombre", "TEXT", 1, None, 0),
+        ("email", "TEXT", 1, None, 0),
+        ("password_hash", "TEXT", 1, None, 0),
+        ("rol", "TEXT", 1, None, 0),
+        ("creado_en", "TEXT", 1, None, 0),
+    ],
+    "horas": [
+        ("id", "INTEGER", 0, None, 1),
+        ("profesional_id", "INTEGER", 1, None, 0),
+        ("inicio", "TEXT", 1, None, 0),
+        ("duracion_min", "INTEGER", 1, "50", 0),
+        ("estado", "TEXT", 1, "'libre'", 0),
+        ("paciente_id", "INTEGER", 0, None, 0),
+        ("reservada_en", "TEXT", 0, None, 0),
+        ("recordatorio_enviado", "INTEGER", 1, "0", 0),
+    ],
+    "notificaciones": [
+        ("id", "INTEGER", 0, None, 1),
+        ("usuario_id", "INTEGER", 1, None, 0),
+        ("tipo", "TEXT", 1, None, 0),
+        ("mensaje", "TEXT", 1, None, 0),
+        ("hora_id", "INTEGER", 0, None, 0),
+        ("leida", "INTEGER", 1, "0", 0),
+        ("creada_en", "TEXT", 1, None, 0),
+    ],
+}
+
+
 def test_comando_init_db(app):
     resultado = app.test_cli_runner().invoke(args=["init-db"])
     assert resultado.exit_code == 0
     with sqlite3.connect(app.config["DATABASE"]) as conn:
         tablas = {
             f[0]
-            for f in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            for f in conn.execute(
+                "SELECT name FROM sqlite_master"
+                " WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            )
         }
-    assert {"usuarios", "horas", "notificaciones"} <= tablas
+        assert tablas == set(COLUMNAS_ESPERADAS)
+        for tabla, esperadas in COLUMNAS_ESPERADAS.items():
+            # table_info: (cid, name, type, notnull, dflt_value, pk)
+            reales = [
+                (c[1], c[2], c[3], c[4], c[5])
+                for c in conn.execute(f"PRAGMA table_info({tabla})")
+            ]
+            assert reales == esperadas, tabla
 
 
 def test_init_db_no_borra_datos_existentes(app):
