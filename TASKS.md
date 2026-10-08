@@ -155,15 +155,24 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Qué:** `POST /horas/<id>/cancelar` con anticipación mínima de 24 h (US-9); la hora vuelve a `libre`.
 - **Nota (revisión de T-04b, R-10):** acotar el `id` de la ruta (`<int:id>`) a un máximo razonable (< 2**63) para que un id gigante dé 404 y no un 500; con prueba.
 - **Nota (revisión de T-05b, R-06):** las reglas de anticipación (24 h, §4) se calculan con instantes absolutos (aware → UTC), nunca con el reloj de pared; pruebas en las noches de cambio de horario. **Nota (revisión de T-06):** el UPDATE de cancelación filtra por paciente y estado y se revisa `rowcount`; anticipación con instantes absolutos.
+- **Añadidos por la revisión de T-07:** (a) **R-01 (media):** el paciente no tiene dónde ver ni cancelar sus reservas hasta T-11; esta tarea incluye una lista mínima «Mis reservas» en `/paciente` (hora, profesional, duración) con botón «Cancelar» por fila (formulario POST con CSRF); T-11 la amplía después con notificaciones; (b) **R-02 (baja):** leer el reloj **después** de obtener el bloqueo `BEGIN IMMEDIATE` (también en `reservar_hora`, T-07): hoy se reservó una hora 1 s después de empezar y `reservada_en` quedó 3 s antes del commit; pruebas; (c) **R-04 (baja):** pruebas de que cada salida de rechazo hace `rollback` (no queda transacción abierta) y de que una excepción inesperada se re-lanza tras `rollback`; hoy las mutaciones que quitan el `rollback` en tres salidas sobreviven; (d) **R-05 (baja):** una prueba de T-07 sobrevive solo con `TZ=America/Santiago` en el equipo: hacerla independiente de la zona del sistema; (e) D-029 (regla de 24 h al reservar) está PENDIENTE del humano: no la implementes; si se aprueba antes, se aplica aquí.
 - **Término:** Pruebas: cancelar con >24 h funciona, con <24 h se rechaza, la hora queda libre.
+
+### T-08b — Acelerar la suite de pruebas (R-06 de la revisión de T-07)
+- **Estado:** PENDIENTE
+- **Depende de:** T-08
+- **Qué:** la suite pasó de ~10 s a ~48 s y cada tarea suma 5–6 s. Medir con `pytest --durations=25`, y reducir sin perder cobertura: fixtures de ámbito `module`/`session` para bases de solo lectura, base SQLite en memoria o plantilla copiada (`init-db` una vez y copiar el archivo) en vez de recrear el esquema en cada prueba, no repetir la prueba exhaustiva de idempotencia (2,4 s) en cada entorno, cache de la zona horaria. Prohibido borrar pruebas o debilitar aserciones.
+- **Término:** `python3 -m pytest` pasa con el mismo número de pruebas (o más) y en menos de 25 s; las mutaciones representativas de T-02e, T-05 y T-07 siguen muriendo (re-ejecutar 6 de ellas y mostrarlas).
+- **Origen:** REVIEW de T-07, R-06; backlog T-03c R-11, T-04b R-08, T-05 R-12.
 
 ## Fase 4 — Notificaciones
 
 ### T-09 — Notificaciones de confirmación y cancelación
 - **Estado:** PENDIENTE
-- **Depende de:** T-08
+- **Depende de:** T-08, T-08b
 - **Qué:** `notificaciones.py`; crear registros y escribir `outbox.log` al reservar y cancelar (US-11, US-13).
 - **Nota de revisión de T-02f (`hora_id` puede ser NULL, D-016):** T-09: el mensaje de la notificación debe bastarse solo (fecha, hora y contraparte), porque `hora_id` queda NULL si la hora se elimina (D-016); prueba con la hora eliminada.
+- **Notas de la revisión de T-07 (R-09):** el `SELECT` de la hora en `reservar_hora` no trae `profesional_id` (añadirlo si hace falta); las notificaciones se insertan **dentro** de la transacción, antes del `commit`, para que reserva y aviso sean atómicos; en T-11/T-12 no ordenar por `reservada_en` (texto con offset: no ordena bien en la noche de cambio de hora).
 - **Término:** Pruebas: se crean notificaciones para ambas partes y aparece la línea en el log.
 
 ### T-10 — Recordatorios 24 h antes

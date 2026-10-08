@@ -292,6 +292,16 @@ Autorizas a que se modifique `ARCHITECTURE.md` (que `CLAUDE.md` reserva al human
 - **Límites conocidos:** si otra escritura mantiene el bloqueo más de 5 s (tiempo de espera por defecto de SQLite) `BEGIN IMMEDIATE` lanza `OperationalError` y la petición da 500 (igual que al crear horas, D-025). No se crean notificaciones (T-09), no se cancela (T-08) ni se lista «mis reservas» (T-08/T-12). D-020, D-022 y D-023 siguen como propuestas sin implementar.
 - **Alternativas descartadas:** solo el UPDATE sin transacción previa (no resuelve la regla 5 entre dos clics del mismo paciente); `UNIQUE (paciente_id, inicio)` (cambia el esquema y no cubre solapes parciales); `reservada_en` en UTC o sin zona (distinto de `creado_en`); 404 para hora ajena/eliminada (distingue casos y es peor experiencia); `INSERT OR REPLACE` (prohibido: borraría la fila).
 
+## D-029 — Reservar una hora que empieza en menos de 24 h (PROPUESTA, pendiente del humano)
+- **Fecha:** 2026-10-08
+- **Estado:** PROPUESTA. No bloquea T-08. Origen: revisión de T-07, R-08.
+- **Problema:** SPEC no impide reservar una hora que empieza dentro de las próximas 24 h, y la regla de cancelación (US-9) exige 24 h de anticipación: esa reserva **no podría cancelarse nunca**. Además conviene confirmar que la regla 5 («un paciente no puede tener dos reservas a la misma hora») se entiende como **solape de intervalos** (lo implementado), no solo igualdad de inicio.
+- **Opciones:**
+  - **A.** Permitirlo y documentar que una reserva con menos de 24 h es definitiva (hoy).
+  - **B (recomendada).** Permitir reservar solo con más de 24 h de anticipación (coherente con cancelar; cambia SPEC y T-07).
+  - **C.** Permitirlo, pero avisar al paciente en la confirmación («esta hora ya no podrá cancelarse»).
+  - Para la regla 5: confirmar «solape de intervalos» (recomendado) o limitarla a inicios idénticos.
+
 ## Plantilla para nuevas decisiones
 
 ```
