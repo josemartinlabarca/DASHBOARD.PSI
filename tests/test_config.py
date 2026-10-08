@@ -13,15 +13,61 @@ def _config(tmp_path, **extra):
     return {"DATABASE": str(tmp_path / "test.db"), **extra}
 
 
-def test_sin_secret_key_fuera_de_debug_falla(tmp_path):
-    with pytest.raises(RuntimeError, match="SECRET_KEY"):
-        create_app(_config(tmp_path))
+def _peticion_fuera_de_debug(app):
+    """Hace una petición real; la app no debe atenderla con 200."""
+    return app.test_client().get("/")
 
 
-def test_secret_key_vacia_fuera_de_debug_falla(tmp_path, monkeypatch):
+def test_sin_secret_key_fuera_de_debug_no_atiende_peticiones(tmp_path, caplog):
+    app = create_app(_config(tmp_path))
+    respuesta = _peticion_fuera_de_debug(app)
+    assert respuesta.status_code == 500
+    assert "SECRET_KEY" in caplog.text
+
+
+def test_secret_key_vacia_fuera_de_debug_no_atiende_peticiones(tmp_path, monkeypatch):
     monkeypatch.setenv("SECRET_KEY", "")
-    with pytest.raises(RuntimeError, match="SECRET_KEY"):
-        create_app(_config(tmp_path))
+    assert _peticion_fuera_de_debug(create_app(_config(tmp_path))).status_code == 500
+
+
+@pytest.mark.parametrize("valor", ["   ", "\t\n ", " "])
+def test_secret_key_de_solo_espacios_cuenta_como_ausente(tmp_path, monkeypatch, valor):
+    monkeypatch.setenv("SECRET_KEY", valor)
+    assert _peticion_fuera_de_debug(create_app(_config(tmp_path))).status_code == 500
+
+
+def test_secret_key_de_solo_espacios_por_test_config_falla(tmp_path):
+    app = create_app(_config(tmp_path, SECRET_KEY="   "))
+    assert _peticion_fuera_de_debug(app).status_code == 500
+
+
+@pytest.mark.parametrize("valor", ["0", "false", "False", "no"])
+def test_flask_debug_desactivado_sin_secret_key_falla(tmp_path, monkeypatch, valor):
+    monkeypatch.setenv("FLASK_DEBUG", valor)
+    app = create_app(_config(tmp_path))
+    assert not app.debug
+    assert _peticion_fuera_de_debug(app).status_code == 500
+
+
+def test_init_db_por_cli_funciona_sin_secret_key_ni_debug(tmp_path):
+    app = create_app(_config(tmp_path))  # sin TESTING, sin clave, sin debug
+    assert not app.testing and not app.debug
+    resultado = app.test_cli_runner().invoke(args=["init-db"])
+    assert resultado.exit_code == 0, resultado.output
+    assert (tmp_path / "test.db").exists()
+
+
+def test_secret_key_por_test_config_se_respeta(tmp_path):
+    app = create_app(_config(tmp_path, SECRET_KEY="clave-por-config"))
+    assert app.config["SECRET_KEY"] == "clave-por-config"
+    assert _peticion_fuera_de_debug(app).status_code == 200
+
+
+def test_secret_key_valida_no_se_modifica(tmp_path, monkeypatch):
+    monkeypatch.setenv("SECRET_KEY", "  con espacios  ")
+    app = create_app(_config(tmp_path))
+    assert app.config["SECRET_KEY"] == "  con espacios  "
+    assert _peticion_fuera_de_debug(app).status_code == 200
 
 
 def test_testing_funciona_sin_secret_key(tmp_path):

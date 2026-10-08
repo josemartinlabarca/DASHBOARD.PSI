@@ -5,7 +5,7 @@ Los agentes agregan aquí una entrada al final de cada vuelta. Lo más reciente 
 ## Estado actual
 
 - Fase: 1 (Base) en curso
-- Última tarea hecha: T-02b
+- Última tarea hecha: T-02d
 - Próxima tarea: T-03 (T-02c sigue pendiente y requiere decisión humana antes de T-05)
 
 ## Bloqueos y dudas abiertas
@@ -37,3 +37,9 @@ _(ninguno)_
 - Cómo se verificó: `python3 -m pytest -q` pasa (14 pruebas). Quitando temporalmente la validación fallan 2 pruebas nuevas (sin clave y clave vacía); se revirtió. Manual: `flask --app app run --debug` sin `SECRET_KEY` respondió 200 en `/` y se cerró; `flask --app app run` sin debug ni clave falla con el mensaje claro. Sin procesos ni `.db` residuales.
 - Problemas / dudas: ninguna.
 - Siguiente paso sugerido: T-03 (registro de pacientes). T-02c requiere decisión humana.
+
+### [2026-10-08 10:30] T-02d — Corregir efectos de T-02b en CLI y README — Implementador
+- Qué se hizo: `create_app` ya no valida `SECRET_KEY` al crearse; `_preparar_secret_key` usa la clave de desarrollo en TESTING/DEBUG, respeta tal cual una clave válida y, si falta/está vacía/es solo espacios (`strip()`), registra un `before_request` que lanza `RuntimeError` con el mensaje claro (D-008). `init-db` y los futuros comandos CLI funcionan sin clave; ninguna petición se atiende sin clave fuera de debug/testing, también bajo gunicorn. README: `export SECRET_KEY=$(python3 -c "...")` sin `<>`, equivalente PowerShell y advertencia sobre `FLASK_DEBUG`. DECISIONS: D-005 antes de D-006, quitada la frase obsoleta, nueva D-008. Se añadió `pytest.ini` (`pythonpath = .`, `testpaths = tests`) porque el `pytest` literal del README fallaba en un venv limpio con `ModuleNotFoundError: app`. Pruebas nuevas en `tests/test_config.py` (25 en total).
+- Cómo se verificó: `pytest` 25 pruebas pasan. Con `app/__init__.py` anterior (git stash) fallan 11 pruebas nuevas; se restauró. Recorrido literal del README en copia temporal con venv nuevo y sin `SECRET_KEY` (pip con red, sin `--system-site-packages`): pip install, `init-db` OK, `run --debug` respondió 200 por curl, `pytest` 25 OK; `run` sin debug ni clave respondió 500 con el mensaje en el log. Copia borrada, sin procesos ni `.db` en el repo.
+- Problemas / dudas: con `flask run` sin clave el servidor arranca y falla en cada petición (500) en lugar de abortar al inicio; costo aceptado en D-008. CLAUDE.md no contradice el README. `FLASK_DEBUG=off` no cuenta como falso para Flask (solo `0`, `false`, `no`).
+- Siguiente paso sugerido: T-03 (registro de pacientes). T-02c sigue requiriendo decisión humana.

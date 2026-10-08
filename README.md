@@ -40,14 +40,27 @@ aleatoria y no subirse al repositorio. Genera una así y defínela antes de
 iniciar la app:
 
 ```bash
-python3 -c "import secrets; print(secrets.token_hex(32))"
-export SECRET_KEY=<el valor generado>     # en Windows (PowerShell): $env:SECRET_KEY="<valor>"
+export SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+flask --app app run
+```
+
+En Windows (PowerShell):
+
+```powershell
+$env:SECRET_KEY = python -c "import secrets; print(secrets.token_hex(32))"
 flask --app app run
 ```
 
 En desarrollo con `flask --app app run --debug` y en las pruebas **no hace
-falta**: se usa un valor de desarrollo inseguro. Fuera de debug, si falta
-`SECRET_KEY`, la app no arranca y muestra un error que lo indica.
+falta**: se usa un valor de desarrollo inseguro. Los comandos de mantenimiento
+(`flask --app app init-db`) tampoco la necesitan. Fuera de debug, si falta
+`SECRET_KEY` (o solo tiene espacios), la app **no atiende ninguna petición**:
+cada una responde error 500 y el log indica qué falta.
+
+> **Advertencia:** no actives `FLASK_DEBUG` (ni `--debug`) en un entorno
+> expuesto. En debug la clave es un valor público fijo (está en el código), así
+> que cualquiera podría falsificar sesiones y tokens CSRF; además el modo debug
+> expone un depurador interactivo.
 
 > Estos comandos se vuelven reales a medida que los agentes completan las
 > tareas de `TASKS.md`. Si algo no existe todavía, mira `PROGRESS.md`.
