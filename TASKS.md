@@ -134,7 +134,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Origen:** REVIEW de T-05 (R-01, R-03, R-04, R-05).
 
 ### T-06 — Paciente ve horas libres
-- **Estado:** PENDIENTE
+- **Estado:** HECHA
 - **Depende de:** T-05, T-05b
 - **Qué:** `/paciente/horas` con horas libres futuras ordenadas (US-7).
 - **Nota (revisión de T-05b, R-01):** el filtro «futuras» debe usar la hora de Chile (no UTC) y llevar una prueba que lo fije: con el reloj entre «ahora» y «ahora en UTC» (3-4 h de diferencia), una hora de hoy aún futura debe aparecer; la mutación «comparar con la hora UTC» debe hacer fallar una prueba. Reutiliza `ahora_chile()`. Considera mover `a_segundos_utc` y `ahora_chile` a un módulo compartido (p. ej. `app/tiempo.py`, justificado en DECISIONS.md) porque T-07/T-08/T-10 lo necesitan.

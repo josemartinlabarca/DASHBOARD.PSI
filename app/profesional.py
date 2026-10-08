@@ -17,8 +17,10 @@ from flask import (
     url_for,
 )
 
+from . import tiempo
 from .auth import solo_profesional, usuario_actual, zona_chile
 from .db import get_db
+from .tiempo import FORMATO_GUARDADO, mostrar_inicio
 
 bp = Blueprint("profesional", __name__)
 
@@ -29,8 +31,6 @@ FORMATO_FECHA = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")  # solo dígitos ASCII
 FORMATO_HORA = re.compile(r"[0-9]{2}:[0-9]{2}")
 FORMATO_DURACION = re.compile(r"[0-9]{1,4}")
 ANIOS_MAX = 2  # tope de fecha futura: hoy + 2 años (D-026); límite de la aplicación
-EPOCA_UTC = datetime(1970, 1, 1, tzinfo=timezone.utc)
-FORMATO_GUARDADO = "%Y-%m-%dT%H:%M:%S"
 
 MENSAJE_FECHA = "Escribe una fecha válida, por ejemplo 2026-12-01."
 MENSAJE_HORA = "Escribe una hora válida, por ejemplo 10:00."
@@ -59,11 +59,6 @@ MENSAJE_RESERVADA = (
 
 
 # ------------------------------------------------------------ validación ----
-
-
-def ahora_chile():
-    """Fecha y hora actuales en Chile (con zona). Las pruebas lo reemplazan."""
-    return datetime.now(zona_chile())
 
 
 def interpretar_fecha(texto):
@@ -161,27 +156,7 @@ def formatear_inicio(inicio):
     return inicio.isoformat(timespec="seconds")
 
 
-def mostrar_inicio(texto):
-    """`2026-12-01T10:00:00` -> `01-12-2026 10:00` (la forma la garantiza el CHECK)."""
-    return f"{texto[8:10]}-{texto[5:7]}-{texto[0:4]} {texto[11:16]}"
-
-
 # ----------------------------------------------------------------- horas ----
-
-
-def a_segundos_utc(local):
-    """Segundos desde 1970 (UTC) del instante que es el `datetime` ingenuo `local` en Chile.
-
-    `None` si el instante no se puede representar (años cercanos a 1 o a 9999).
-    Una hora que no existe o se repite por el cambio de horario se interpreta
-    con `fold=0`; la aplicación no las deja guardar (D-025), esto solo evita
-    errores con filas insertadas por otro camino.
-    """
-    try:
-        instante = local.replace(tzinfo=zona_chile(), fold=0).astimezone(timezone.utc)
-        return int((instante - EPOCA_UTC).total_seconds())
-    except (OverflowError, ValueError):
-        return None
 
 
 def _minutos_guardados(valor):
@@ -198,7 +173,7 @@ def _intervalo_guardado(fila):
     except (ValueError, TypeError):  # fecha imposible como 2026-13-45T99:99:99
         return None
     minutos = _minutos_guardados(fila["duracion_min"])
-    inicio_s = a_segundos_utc(local)
+    inicio_s = tiempo.a_segundos_utc(local)
     if minutos is None or inicio_s is None:
         return None
     return inicio_s, inicio_s + minutos * 60
@@ -226,7 +201,7 @@ def buscar_solape(db, profesional_id, inicio, duracion):
     existe y si no la primera por fecha. Las filas que el esquema deja pasar
     pero no son una fecha real o una duración entera positiva no se comparan.
     """
-    inicio_s = a_segundos_utc(inicio)
+    inicio_s = tiempo.a_segundos_utc(inicio)
     if inicio_s is None:
         raise ValueError("inicio fuera del rango representable")
     fin_s = inicio_s + duracion * 60
@@ -317,7 +292,7 @@ def listar_horas_futuras(db, profesional_id, ahora):
 @solo_profesional
 def dashboard():
     usuario = usuario_actual()
-    horas = listar_horas_futuras(get_db(), usuario["id"], ahora_chile())
+    horas = listar_horas_futuras(get_db(), usuario["id"], tiempo.ahora_chile())
     return render_template("profesional.html", usuario=usuario, horas=horas)
 
 
@@ -331,7 +306,7 @@ def nueva_hora():
     fecha = request.form.get("fecha", "").strip()
     hora = request.form.get("hora", "").strip()
     duracion_texto = request.form.get("duracion", "").strip()
-    inicio, duracion, errores = validar_formulario(fecha, hora, duracion_texto, ahora_chile())
+    inicio, duracion, errores = validar_formulario(fecha, hora, duracion_texto, tiempo.ahora_chile())
     if not errores:
         rechazo = crear_hora(get_db(), usuario_actual()["id"], inicio, duracion)
         if rechazo is None:

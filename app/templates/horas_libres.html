@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block titulo %}Horas disponibles · Agenda Psi{% endblock %}
+{% block contenido %}
+  <h1>Horas disponibles</h1>
+  {% if horas %}
+    <table>
+      <thead>
+        <tr><th>Fecha y hora</th><th>Duración</th><th>Profesional</th></tr>
+      </thead>
+      <tbody>
+        {% for hora in horas %}
+          <tr>
+            <td>{{ hora.inicio }}</td>
+            <td>{{ hora.duracion_min }} min</td>
+            <td>{{ hora.profesional }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p>Por ahora no hay horas disponibles. Vuelve a revisar más tarde.</p>
+  {% endif %}
+  <p><a href="{{ url_for('paciente.dashboard') }}">Volver a mi panel</a></p>
+{% endblock %}

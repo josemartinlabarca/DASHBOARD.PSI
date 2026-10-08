@@ -7,12 +7,12 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from app import auth, profesional
+from app import auth, profesional, tiempo
 from app.db import get_db, init_db
 from tests.test_login import crear, iniciar
 from tests.test_seguridad import extraer_token
 
-AHORA_REAL = profesional.ahora_chile  # la función de verdad, antes de que la fixture la reemplace
+AHORA_REAL = tiempo.ahora_chile  # la función de verdad, antes de que la fixture la reemplace
 
 # "Ahora" fijo (hora de Chile, verano: UTC-3) para que las pruebas no dependan del reloj.
 AHORA = datetime(2026, 10, 8, 12, 0)
@@ -27,7 +27,7 @@ def base_inicializada(app):
 @pytest.fixture(autouse=True)
 def reloj_fijo(monkeypatch):
     monkeypatch.setattr(
-        profesional, "ahora_chile", lambda: AHORA.replace(tzinfo=auth.zona_chile())
+        tiempo, "ahora_chile", lambda: AHORA.replace(tzinfo=auth.zona_chile())
     )
 
 
@@ -254,7 +254,7 @@ def test_el_reloj_de_verdad_da_la_hora_de_chile():
 
 def con_reloj(monkeypatch, ano, mes, dia):
     monkeypatch.setattr(
-        profesional, "ahora_chile", lambda: datetime(ano, mes, dia, 8, 0, tzinfo=auth.zona_chile())
+        tiempo, "ahora_chile", lambda: datetime(ano, mes, dia, 8, 0, tzinfo=auth.zona_chile())
     )
 
 
@@ -807,19 +807,19 @@ def solapa(app, email, nueva, duracion):
 
 def test_a_segundos_utc_usa_el_desfase_de_chile():
     # verano (UTC-3) e invierno (UTC-4); un mutante "reloj de pared" (UTC) daría 10:00Z
-    assert profesional.a_segundos_utc(datetime(2027, 3, 1, 10, 0)) == int(
+    assert tiempo.a_segundos_utc(datetime(2027, 3, 1, 10, 0)) == int(
         datetime(2027, 3, 1, 13, 0, tzinfo=timezone.utc).timestamp()
     )
-    assert profesional.a_segundos_utc(datetime(2027, 7, 1, 10, 0)) == int(
+    assert tiempo.a_segundos_utc(datetime(2027, 7, 1, 10, 0)) == int(
         datetime(2027, 7, 1, 14, 0, tzinfo=timezone.utc).timestamp()
     )
 
 
 def test_a_segundos_utc_acepta_horas_inexistentes_o_repetidas_y_fuera_de_rango():
-    assert profesional.a_segundos_utc(datetime(2027, 9, 5, 0, 30)) is not None  # no existe
-    assert profesional.a_segundos_utc(datetime(2027, 4, 3, 23, 30)) is not None  # se repite
-    profesional.a_segundos_utc(datetime(1, 1, 1))  # no lanza (devuelve un valor o None)
-    assert profesional.a_segundos_utc(datetime(9999, 12, 31, 23, 59)) is None
+    assert tiempo.a_segundos_utc(datetime(2027, 9, 5, 0, 30)) is not None  # no existe
+    assert tiempo.a_segundos_utc(datetime(2027, 4, 3, 23, 30)) is not None  # se repite
+    tiempo.a_segundos_utc(datetime(1, 1, 1))  # no lanza (devuelve un valor o None)
+    assert tiempo.a_segundos_utc(datetime(9999, 12, 31, 23, 59)) is None
 
 
 def test_septiembre_50_min_desde_las_2330_pisan_la_1_del_domingo(app, pro):
