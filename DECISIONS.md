@@ -147,6 +147,20 @@ Autorizas a que se modifique `ARCHITECTURE.md` (que `CLAUDE.md` reserva al human
 ## Plantilla para nuevas decisiones
 
 ```
+## D-015 — Política de caracteres permitidos en el correo (T-03c) — **PROPUESTA, PENDIENTE DE APROBACIÓN HUMANA**
+- **Fecha:** 2026-10-08
+- **Estado:** PROPUESTA. Origen: hallazgo 2 de la revisión de T-03b. Ningún agente puede implementarla hasta que el humano elija.
+- **Problema:** `normalizar_email` (D-013) solo rechaza espacios y las categorías Unicode Cc y Cf. Siguen pasando caracteres invisibles o engañosos (selectores de variación, relleno hangul, braille en blanco, combinantes sueltos, uso privado) y los homoglifos de otros alfabetos (una «е» cirílica idéntica a la «e» latina), que D-013 aceptó como riesgo.
+- **Efecto en el usuario:** el riesgo real es de **suplantación visual** (dos cuentas que se ven iguales) y de cuentas que el usuario no puede reproducir al escribir.
+
+### Opciones
+- **1. Solo ASCII (recomendada).** Tras NFKC y `casefold`, todo carácter debe ser ASCII imprimible. Elimina de raíz invisibles, combinantes, uso privado y **también los homoglifos**, y vuelve irrelevantes las diferencias entre versiones de Python. Costo: rechaza correos con caracteres no ASCII en el nombre o el dominio (por ejemplo `señor@…`), muy poco frecuentes y que la mayoría de los proveedores no emiten. Mensaje al usuario: "Usa un correo con letras sin tildes ni caracteres especiales."
+- **2. Rechazar categorías Unicode de riesgo.** Rechazar todas las categorías `C*` (control, formato, uso privado, sin asignar, sustitutos) y las marcas `Mn/Mc/Me`. Permite `señor@…` si viene precompuesta, pero **no resuelve los homoglifos** y mantiene cierta dependencia de la versión de Python.
+- **3. Mantener como está.** Sin cambios; el riesgo queda aceptado en D-013 y documentado. Solo se añaden las pruebas del punto 1 de T-03c.
+
+### Resolución
+- **Elegida:** ______   **Aprobada por:** ______   **Fecha:** ______
+
 ## D-00X — Título
 - **Fecha:**
 - **Decisión:**
