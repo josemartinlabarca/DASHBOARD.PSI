@@ -16,7 +16,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Término:** `pytest` corre (aunque sea con una prueba trivial) y `flask --app app run` levanta una página de inicio.
 
 ### T-02 — Base de datos
-- **Estado:** PENDIENTE
+- **Estado:** HECHA
 - **Depende de:** T-01
 - **Qué:** `schema.sql` según `ARCHITECTURE.md`, `db.py` y comando `init-db`.
 - **Término:** Prueba que crea la base y verifica que existen las 3 tablas con sus restricciones.

@@ -28,6 +28,12 @@ decisión técnica que no esté ya cubierta, en lugar de tomarla en silencio.
 - **Decisión:** El profesional se crea por CLI; no hay registro público de profesionales.
 - **Porqué:** Simplifica permisos y evita decidir un flujo de verificación.
 
+## D-006 — `init-db` no destructivo (`CREATE TABLE IF NOT EXISTS`)
+- **Fecha:** 2026-10-07
+- **Decisión:** `schema.sql` usa `CREATE TABLE IF NOT EXISTS` y `init-db` nunca borra datos; ejecutarlo sobre una base existente solo crea las tablas que falten. No modifica tablas ya existentes (los cambios de esquema futuros requerirán otra decisión).
+- **Porqué:** Es lo más simple y seguro: evita perder citas o usuarios por ejecutarlo dos veces. (D-005 queda reservada para T-02b.)
+- **Alternativas descartadas:** `DROP TABLE` + recrear (destructivo, exigiría confirmación); sistema de migraciones (excesivo para v1).
+
 ## Plantilla para nuevas decisiones
 
 ```

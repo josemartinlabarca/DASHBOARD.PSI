@@ -16,6 +16,10 @@ def create_app(test_config=None):
     if test_config:
         app.config.update(test_config)
 
+    from . import db
+
+    db.init_app(app)
+
     @app.route("/")
     def inicio():
         return render_template("inicio.html", nombre_proyecto=NOMBRE_PROYECTO)
