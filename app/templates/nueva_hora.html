@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block titulo %}Agregar hora · Agenda Psi{% endblock %}
+{% block contenido %}
+  <h1>Agregar hora</h1>
+  <form method="post" action="{{ url_for('profesional.nueva_hora') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {% if errores.general %}<p class="error" role="alert">{{ errores.general }}</p>{% endif %}
+
+    <p>
+      <label for="fecha">Fecha</label><br>
+      <input type="date" id="fecha" name="fecha" value="{{ fecha }}" required>
+      {% if errores.fecha %}<br><span class="error" role="alert">{{ errores.fecha }}</span>{% endif %}
+    </p>
+
+    <p>
+      <label for="hora">Hora de inicio</label><br>
+      <input type="time" id="hora" name="hora" value="{{ hora }}" required>
+      {% if errores.hora %}<br><span class="error" role="alert">{{ errores.hora }}</span>{% endif %}
+    </p>
+
+    <p>
+      <label for="duracion">Duración (minutos)</label><br>
+      <input type="number" id="duracion" name="duracion" value="{{ duracion }}"
+             min="1" max="480" step="1" inputmode="numeric" required>
+      {% if errores.duracion %}<br><span class="error" role="alert">{{ errores.duracion }}</span>{% endif %}
+    </p>
+
+    <p><button type="submit">Agregar hora</button></p>
+  </form>
+  <p><a href="{{ url_for('profesional.dashboard') }}">Volver al panel</a></p>
+{% endblock %}

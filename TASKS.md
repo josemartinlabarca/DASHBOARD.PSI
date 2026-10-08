@@ -117,7 +117,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 ## Fase 3 — Horas
 
 ### T-05 — Profesional agrega y elimina horas
-- **Estado:** PENDIENTE
+- **Estado:** HECHA
 - **Depende de:** T-04, T-04b, T-02c, T-02e, T-02f, T-02g
 - **Qué:** Formulario y rutas de US-4 y US-5 con reglas 2, 3 y 4.
 - **Requisitos que vienen de las revisiones de T-02c (resolver al implementar):** (a) **D-016 y D-017 ya están decididas** (T-02f las aplica al esquema): la aplicación debe guardar `inicio` siempre en formato canónico `YYYY-MM-DDTHH:MM:SS` hora local de Chile, validar que la fecha exista y no sea pasada, y poder eliminar una hora que fue reservada y cancelada; (b) la comprobación de solape (regla §4.3 y §4.5) debe hacerse dentro de una transacción `BEGIN IMMEDIATE`, porque el esquema solo impide inicios idénticos, no solapes parciales; (c) pruebas del flujo real: reservar → cancelar → eliminar la hora debe funcionar.
@@ -220,7 +220,6 @@ en qué tarea conviene absorberlo.
 | T-03c R-12 | Los puntos no asignados (Cn) dependen de la versión de Unicode de Python: un Python más antiguo podría rechazar en el login un correo ya registrado | T-14 (fijar versión mínima de Python o revisar) |
 | T-04 R-09 | Mensajes de Click (contraseñas que no coinciden) y la página 400 en inglés; accesibilidad del login sin pruebas | T-13 |
 | T-04 R-08 | Con la clave de desarrollo pública (`FLASK_DEBUG=1`) cualquiera puede forjar una cookie y entrar al panel del profesional (ya anotado en T-02d #1) | T-14 |
-| T-04 R-12 | Prueba de lista blanca de rutas públicas: toda ruta nueva debe exigir sesión salvo las declaradas públicas | T-05 |
 | T-04 | Sin límite de intentos de login ni bloqueo | T-14 |
 | T-04b R-01 | Sobreviven 3 mutaciones del CSRF: aceptar un prefijo del token, eximir `/login` si el cuerpo es JSON y con cuerpo vacío | cuando se toque `tests/test_seguridad.py` |
 | T-04b R-02 | Las pruebas de `no-store` no cubren 405, 413, 500, HEAD ni OPTIONS (con servidor real sí llevan la cabecera); el hook sobrescribe `Cache-Control` y una vista no puede salirse | cuando se toque ese archivo |

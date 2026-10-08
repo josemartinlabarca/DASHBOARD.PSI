@@ -2,7 +2,38 @@
 {% block titulo %}Panel · Agenda Psi{% endblock %}
 {% block contenido %}
   <h1>Hola, {{ usuario.nombre }}</h1>
-  <p>Tu panel está vacío por ahora.</p>
+
+  <h2>Tus próximas horas</h2>
+  {% if horas %}
+    <table>
+      <thead>
+        <tr><th>Fecha y hora</th><th>Duración</th><th>Estado</th><th>Acción</th></tr>
+      </thead>
+      <tbody>
+        {% for hora in horas %}
+          <tr>
+            <td>{{ hora.inicio }}</td>
+            <td>{{ hora.duracion_min }} min</td>
+            <td>{{ "Reservada" if hora.reservada else "Libre" }}</td>
+            <td>
+              {% if hora.reservada %}
+                No se puede eliminar (cancela la reserva primero)
+              {% else %}
+                <form method="post" action="{{ url_for('profesional.eliminar_hora', hora_id=hora.id) }}">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button type="submit">Eliminar</button>
+                </form>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p>Aún no tienes horas publicadas.</p>
+  {% endif %}
+  <p><a href="{{ url_for('profesional.nueva_hora') }}">Agregar hora</a></p>
+
   <form method="post" action="{{ url_for('auth.logout') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <button type="submit">Cerrar sesión</button>
