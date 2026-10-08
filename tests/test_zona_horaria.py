@@ -85,7 +85,35 @@ def test_zona_chile_se_crea_una_sola_vez(cache_de_zona_limpia):
 
 
 def test_las_pruebas_anteriores_no_dejan_la_cache_poblada():
-    """Corre después de la anterior (mismo archivo, orden de definición)."""
+    """Independiente del orden (R-03): ella misma puebla la caché y comprueba que la fixture la vacía.
+
+    Antes solo miraba el estado que dejara la prueba de al lado y fallaba en orden aleatorio.
+    Aquí se ejecutan a mano el arranque y el cierre de `cache_de_zona_limpia`: si el cierre
+    dejara de vaciar la caché, esta prueba falla sin importar qué corrió antes.
+    """
+    fixture = getattr(cache_de_zona_limpia, "__wrapped__", cache_de_zona_limpia)
+    auth.zona_chile()  # estado sucio a propósito, venga lo que venga de antes
+    assert auth.zona_chile.cache_info().currsize == 1
+    try:
+        ciclo = fixture()
+        next(ciclo)  # arranque: la deja vacía
+        assert auth.zona_chile.cache_info().currsize == 0
+        auth.zona_chile()  # lo que haría una prueba que use la zona
+        assert auth.zona_chile.cache_info().currsize == 1
+        with pytest.raises(StopIteration):
+            next(ciclo)  # cierre: la vuelve a vaciar
+        assert auth.zona_chile.cache_info().currsize == 0
+    finally:
+        auth.zona_chile.cache_clear()
+
+
+def test_crear_la_app_y_servir_paginas_publicas_no_puebla_la_cache_de_zona(app, client, cache_de_zona_limpia):
+    """La zona se carga solo cuando hace falta (D-012): ni crear la app ni las páginas públicas la piden."""
+    from app import create_app
+
+    create_app({"TESTING": True, "DATABASE": app.config["DATABASE"]})
+    for ruta in ("/", "/registro", "/login"):
+        assert client.get(ruta).status_code == 200, ruta
     assert auth.zona_chile.cache_info().currsize == 0
 
 

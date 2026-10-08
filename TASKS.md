@@ -167,7 +167,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Origen:** REVIEW de T-07, R-06; backlog T-03c R-11, T-04b R-08, T-05 R-12.
 
 ### T-08c — Endurecer la infraestructura de pruebas de T-08b (sin decisiones humanas)
-- **Estado:** PENDIENTE
+- **Estado:** HECHA
 - **Depende de:** T-08b
 - **Qué:** (1) **R-01 (media):** `tests/conftest.py` usa `/dev/shm` sin comprobar su capacidad; con 12 MB libres la suite se rompe a las ~650 pruebas («database or disk is full») y Docker trae 64 MB por defecto (pico actual 23,5 MB). Usar `/dev/shm` solo si el espacio libre es holgado (≥ 4× el pico medido) y, si no, caer al directorio temporal normal; permitir forzarlo con una variable de entorno; pruebas de la decisión con `shutil.disk_usage` simulado. (2) **R-02 (baja):** crear el directorio con `tempfile.mkdtemp` (nombre impredecible, permisos 0700) y limpiarlo también ante SIGTERM/`atexit`. (3) **R-03 (baja):** `tests/test_zona_horaria.py::test_las_pruebas_anteriores_no_dejan_la_cache_poblada` depende del orden de ejecución (falla en orden aleatorio, ya fallaba antes de T-08b): hacerla independiente (que ella misma limpie y verifique el estado que prueba) sin debilitarla; comprobar que la mutación que deja la caché poblada sigue haciéndola fallar. (4) Actualizar el criterio de D-031: el umbral de 30 s es orientativo (mediciones de 24 a 31 s según el equipo); el criterio firme es «no más de la mitad del tiempo previo a T-08b (63 s)».
 - **Término:** la suite pasa en orden normal, inverso y aleatorio (semillas 1–4) y con `/dev/shm` simulado casi lleno; las mutaciones «quitar la comprobación de espacio» y «dejar la caché poblada» hacen fallar al menos una prueba; mismo nº de pruebas o más. Debe quedar HECHA **antes** de T-09.

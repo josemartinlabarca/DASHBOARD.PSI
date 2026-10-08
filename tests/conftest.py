@@ -1,10 +1,13 @@
+import atexit
 import importlib
 import itertools
 import os
 import pkgutil
 import shutil
+import signal
 import sqlite3
 import sys
+import tempfile
 import time
 
 import pytest
@@ -22,20 +25,111 @@ from app import db as modulo_db
 for _modulo in pkgutil.iter_modules(paquete_app.__path__):
     importlib.import_module(f"app.{_modulo.name}")
 
+# --- Carpeta temporal en memoria (T-08b, D-031; endurecida en T-08c) ------------
+# Las bases de prueba van a /dev/shm (tmpfs) si hay sitio de sobra: cada commit de
+# SQLite hace fsync y en disco costaba ~2 ms. Variable de entorno para forzar:
+#
+#   AGENDA_PSI_TMPFS=0     nunca usa /dev/shm (carpeta temporal normal del sistema)
+#   AGENDA_PSI_TMPFS=1     lo usa aunque el espacio sea justo (si no existe, no lo usa)
+#   sin definir / "auto"   lo usa solo si el espacio libre es >= HOLGURA x PICO_MEDIDO
+#
+# Si el usuario pasa --basetemp, se respeta siempre. La cabecera de pytest
+# (`pytest_report_header`) dice qué carpeta se usa y por qué.
+VARIABLE_TMPFS = "AGENDA_PSI_TMPFS"
+DIRECTORIO_TMPFS = "/dev/shm"
+PREFIJO_TMPFS = "pytest-agenda-psi-"
+# Pico de uso de /dev/shm medido en T-08c con 1135 pruebas: 23 520 KiB (~23 MiB), que
+# se redondea a 24 MiB. Si la suite crece mucho, vuelve a medirlo y sube la cifra.
+PICO_MEDIDO_BYTES = 24 * 1024 * 1024
+HOLGURA = 4
+UMBRAL_TMPFS_BYTES = HOLGURA * PICO_MEDIDO_BYTES
+
+
+def decidir_directorio_en_memoria(
+    entorno=None, directorio=DIRECTORIO_TMPFS, uso_de_disco=None, acceso=None,
+):
+    """Devuelve (usar, motivo): si conviene poner la carpeta temporal en `directorio`."""
+    entorno = os.environ if entorno is None else entorno
+    uso_de_disco = shutil.disk_usage if uso_de_disco is None else uso_de_disco
+    acceso = os.access if acceso is None else acceso
+    ajuste = entorno.get(VARIABLE_TMPFS, "auto").strip().lower() or "auto"
+    if ajuste == "0":
+        return False, f"{VARIABLE_TMPFS}=0"
+    if not acceso(directorio, os.W_OK):
+        return False, f"{directorio} no existe o no se puede escribir"
+    if ajuste == "1":
+        return True, f"forzado con {VARIABLE_TMPFS}=1"
+    try:
+        libre = uso_de_disco(directorio).free
+    except OSError as error:
+        return False, f"no se pudo medir el espacio de {directorio} ({error})"
+    if libre < UMBRAL_TMPFS_BYTES:
+        return False, (
+            f"{directorio} tiene {libre // 2**20} MiB libres y se piden "
+            f"{UMBRAL_TMPFS_BYTES // 2**20} MiB ({HOLGURA} x pico de {PICO_MEDIDO_BYTES // 2**20} MiB)"
+        )
+    return True, f"{libre // 2**20} MiB libres en {directorio}"
+
+
+def limpiar_directorio(ruta, pid_dueno):
+    # En un proceso hijo (fork) heredado no se borra lo del padre.
+    if ruta and os.getpid() == pid_dueno:
+        shutil.rmtree(ruta, ignore_errors=True)
+
+
+def instalar_limpieza(ruta):
+    """Borra `ruta` al salir (atexit) y también ante SIGTERM, que atexit no cubre.
+
+    El manejador de SIGTERM limpia, restaura la acción por defecto y se reenvía la
+    señal: el proceso muere igual que sin manejador (código -SIGTERM). Solo se
+    instala si SIGTERM tenía la acción por defecto (no pisa a otro manejador) y se
+    omite donde no existe (Windows). En procesos hijos heredados por fork no borra.
+    """
+    pid = os.getpid()
+    atexit.register(limpiar_directorio, ruta, pid)
+    sigterm = getattr(signal, "SIGTERM", None)
+    if sigterm is None:
+        return
+
+    def al_recibir_sigterm(numero, marco):
+        limpiar_directorio(ruta, pid)
+        signal.signal(sigterm, signal.SIG_DFL)
+        os.kill(os.getpid(), sigterm)
+
+    try:
+        if signal.getsignal(sigterm) == signal.SIG_DFL:
+            signal.signal(sigterm, al_recibir_sigterm)
+    except ValueError:  # fuera del hilo principal
+        pass
+
+
+def crear_raiz_temporal(directorio):
+    # Nombre impredecible y permisos 0700 (mkdtemp), sin chocar con otras corridas.
+    ruta = tempfile.mkdtemp(prefix=PREFIJO_TMPFS, dir=directorio)
+    instalar_limpieza(ruta)
+    return ruta
+
+
 def pytest_configure(config):
-    # Las bases de prueba van a memoria compartida (tmpfs) si existe: cada commit
-    # de SQLite hace fsync y en disco costaba ~2 ms (T-08b, D-031). Si el usuario
-    # pasa --basetemp, o no hay /dev/shm (Windows, macOS), se usa lo de siempre.
-    if config.option.basetemp is None and os.access("/dev/shm", os.W_OK):
-        # Un directorio por proceso: una corrida anidada (subproceso) no borra el de otra.
-        config.option.basetemp = f"/dev/shm/pytest-agenda-psi-{os.getpid()}"
-        config._basetemp_en_memoria = config.option.basetemp
+    config._tmpfs_raiz = None
+    if config.option.basetemp is not None:
+        config._tmpfs_motivo = f"carpeta temporal: {config.option.basetemp} (--basetemp)"
+        return
+    usar, motivo = decidir_directorio_en_memoria(directorio=DIRECTORIO_TMPFS)
+    if not usar:
+        config._tmpfs_motivo = f"carpeta temporal: la normal de pytest ({motivo})"
+        return
+    config._tmpfs_raiz = crear_raiz_temporal(DIRECTORIO_TMPFS)
+    config.option.basetemp = os.path.join(config._tmpfs_raiz, "base")
+    config._tmpfs_motivo = f"carpeta temporal: {config.option.basetemp} (memoria; {motivo})"
+
+
+def pytest_report_header(config):
+    return getattr(config, "_tmpfs_motivo", None)
 
 
 def pytest_unconfigure(config):
-    ruta = getattr(config, "_basetemp_en_memoria", None)
-    if ruta:
-        shutil.rmtree(ruta, ignore_errors=True)  # en /dev/shm no se acumula entre corridas
+    limpiar_directorio(getattr(config, "_tmpfs_raiz", None), os.getpid())
 
 
 # Hash rápido para toda la suite (D-019). Sigue siendo scrypt con sal propia,
