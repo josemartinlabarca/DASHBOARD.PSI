@@ -124,9 +124,21 @@ git conserva cada revisión aunque `REVIEW.md` se sobrescriba.
 - **Mi decisión como orquestador:** los hallazgos 1–3 se agrupan en **T-03b**, que debe ir **antes** de T-04, porque el login reutilizará la normalización del correo. El hallazgo 4 se asigna a T-04, que es donde nace el login. El resto va al backlog con tarea asignada.
 - **Lección:** el orden de las tareas es una herramienta. Arreglar los cimientos de la autenticación antes de construir el login sale más barato que corregirlos después.
 
+### Vuelta 6 — T-03b Endurecer el registro (y tu primera decisión humana)
+- **Implementador:** `normalizar_email()` (NFKC + `casefold`, rechaza caracteres invisibles), zona horaria creada al usarla y `tzdata` en `requirements.txt` (D-012), `MAX_CONTENT_LENGTH` de 16 kB (D-014) y pruebas reforzadas. 109 pruebas; ejecutó 10 mutaciones y reportó cuáles pruebas fallaban.
+- **Mi verificación:** 109 pruebas en tres entornos (sin variables, con `SECRET_KEY`, con `FLASK_DEBUG=1`); comprobé que no tocó el esquema, `ARCHITECTURE.md` ni la propuesta D-007; y ejecuté yo mismo dos mutaciones (usar solo `lower()` en vez de la normalización; desactivar el límite de tamaño). Las dos fueron detectadas.
+- **Revisor: APROBADO**, pero encontró una **afirmación falsa del implementador**: dijo que quitar la primera NFKC era equivalente. Lo reproduje: cambia el resultado en **637 puntos de código** y rompe la idempotencia. La suite seguía verde porque ninguna prueba cubría esos casos.
+- **Tu primera decisión humana:** aceptaste las opciones A–F de **D-007** (refuerzos del esquema, más la autorización para editar `ARCHITECTURE.md`). Quedó registrada en `DECISIONS.md` con tu respuesta textual, y T-02c pasó a ser la siguiente tarea de esquema.
+- **Decisión pendiente nueva:** **D-015** (qué caracteres se aceptan en un correo). Tres opciones con su costo; la recomendada es aceptar solo ASCII.
+- **Lección:** el implementador no mintió con mala intención: razonó mal ("la segunda NFKC ya lo cubre") y lo dio por verificado sin ejecutarlo. Por eso existe la regla 9 de `CLAUDE.md` y por eso el revisor sigue siendo imprescindible.
+
 ### Historial git resultante
 
 ```
+T-03b revisión: REVIEW.md aprobado, tarea T-03c y propuesta D-015
+D-007 aprobada por el humano: T-02c desbloqueada y antes de T-04
+T-03b: endurecer el registro (tzdata, normalizar_email, límite de tamaño, pruebas)
+D-007: propuesta de refuerzos de esquema pendiente de aprobación (T-02c)
 T-03 revisión: REVIEW.md aprobado, tarea T-03b y backlog
 T-03: registro de pacientes con CSRF propio y validación
 T-02d revisión y backlog, reglas 8–10 de CLAUDE.md
@@ -143,15 +155,16 @@ docs: documentación base del proyecto Agenda Psi
 
 ## 4. Estado actual y qué sigue
 
-- Hecho: **T-01, T-02, T-02b, T-02d, T-03** (62 pruebas pasando).
-- Siguiente sin decisión tuya: **T-03b** (endurecer el registro: `tzdata`, normalización del correo, tamaño de petición, pruebas más fuertes). Bloquea T-04.
-- Pendiente de tu decisión: **T-02c** (refuerzos del esquema, más dos puntos nuevos: `COLLATE NOCASE` en el correo y añadir `seguridad.py` a `ARCHITECTURE.md`). Lee los hallazgos con `git log -p -- REVIEW.md`, decide cuáles aceptas y regístralos como D-007. Debe estar hecha antes de T-05, pero **no bloquea T-03b ni T-04**.
-- Orden sugerido: T-03b → T-04 → T-02c → T-05 → ... (las dependencias en `TASKS.md` ya lo imponen).
+- Hecho: **T-01, T-02, T-02b, T-02d, T-03, T-03b** (109 pruebas pasando).
+- **Aprobada por ti:** D-007 (esquema). **T-02c** está desbloqueada y es la siguiente.
+- **Pendiente de tu decisión:** **D-015** (caracteres permitidos en el correo) → bloquea solo el punto 2 de T-03c.
+- Siguiente sin decisión tuya: **T-02c** (esquema) y **T-03c** (cerrar hallazgos, salvo el punto 2).
+- Orden: T-02c → T-03c → T-04 → T-05 → ... (las dependencias en `TASKS.md` ya lo imponen).
 
-**Tu primer ejercicio:** lanza tú mismo la vuelta de T-03b con el prompt del Paso B y
+**Tu primer ejercicio:** lanza tú mismo la vuelta de T-02c con el prompt del Paso B y
 revisa el resultado con la lista del Paso C. Antes de dar por buena cualquier tarea, haz
-dos preguntas extra: *¿esto rompió algo que ya estaba documentado?* y *¿estas pruebas fallarían si quitara la protección?*
-Hazlo antes de pensar en automatizar.
+tres preguntas extra: *¿esto rompió algo que ya estaba documentado?*, *¿estas pruebas fallarían si quitara la protección?* y
+*¿el reporte del agente afirma algo que no ejecutó?* Hazlo antes de pensar en automatizar.
 
 ## 5. Consejos profesionales (lo que hace la diferencia)
 
@@ -175,6 +188,10 @@ Hazlo antes de pensar en automatizar.
 18. **No escribas tu propia seguridad sin motivo, y si lo haces, que te la ataquen.** El CSRF propio fue una decisión consciente (sin dependencias, D-009), pero por eso se revisó con mentalidad de auditor. Los fallos reales salieron de los casos límite: Unicode, Windows, tamaño de la petición.
 19. **Prueba como un atacante, no solo como un usuario.** Reutilizar el token de otra sesión, enviar `rol=profesional`, mandar un correo en ancho completo: ninguno es un uso normal y todos son los que importan.
 20. **El orden de las tareas es una herramienta de gestión.** Mover un arreglo antes de una tarea que lo reutiliza evita deuda sobre los cimientos.
+21. **Reproduce las afirmaciones, también las de los agentes.** "Es equivalente" era una afirmación sin ejecutar. Reproducirla (637 casos) la desmontó en segundos.
+22. **Separa qué decide el humano y qué decide el agente.** Un cambio de esquema, de política o de dependencia es del humano; un agente propone con opciones, costo y recomendación, y tú respondes. Deja la respuesta escrita en el repositorio, no solo en el chat.
+23. **Prepara las decisiones para que sean fáciles de tomar.** Una propuesta con opciones marcables, SQL ya probado y el costo de cada una se resuelve en un mensaje. Una pregunta abierta, no.
+24. **Los agentes hacen un recorrido mental, no una ejecución.** Cuando algo "es obvio", pide una prueba o una mutación que lo demuestre.
 
 ## 6. Trampas de principiante que ya viste en acción
 
