@@ -484,6 +484,7 @@ def test_sin_claves_foraneas_la_prueba_no_pasaria_por_casualidad(db, ids):
     insertar_notificacion(db, usuario_id=ids["pac"], hora_id=hora)
     db.commit()
     db.execute("PRAGMA foreign_keys = OFF")
+    assert db.execute("PRAGMA foreign_keys").fetchone()[0] == 0  # realmente quedó apagado
     db.execute("DELETE FROM horas WHERE id=?", (hora,))
     assert _notificaciones_de(db, hora)[0]["hora_id"] == hora  # colgando
 
@@ -634,14 +635,105 @@ def test_update_a_un_formato_invalido_tambien_se_rechaza(db, ids):
     )
 
 
-def test_limitacion_conocida_nul_tras_el_prefijo_canonico_pasa_el_check(db, ids):
-    """LIMITACIÓN REAL del CHECK (comprobada con SQLite 3.45.1): GLOB trabaja sobre
-    cadenas C, así que un NUL (\\x00) corta la comparación. `2026-12-01T10:00:00\\x00basura`
-    se ACEPTA y es un valor distinto del canónico, por lo que también elude la UNIQUE.
-    El esquema aprobado (D-017) no lo impide; la aplicación (T-05) debe guardar solo
-    el resultado de formatear un datetime, nunca el texto crudo del formulario."""
+# --- D-018: el carácter nulo en horas.inicio (T-02g) ----------------------------
+
+NULOS_RECHAZADOS = {
+    "nul_al_final": CANONICO + "\x00",
+    "nul_con_texto": CANONICO + "\x00basura",
+    "nul_al_inicio": "\x00" + CANONICO,
+    "nul_en_medio": "2026-12-01\x00T10:00:00",
+    "nul_en_medio_de_la_hora": "2026-12-01T10:00\x00:00",
+    "solo_prefijo_y_nul": "2026-12-01T10:00:00\x00",
+    "nul_solo": "\x00",
+}
+
+
+@pytest.mark.parametrize("inicio", NULOS_RECHAZADOS.values(), ids=NULOS_RECHAZADOS.keys())
+def test_inicio_con_nul_rechazado_por_el_check(db, ids, inicio):
+    """D-018: GLOB corta en el NUL; `instr(inicio, char(0)) = 0` lo cierra."""
+    rechazada(
+        lambda: insertar_hora(db, profesional_id=ids["prof"], inicio=inicio),
+        "CHECK constraint failed",
+    )
+    assert db.execute("SELECT COUNT(*) FROM horas").fetchone()[0] == 0
+
+
+def test_inicio_con_nul_no_elude_la_unique(db, ids):
     insertar_hora(db, profesional_id=ids["prof"], inicio=CANONICO)
     for inicio in (CANONICO + "\x00", CANONICO + "\x00basura"):
-        hora = insertar_hora(db, profesional_id=ids["prof"], inicio=inicio)
-        assert db.execute("SELECT length(inicio) FROM horas WHERE id=?", (hora,)).fetchone()[0] == 19
-    assert db.execute("SELECT COUNT(*) FROM horas").fetchone()[0] == 3
+        rechazada(
+            lambda: insertar_hora(db, profesional_id=ids["prof"], inicio=inicio),
+            "CHECK constraint failed",
+        )
+    assert db.execute("SELECT COUNT(*) FROM horas").fetchone()[0] == 1
+
+
+def test_update_a_un_valor_con_nul_tambien_se_rechaza(db, ids):
+    hora = insertar_hora(db, profesional_id=ids["prof"], inicio=CANONICO)
+    rechazada(
+        lambda: db.execute("UPDATE horas SET inicio=? WHERE id=?", (CANONICO + "\x00x", hora)),
+        "CHECK constraint failed",
+    )
+    assert db.execute("SELECT inicio FROM horas WHERE id=?", (hora,)).fetchone()[0] == CANONICO
+
+
+def test_el_canonico_sigue_aceptado_junto_a_la_regla_del_nul(db, ids):
+    hora = insertar_hora(db, profesional_id=ids["prof"], inicio=CANONICO)
+    fila = db.execute("SELECT inicio, length(inicio) FROM horas WHERE id=?", (hora,)).fetchone()
+    assert tuple(fila) == (CANONICO, 19)
+
+
+# --- Cada posición del formato (hallazgo 5 de la revisión de T-02f) -------------
+
+SEPARADORES = {4, 7, 10, 13, 16}
+
+
+def _sustituciones_invalidas():
+    for pos, caracter in enumerate(CANONICO):
+        malos = ["/", "x", " "] if pos in SEPARADORES else ["x", "O", "*", "?"]
+        for malo in malos:
+            nombre = {"/": "barra", "x": "x", " ": "espacio", "O": "O", "*": "asterisco", "?": "interrogacion"}[malo]
+            tipo = "separador" if pos in SEPARADORES else "digito"
+            yield pytest.param(
+                CANONICO[:pos] + malo + CANONICO[pos + 1 :],
+                id=f"pos{pos:02d}-{tipo}-{caracter!r}-por-{nombre}",
+            )
+
+
+def test_el_canonico_tiene_19_posiciones():
+    assert len(CANONICO) == 19
+
+
+@pytest.mark.parametrize("inicio", list(_sustituciones_invalidas()))
+def test_un_caracter_invalido_en_cualquier_posicion_es_rechazado(db, ids, inicio):
+    rechazada(
+        lambda: insertar_hora(db, profesional_id=ids["prof"], inicio=inicio),
+        "CHECK constraint failed",
+    )
+    assert db.execute("SELECT COUNT(*) FROM horas").fetchone()[0] == 0
+
+
+COMODINES_Y_SEPARADORES = [
+    "2026-12-01 10:00:00",  # espacio en lugar de T, con segundos
+    "2026-12-01_10:00:00",
+    "20*6-12-01T10:00:00",
+    "*026-12-01T10:00:00",
+    "2026-12-01T10:00:0?",
+    "2026-12-01T10:00:??",
+    "2026-12-01T10:00:0[0-9]",
+    "[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]",
+    "2026-12-01T[0-9][0-9]:00:00",
+    "2026-*",
+    "*",
+    "????-??-??T??:??:??",
+    "20[0-9]6-12-01T10:00:00",
+]
+
+
+@pytest.mark.parametrize("inicio", COMODINES_Y_SEPARADORES)
+def test_comodines_de_glob_y_otros_separadores_rechazados(db, ids, inicio):
+    rechazada(
+        lambda: insertar_hora(db, profesional_id=ids["prof"], inicio=inicio),
+        "CHECK constraint failed",
+    )
+    assert db.execute("SELECT COUNT(*) FROM horas").fetchone()[0] == 0

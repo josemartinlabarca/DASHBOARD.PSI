@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS horas (
         (estado = 'libre' AND paciente_id IS NULL AND reservada_en IS NULL)
         OR (estado = 'reservada' AND paciente_id IS NOT NULL AND reservada_en IS NOT NULL)
     ),
-    CHECK (inicio GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]'),
+    CHECK (inicio GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]' AND instr(inicio, char(0)) = 0),
     UNIQUE (profesional_id, inicio)
 );
 

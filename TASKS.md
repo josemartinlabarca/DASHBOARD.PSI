@@ -52,7 +52,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Origen:** D-016 y D-017 (revisión de T-02c, hallazgos 1 y 3).
 
 ### T-02g — Cerrar el hueco del carácter nulo en `horas.inicio` (D-018, aprobada 2026-10-08 01:16)
-- **Estado:** PENDIENTE — decisión humana **APROBADA** (D-018). Autorizada a modificar `app/schema.sql` y la línea `inicio` de `ARCHITECTURE.md` **solo** para esto.
+- **Estado:** HECHA — decisión humana **APROBADA** (D-018). Autorizada a modificar `app/schema.sql` y la línea `inicio` de `ARCHITECTURE.md` **solo** para esto.
 - **Depende de:** T-02f
 - **Qué:** (1) Añadir `AND instr(inicio, char(0)) = 0` al CHECK de formato de `horas.inicio` (D-018) y reflejarlo en `ARCHITECTURE.md`. (2) **Reemplazar** la prueba `test_limitacion_conocida_nul_tras_el_prefijo_canonico_pasa_el_check` (que documenta el defecto aceptándolo y fallaría sin explicación al corregirlo) por pruebas que exijan el rechazo: NUL al final, NUL solo tras el prefijo, NUL con texto, NUL al inicio y NUL en medio; el canónico se acepta. (3) Cerrar los huecos de las mutaciones del GLOB que dejaban todo en verde (hallazgo 5 de la revisión de T-02f): una prueba **por posición** de carácter inválido (16 de los 19 caracteres no son separadores: sustituir cada dígito por una letra y cada separador por otro carácter), aceptar el espacio como separador (`2026-12-01 10:00:00`), y un comodín en el año. (4) En la prueba de control con claves foráneas apagadas, afirmar el estado del `PRAGMA` tras apagarlo (hallazgo 7).
 - **Término:** Las mutaciones "quitar `instr(...)`", "GLOB con `[T ]`", "comodín en el año" y "quitar el CHECK de `inicio`" hacen fallar al menos una prueba; `python3 -m pytest` pasa. Debe quedar HECHA **antes** de T-02e y de T-05.

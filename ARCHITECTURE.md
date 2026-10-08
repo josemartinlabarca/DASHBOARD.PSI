@@ -44,7 +44,7 @@ agenda-psi/
 **horas**
 - `id` INTEGER PK
 - `profesional_id` INTEGER NOT NULL → usuarios.id
-- `inicio` TEXT NOT NULL (ISO 8601, hora local de Chile, formato canónico `YYYY-MM-DDTHH:MM:SS` sin desfase; el esquema lo exige con `CHECK (inicio GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]')`, que valida la forma pero no que la fecha exista: eso lo valida la aplicación)
+- `inicio` TEXT NOT NULL (ISO 8601, hora local de Chile, formato canónico `YYYY-MM-DDTHH:MM:SS` sin desfase; el esquema lo exige con `CHECK (inicio GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]' AND instr(inicio, char(0)) = 0)`, que valida la forma (y rechaza el carácter nulo, D-018) pero no que la fecha exista: eso lo valida la aplicación)
 - `duracion_min` INTEGER NOT NULL DEFAULT 50 CHECK (duracion_min > 0)
 - `estado` TEXT NOT NULL CHECK (estado IN ('libre','reservada')) DEFAULT 'libre'
   (al cancelar, la hora vuelve a `libre` y se limpian `paciente_id` y `reservada_en`)

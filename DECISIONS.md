@@ -214,6 +214,7 @@ Autorizas a que se modifique `ARCHITECTURE.md` (que `CLAUDE.md` reserva al human
   - `length(CAST(inicio AS BLOB)) = 19`: funciona, pero fija la longitud y es menos obvio de leer.
   - No cambiar el esquema y confiar en la aplicación: descartada por el humano.
 - **Implementación:** T-02g. Autorizada a modificar `app/schema.sql` y la línea `inicio` del "Modelo de datos" de `ARCHITECTURE.md` **solo** para esto. Consecuencia ya conocida (D-006): borrar `agenda.db` y volver a ejecutar `init-db`.
+- **Implementada:** T-02g, 2026-10-08 01:21
 
 ## D-00X — Título
 - **Fecha:**
