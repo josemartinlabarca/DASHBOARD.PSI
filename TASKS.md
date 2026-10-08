@@ -22,7 +22,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Término:** Prueba que crea la base y verifica que existen las 3 tablas con sus restricciones.
 
 ### T-02b — Endurecer configuración (hallazgos de la revisión de T-01)
-- **Estado:** PENDIENTE
+- **Estado:** HECHA
 - **Depende de:** T-02
 - **Qué:** (1) `SECRET_KEY`: el valor por defecto solo se acepta en modo debug/testing; en otro caso la app falla al arrancar si falta la variable de entorno. (2) Fijar versión de `pytest` en `requirements.txt` y registrar la dependencia en `DECISIONS.md` (D-005). (3) Documentar `SECRET_KEY` en `README.md`.
 - **Término:** Pruebas: arranque sin `SECRET_KEY` fuera de debug/testing falla; en testing funciona. Debe quedar HECHA **antes** de T-03.

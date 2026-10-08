@@ -5,8 +5,8 @@ Los agentes agregan aquí una entrada al final de cada vuelta. Lo más reciente 
 ## Estado actual
 
 - Fase: 1 (Base) en curso
-- Última tarea hecha: T-02
-- Próxima tarea: T-02b
+- Última tarea hecha: T-02b
+- Próxima tarea: T-03 (T-02c sigue pendiente y requiere decisión humana antes de T-05)
 
 ## Bloqueos y dudas abiertas
 
@@ -31,3 +31,9 @@ _(ninguno)_
 - Cómo se verificó: `python3 -m pytest -q` pasa (9 pruebas); `flask --app app init-db` ejecutado dos veces contra una base temporal (variable `DATABASE`), sin dejar archivos `.db` en el repo.
 - Problemas / dudas: `notificaciones.tipo` no tiene CHECK porque ARCHITECTURE.md solo lo lista como comentario; se dejó sin restricción para seguir el documento al pie de la letra.
 - Siguiente paso sugerido: T-02b (endurecer configuración).
+
+### [2026-10-07 23:59] T-02b — Endurecer configuración — Implementador
+- Qué se hizo: `create_app` ahora lee `SECRET_KEY` solo del entorno (o de `test_config`) y `_validar_secret_key` aplica el valor de desarrollo únicamente si `TESTING` o `DEBUG` están activos (`app.config["DEBUG"]` refleja `FLASK_DEBUG`, que `flask run --debug` fija antes de crear la app); si no, lanza `RuntimeError` en español (una `SECRET_KEY` vacía cuenta como ausente). `requirements.txt`: `pytest>=9,<10` y decisión D-005 en `DECISIONS.md`. README: sección `SECRET_KEY`. Nuevo `tests/test_config.py` (5 pruebas, con `monkeypatch`).
+- Cómo se verificó: `python3 -m pytest -q` pasa (14 pruebas). Quitando temporalmente la validación fallan 2 pruebas nuevas (sin clave y clave vacía); se revirtió. Manual: `flask --app app run --debug` sin `SECRET_KEY` respondió 200 en `/` y se cerró; `flask --app app run` sin debug ni clave falla con el mensaje claro. Sin procesos ni `.db` residuales.
+- Problemas / dudas: ninguna.
+- Siguiente paso sugerido: T-03 (registro de pacientes). T-02c requiere decisión humana.

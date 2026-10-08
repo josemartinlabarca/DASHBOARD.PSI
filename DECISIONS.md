@@ -34,6 +34,12 @@ decisión técnica que no esté ya cubierta, en lugar de tomarla en silencio.
 - **Porqué:** Es lo más simple y seguro: evita perder citas o usuarios por ejecutarlo dos veces. (D-005 queda reservada para T-02b.)
 - **Alternativas descartadas:** `DROP TABLE` + recrear (destructivo, exigiría confirmación); sistema de migraciones (excesivo para v1).
 
+## D-005 — Versión de pytest acotada en `requirements.txt`
+- **Fecha:** 2026-10-07
+- **Decisión:** Fijar `pytest>=9,<10` (versión probada: 9.1.1), igual que Flask (`>=3.1,<3.2`).
+- **Porqué:** Una instalación nueva no debe traer un cambio mayor de pytest que rompa las pruebas sin aviso. Es una dependencia ya existente; solo se acota su rango (hallazgo 2 de la revisión de T-01).
+- **Alternativas descartadas:** dejar `pytest` sin versión (no reproducible); fijar versión exacta con `==` (demasiado rígido para v1).
+
 ## Plantilla para nuevas decisiones
 
 ```

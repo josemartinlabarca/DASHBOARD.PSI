@@ -32,6 +32,23 @@ flask --app app run --debug      # http://127.0.0.1:5000
 pytest                           # corre las pruebas
 ```
 
+### Variable `SECRET_KEY`
+
+`SECRET_KEY` es la clave secreta con la que Flask firma las sesiones y los
+tokens CSRF. Si alguien la conoce, puede falsificarlos, así que debe ser larga,
+aleatoria y no subirse al repositorio. Genera una así y defínela antes de
+iniciar la app:
+
+```bash
+python3 -c "import secrets; print(secrets.token_hex(32))"
+export SECRET_KEY=<el valor generado>     # en Windows (PowerShell): $env:SECRET_KEY="<valor>"
+flask --app app run
+```
+
+En desarrollo con `flask --app app run --debug` y en las pruebas **no hace
+falta**: se usa un valor de desarrollo inseguro. Fuera de debug, si falta
+`SECRET_KEY`, la app no arranca y muestra un error que lo indica.
+
 > Estos comandos se vuelven reales a medida que los agentes completan las
 > tareas de `TASKS.md`. Si algo no existe todavía, mira `PROGRESS.md`.
 
