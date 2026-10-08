@@ -28,6 +28,13 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Término:** Pruebas: arranque sin `SECRET_KEY` fuera de debug/testing falla; en testing funciona. Debe quedar HECHA **antes** de T-03.
 - **Origen:** REVIEW de T-01, hallazgos 1 (media) y 2 (baja).
 
+### T-02c — Reforzar integridad del esquema (hallazgos de la revisión de T-02)
+- **Estado:** PENDIENTE — **requiere decisión humana primero** (cambia el esquema documentado en `ARCHITECTURE.md`)
+- **Depende de:** T-02
+- **Qué:** Tras aprobar el humano las propuestas en `DECISIONS.md` (D-007) y actualizar `ARCHITECTURE.md`: (1) CHECK que ate `estado`, `paciente_id` y `reservada_en` en `horas` (reserva consistente, regla §4.1); (2) CHECK de `notificaciones.tipo`; (3) CHECK de dominio en `duracion_min > 0` y `recordatorio_enviado IN (0,1)`; (4) evaluar `UNIQUE(profesional_id, inicio)` como refuerzo parcial de §4.3. Además, completar las pruebas de `NOT NULL` y de las FK `horas.paciente_id` y `notificaciones.hora_id`, y hacer que `test_comando_init_db` compare columnas.
+- **Término:** Pruebas nuevas fallan si se quita cualquiera de los CHECK/NOT NULL/FK; `pytest` pasa. Debe quedar HECHA **antes** de T-05.
+- **Origen:** REVIEW de T-02, hallazgos 1–6 (ver historial git de `REVIEW.md`).
+
 ## Fase 2 — Usuarios
 
 ### T-03 — Registro de pacientes
@@ -46,7 +53,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 
 ### T-05 — Profesional agrega y elimina horas
 - **Estado:** PENDIENTE
-- **Depende de:** T-04
+- **Depende de:** T-04, T-02c
 - **Qué:** Formulario y rutas de US-4 y US-5 con reglas 2, 3 y 4.
 - **Término:** Pruebas: crear hora válida, rechazar pasado, rechazar solape, no eliminar reservada.
 

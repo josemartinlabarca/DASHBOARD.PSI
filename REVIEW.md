@@ -1,26 +1,27 @@
-APROBADO
+# REVIEW — T-02 (commit 748f18e)
 
-# REVIEW — T-01 (commit 41389e5)
+**APROBADO**
 
-Verificado: `pytest` pasa (1 prueba); `flask --app app run` responde 200 en `/`; no quedan procesos ni archivos `.db` en el repositorio; el árbol de trabajo está limpio.
+No hay hallazgos de severidad alta. `pytest`: 9 pruebas pasan. No quedaron archivos `.db` ni procesos en el repo.
 
-## Comprobaciones pedidas
-- Formato de commit: cumple (`T-01: esqueleto del proyecto con fábrica Flask y pruebas`, en español).
-- SPEC.md y ARCHITECTURE.md: sin modificaciones en el commit.
-- Archivos no pedidos: ninguno. Solo se tocaron `.gitignore`, `app/`, `requirements.txt`, `tests/`, `TASKS.md` y `PROGRESS.md`, todo dentro del alcance de T-01.
-- Estructura vs ARCHITECTURE.md: coincide con lo que corresponde a T-01. Faltan `db.py`, `schema.sql`, `auth.py`, etc. y `static/`, que pertenecen a tareas posteriores.
-- Criterio de término de T-01: cumplido.
+## Verificaciones pedidas
+
+1. **schema.sql vs "Modelo de datos"**: coincide campo por campo (tablas, columnas, NOT NULL, UNIQUE de `email`, CHECK de `rol` y `estado`, DEFAULT 50/'libre'/0, columnas NULL, FKs). Sin diferencias.
+2. **`notificaciones.tipo` sin CHECK**: seguir el documento al pie de la letra fue razonable, pero conviene proponerlo (hallazgo 4). Con la lista cerrada `('confirmacion','recordatorio','cancelacion')` en ARCHITECTURE.md y en SPEC §5/US-11..13, un typo en T-09/T-10 se guardaría en silencio (verificado: `'basura'` es aceptado). El cambio debe pasar por `DECISIONS.md`, no hacerse en silencio.
+3. **Pruebas**: ver hallazgos 2 y 3.
+4. **`PRAGMA foreign_keys = ON`**: se aplica en `get_db()` (app/db.py:13) en cada conexión nueva de la aplicación, y `test_claves_foraneas_se_hacen_cumplir` falla si se quita. Es la única vía de conexión del código (`grep` no encuentra otro `sqlite3.connect` en `app/`). Ver hallazgo 8 para el límite.
+5. **Integridad de `horas`**: ver hallazgos 1, 5, 6 y 7.
+6. **SQL parametrizado**: sí. No hay SQL concatenado ni f-strings con SQL en `app/`; las pruebas usan `?`. `executescript` solo ejecuta el archivo `schema.sql` fijo.
+7. **Commit y alcance**: mensaje `T-02: esquema SQLite, db.py y comando init-db` cumple el formato. `SPEC.md`, `ARCHITECTURE.md`, `requirements.txt` y `.gitignore` no fueron modificados; no hay dependencias nuevas (`click` viene con Flask). `TASKS.md`, `PROGRESS.md` (formato correcto) y `DECISIONS.md` actualizados según las reglas.
+8. **D-006**: coherente con el código. `CREATE TABLE IF NOT EXISTS` en las 3 tablas (app/schema.sql:1,9,20), `init_db` no borra nada (app/db.py:23-28) y `test_init_db_no_borra_datos_existentes` lo respalda. Su afirmación de que no modifica tablas existentes también es cierta. Nota menor: el `db.commit()` de app/db.py:28 es redundante tras `executescript` (inofensivo).
 
 ## Hallazgos
 
-1. **MEDIA** — `app/__init__.py:11`: `SECRET_KEY` tiene un valor por defecto público (`"dev-no-usar-en-produccion"`). Si la app se despliega sin definir la variable de entorno, las cookies de sesión y los tokens CSRF (que llegan en T-03 y siguientes) serían falsificables, lo que permitiría suplantar usuarios, incluido el profesional. No es explotable hoy porque aún no hay sesiones, pero conviene corregirlo antes de T-03/T-04. Recomendación: que el valor por defecto solo se use en modo debug o testing. Fuera de eso, exigir `SECRET_KEY` y fallar al arrancar si falta. Alternativa: generar una clave aleatoria con `secrets.token_hex()` cuando falte, con una advertencia. Documentar la decisión en `DECISIONS.md` y la variable en `README.md`.
-
-2. **BAJA** — `requirements.txt:2`: `pytest` no tiene versión fijada, mientras que `flask` sí. Además, CLAUDE.md exige una entrada en `DECISIONS.md` por cada dependencia nueva. D-001 cubre Flask, pero no hay entrada para `pytest`. Recomendación: agregar una entrada breve en `DECISIONS.md` (por ejemplo, D-005) y fijar un rango de versiones. Otra opción es separar las dependencias de desarrollo.
-
-3. **BAJA** — `PROGRESS.md:22`: el encabezado de la entrada usa solo la fecha. CLAUDE.md define el formato `[fecha hora] T-XX — título — rol` y falta la hora.
-
-4. **BAJA** — `app/templates/base.html`: no enlaza `static/style.css`. Es aceptable para T-01 porque `static/` aún no existe. Hay que acordarse de añadirlo cuando se cree `static/`, ya que SPEC §6 pide un diseño que funcione bien en celular. El `viewport` ya está presente.
-
-5. **BAJA (informativa)** — `app/__init__.py:12-14`: `DATABASE` apunta por defecto a `agenda.db` en la raíz del proyecto. El patrón `*.db` de `.gitignore` lo cubre, así que no hay riesgo. Se anota solo porque esa ruta es la que usará `init-db` en T-02.
-
-No hay hallazgos de severidad alta. Las reglas de SPEC §4 aún no aplican a esta tarea.
+1. **MEDIA — Estado y datos de reserva pueden ser incoherentes** (app/schema.sql:9-18). Verificado: se aceptan `estado='reservada'` con `paciente_id` y `reservada_en` NULL, y `estado='libre'` con `paciente_id` informado. Esto contradice la nota de ARCHITECTURE.md ("al cancelar... se limpian `paciente_id` y `reservada_en`") y afecta la regla SPEC §4.1 y las consultas de T-06..T-08, que dependen de esa coherencia. Se puede reforzar sin cambiar columnas con un CHECK: `(estado='libre' AND paciente_id IS NULL AND reservada_en IS NULL) OR (estado='reservada' AND paciente_id IS NOT NULL AND reservada_en IS NOT NULL)`. Es un añadido al esquema documentado, por lo que requiere entrada en `DECISIONS.md` (y luego ajustar ARCHITECTURE.md por el humano).
+2. **MEDIA — Las pruebas no cubren varias restricciones que el criterio de término llama "sus restricciones"** (tests/test_db.py). Una versión rota del esquema pasaría sin que ninguna prueba falle si: se quita `NOT NULL` de cualquier columna; se quita la FK de `horas.paciente_id` o de `notificaciones.hora_id` (solo se prueban `horas.profesional_id` y `notificaciones.usuario_id`, líneas 54-63); se cambia el DEFAULT de `duracion_min` a otro valor distinto de 50 sería detectado, pero no el de `leida` salvo en la fila de prueba. Falta al menos una prueba de NOT NULL y de las dos FKs restantes.
+3. **BAJA — `test_comando_init_db` usa `<=`** (tests/test_db.py:~90). Pasaría aunque `init-db` creara tablas adicionales; es débil frente a la prueba exacta de la línea 22-26. Además solo comprueba nombres de tabla, no columnas (nada detecta una columna faltante o renombrada, p. ej. `recordatorio_enviado`).
+4. **BAJA — Proponer CHECK en `notificaciones.tipo`** (app/schema.sql:22). Ver punto 2 arriba. Misma vía: `DECISIONS.md`.
+5. **BAJA — Sin CHECK de dominio en columnas numéricas** (app/schema.sql:12, 16, 25). Verificado: se acepta `duracion_min = -5` y `recordatorio_enviado = 7`. Sugerencia: `CHECK (duracion_min > 0)` y `CHECK (... IN (0,1))` para `recordatorio_enviado` y `leida`. Mismo trámite que el hallazgo 1.
+6. **BAJA — Reglas SPEC §4.3 y §4.5 podrían reforzarse parcialmente en el esquema** (app/schema.sql:9-18). Hoy se aceptan dos horas idénticas del mismo profesional (verificado). Un `UNIQUE (profesional_id, inicio)` evita duplicados exactos (el solape parcial sigue requiriendo lógica en T-05). Para la regla 5, un índice único parcial `ON horas (paciente_id, inicio) WHERE estado='reservada'` impide dos reservas del mismo paciente a la misma hora de inicio (no cubre solapes parciales entre profesionales, pero hay uno solo en v1). Es defensa en profundidad; la lógica de aplicación sigue siendo necesaria y no es bloqueante para T-02.
+7. **BAJA — Los roles no se validan en las FKs** (app/schema.sql:11,14). `horas.profesional_id` puede apuntar a un paciente y `paciente_id` a un profesional. Los CHECK/triggers para eso son excesivos para v1; basta anotar que la validación debe estar en T-05/T-07.
+8. **BAJA — `PRAGMA foreign_keys` depende de usar siempre `get_db()`** (app/db.py:13). Cualquier conexión futura (scripts, comandos CLI, pruebas con `sqlite3.connect` directo) no tendrá FKs activas. Hoy no hay ninguna; conviene mantener la regla de pasar siempre por `get_db()` (el propio `test_comando_init_db` abre una conexión directa, pero solo para leer).
