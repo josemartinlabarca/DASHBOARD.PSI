@@ -67,6 +67,18 @@ def rechazada(accion, fragmento):
     assert fragmento in str(info.value)
 
 
+# Fragmentos del mensaje de SQLite: indica QUÉ restricción falló (el texto de la
+# expresión), para que un rechazo por otro CHECK no pase por bueno (R-04).
+CHECK_COHERENCIA = "CHECK constraint failed: (estado = 'libre' AND paciente_id IS NULL"
+CHECK_TIPO = "CHECK constraint failed: tipo IN ('confirmacion', 'recordatorio', 'cancelacion')"
+CHECK_DURACION = "CHECK constraint failed: duracion_min > 0"
+CHECK_RECORDATORIO = "CHECK constraint failed: recordatorio_enviado IN (0, 1)"
+CHECK_LEIDA = "CHECK constraint failed: leida IN (0, 1)"
+CHECK_INICIO = "CHECK constraint failed: inicio GLOB "
+CHECK_ROL = "CHECK constraint failed: rol IN ('paciente', 'profesional')"
+CHECK_ESTADO = "CHECK constraint failed: estado IN ('libre', 'reservada')"
+
+
 # --- A: coherencia de la reserva -------------------------------------------------
 
 def test_hora_libre_sin_paciente_ni_reservada_en_aceptada(db, ids):
@@ -106,7 +118,7 @@ def test_hora_incoherente_rechazada(db, ids, campos):
     campos = {k: (ids[v] if v == "pac" else v) for k, v in campos.items()}
     rechazada(
         lambda: insertar_hora(db, profesional_id=ids["prof"], **campos),
-        "CHECK constraint failed",
+        CHECK_COHERENCIA,
     )
 
 
@@ -152,13 +164,13 @@ def test_cancelar_sin_limpiar_paciente_es_rechazado(db, ids):
     )
     rechazada(
         lambda: db.execute("UPDATE horas SET estado='libre' WHERE id=?", (hora,)),
-        "CHECK constraint failed",
+        CHECK_COHERENCIA,
     )
     rechazada(
         lambda: db.execute(
             "UPDATE horas SET estado='libre', paciente_id=NULL WHERE id=?", (hora,)
         ),
-        "CHECK constraint failed",
+        CHECK_COHERENCIA,
     )
 
 
@@ -173,7 +185,7 @@ def test_tipo_de_notificacion_valido_aceptado(db, ids, tipo):
 def test_tipo_de_notificacion_invalido_rechazado(db, ids, tipo):
     rechazada(
         lambda: insertar_notificacion(db, usuario_id=ids["pac"], tipo=tipo),
-        "CHECK constraint failed",
+        CHECK_TIPO,
     )
 
 
@@ -187,7 +199,7 @@ def test_duracion_positiva_aceptada(db, ids):
 def test_duracion_cero_o_negativa_rechazada(db, ids, duracion):
     rechazada(
         lambda: insertar_hora(db, profesional_id=ids["prof"], duracion_min=duracion),
-        "CHECK constraint failed",
+        CHECK_DURACION,
     )
 
 
@@ -200,7 +212,7 @@ def test_recordatorio_enviado_0_o_1_aceptado(db, ids, valor):
 def test_recordatorio_enviado_fuera_de_0_1_rechazado(db, ids, valor):
     rechazada(
         lambda: insertar_hora(db, profesional_id=ids["prof"], recordatorio_enviado=valor),
-        "CHECK constraint failed",
+        CHECK_RECORDATORIO,
     )
 
 
@@ -213,7 +225,7 @@ def test_leida_0_o_1_aceptada(db, ids, valor):
 def test_leida_fuera_de_0_1_rechazada(db, ids, valor):
     rechazada(
         lambda: insertar_notificacion(db, usuario_id=ids["pac"], leida=valor),
-        "CHECK constraint failed",
+        CHECK_LEIDA,
     )
 
 
@@ -575,7 +587,7 @@ OTROS_FORMATOS_INVALIDOS = [
 def test_formato_de_la_revision_rechazado(db, ids, inicio):
     rechazada(
         lambda: insertar_hora(db, profesional_id=ids["prof"], inicio=inicio),
-        "CHECK constraint failed",
+        CHECK_INICIO,
     )
 
 
@@ -583,7 +595,7 @@ def test_formato_de_la_revision_rechazado(db, ids, inicio):
 def test_otro_formato_invalido_rechazado(db, ids, inicio):
     rechazada(
         lambda: insertar_hora(db, profesional_id=ids["prof"], inicio=inicio),
-        "CHECK constraint failed",
+        CHECK_INICIO,
     )
     assert db.execute("SELECT COUNT(*) FROM horas").fetchone()[0] == 0
 
@@ -631,7 +643,7 @@ def test_update_a_un_formato_invalido_tambien_se_rechaza(db, ids):
         lambda: db.execute(
             "UPDATE horas SET inicio='2026-12-01 10:00' WHERE id=?", (hora,)
         ),
-        "CHECK constraint failed",
+        CHECK_INICIO,
     )
 
 
@@ -653,7 +665,7 @@ def test_inicio_con_nul_rechazado_por_el_check(db, ids, inicio):
     """D-018: GLOB corta en el NUL; `instr(inicio, char(0)) = 0` lo cierra."""
     rechazada(
         lambda: insertar_hora(db, profesional_id=ids["prof"], inicio=inicio),
-        "CHECK constraint failed",
+        CHECK_INICIO,
     )
     assert db.execute("SELECT COUNT(*) FROM horas").fetchone()[0] == 0
 
@@ -663,7 +675,7 @@ def test_inicio_con_nul_no_elude_la_unique(db, ids):
     for inicio in (CANONICO + "\x00", CANONICO + "\x00basura"):
         rechazada(
             lambda: insertar_hora(db, profesional_id=ids["prof"], inicio=inicio),
-            "CHECK constraint failed",
+            CHECK_INICIO,
         )
     assert db.execute("SELECT COUNT(*) FROM horas").fetchone()[0] == 1
 
@@ -672,7 +684,7 @@ def test_update_a_un_valor_con_nul_tambien_se_rechaza(db, ids):
     hora = insertar_hora(db, profesional_id=ids["prof"], inicio=CANONICO)
     rechazada(
         lambda: db.execute("UPDATE horas SET inicio=? WHERE id=?", (CANONICO + "\x00x", hora)),
-        "CHECK constraint failed",
+        CHECK_INICIO,
     )
     assert db.execute("SELECT inicio FROM horas WHERE id=?", (hora,)).fetchone()[0] == CANONICO
 
@@ -708,7 +720,7 @@ def test_el_canonico_tiene_19_posiciones():
 def test_un_caracter_invalido_en_cualquier_posicion_es_rechazado(db, ids, inicio):
     rechazada(
         lambda: insertar_hora(db, profesional_id=ids["prof"], inicio=inicio),
-        "CHECK constraint failed",
+        CHECK_INICIO,
     )
     assert db.execute("SELECT COUNT(*) FROM horas").fetchone()[0] == 0
 
@@ -734,7 +746,7 @@ COMODINES_Y_SEPARADORES = [
 def test_comodines_de_glob_y_otros_separadores_rechazados(db, ids, inicio):
     rechazada(
         lambda: insertar_hora(db, profesional_id=ids["prof"], inicio=inicio),
-        "CHECK constraint failed",
+        CHECK_INICIO,
     )
     assert db.execute("SELECT COUNT(*) FROM horas").fetchone()[0] == 0
 
@@ -776,3 +788,132 @@ def test_digito_de_borde_en_cada_posicion_se_acepta_en_la_base(db, ids, inicio):
 def test_extremos_de_forma_valida_se_aceptan_en_la_base(db, ids, inicio):
     insertar_hora(db, profesional_id=ids["prof"], inicio=inicio)
     assert db.execute("SELECT inicio FROM horas").fetchone()[0] == inicio
+
+
+# --- T-02e: el conjunto EXACTO de valores y el SQL exacto del esquema ----------------
+# Las pruebas anteriores comprueban que lo inválido se rechaza, pero no que lo
+# permitido sea exactamente lo aprobado: una restricción ampliada (más valores en un
+# IN, un lower(), un tope superior) las dejaba en verde. Estas la fijan de dos
+# maneras: valores vecinos y SQL de sqlite_master (si el esquema cambia a propósito,
+# hay que actualizar el SQL esperado aquí).
+
+def _sql(db, tabla):
+    fila = db.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (tabla,)
+    ).fetchone()
+    return " ".join(fila["sql"].split())  # normaliza espacios y saltos de línea
+
+
+SQL_ESPERADO = {
+    "usuarios": (
+        "CREATE TABLE usuarios ( id INTEGER PRIMARY KEY, nombre TEXT NOT NULL,"
+        " email TEXT NOT NULL UNIQUE COLLATE NOCASE, password_hash TEXT NOT NULL,"
+        " rol TEXT NOT NULL CHECK (rol IN ('paciente', 'profesional')),"
+        " creado_en TEXT NOT NULL )"
+    ),
+    "horas": (
+        "CREATE TABLE horas ( id INTEGER PRIMARY KEY,"
+        " profesional_id INTEGER NOT NULL REFERENCES usuarios (id),"
+        " inicio TEXT NOT NULL,"
+        " duracion_min INTEGER NOT NULL DEFAULT 50 CHECK (duracion_min > 0),"
+        " estado TEXT NOT NULL DEFAULT 'libre' CHECK (estado IN ('libre', 'reservada')),"
+        " paciente_id INTEGER REFERENCES usuarios (id), reservada_en TEXT,"
+        " recordatorio_enviado INTEGER NOT NULL DEFAULT 0"
+        " CHECK (recordatorio_enviado IN (0, 1)),"
+        " CHECK ( (estado = 'libre' AND paciente_id IS NULL AND reservada_en IS NULL)"
+        " OR (estado = 'reservada' AND paciente_id IS NOT NULL"
+        " AND reservada_en IS NOT NULL) ),"
+        " CHECK (inicio GLOB"
+        " '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]'"
+        " AND instr(inicio, char(0)) = 0),"
+        " UNIQUE (profesional_id, inicio) )"
+    ),
+    "notificaciones": (
+        "CREATE TABLE notificaciones ( id INTEGER PRIMARY KEY,"
+        " usuario_id INTEGER NOT NULL REFERENCES usuarios (id),"
+        " tipo TEXT NOT NULL CHECK (tipo IN ('confirmacion', 'recordatorio', 'cancelacion')),"
+        " mensaje TEXT NOT NULL,"
+        " hora_id INTEGER REFERENCES horas (id) ON DELETE SET NULL,"
+        " leida INTEGER NOT NULL DEFAULT 0 CHECK (leida IN (0, 1)),"
+        " creada_en TEXT NOT NULL )"
+    ),
+}
+
+
+@pytest.mark.parametrize("tabla", list(SQL_ESPERADO))
+def test_el_sql_de_cada_tabla_es_exactamente_el_aprobado(db, tabla):
+    assert _sql(db, tabla) == SQL_ESPERADO[tabla]
+
+
+def test_no_hay_otros_objetos_en_la_base(db):
+    """Sin triggers, vistas ni índices extra que cambien el comportamiento."""
+    filas = db.execute(
+        "SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'"
+    ).fetchall()
+    assert {(f["type"], f["name"]) for f in filas} == {
+        ("table", "usuarios"), ("table", "horas"), ("table", "notificaciones"),
+    }
+
+
+FK_ESPERADAS = {
+    "horas": [
+        ("usuarios", "paciente_id", "id", "NO ACTION", "NO ACTION", "NONE"),
+        ("usuarios", "profesional_id", "id", "NO ACTION", "NO ACTION", "NONE"),
+    ],
+    "notificaciones": [
+        ("horas", "hora_id", "id", "NO ACTION", "SET NULL", "NONE"),
+        ("usuarios", "usuario_id", "id", "NO ACTION", "NO ACTION", "NONE"),
+    ],
+    "usuarios": [],
+}
+
+
+@pytest.mark.parametrize("tabla", list(FK_ESPERADAS))
+def test_foreign_key_list_completo_incluido_on_update(db, tabla):
+    """Compara la fila entera (table, from, to, on_update, on_delete, match)."""
+    filas = sorted(
+        (f["table"], f["from"], f["to"], f["on_update"], f["on_delete"], f["match"])
+        for f in db.execute(f"PRAGMA foreign_key_list({tabla})")
+    )
+    assert filas == FK_ESPERADAS[tabla]
+
+
+# Valores vecinos: lo que no está en la lista aprobada se rechaza POR ESE CHECK.
+
+@pytest.mark.parametrize("rol", ["Paciente", "PROFESIONAL", "Profesional", " paciente", "admin", ""])
+def test_rol_fuera_de_la_lista_exacta_rechazado_por_su_check(db, rol):
+    rechazada(lambda: crear_usuario(db, rol=rol), CHECK_ROL)
+
+
+@pytest.mark.parametrize("rol", ["paciente", "profesional"])
+def test_rol_aprobado_aceptado(db, rol):
+    crear_usuario(db, rol=rol)
+
+
+@pytest.mark.parametrize(
+    "estado", ["cancelada", "Libre", "RESERVADA", "otro", ""]
+)
+def test_estado_fuera_de_la_lista_exacta_rechazado_por_su_check(db, ids, estado):
+    rechazada(
+        lambda: insertar_hora(db, profesional_id=ids["prof"], estado=estado),
+        CHECK_ESTADO,
+    )
+
+
+@pytest.mark.parametrize("tipo", ["otro", "Recordatorio", "cancelación", "confirmacion "])
+def test_tipo_fuera_de_la_lista_exacta_rechazado_por_su_check(db, ids, tipo):
+    rechazada(
+        lambda: insertar_notificacion(db, usuario_id=ids["pac"], tipo=tipo),
+        CHECK_TIPO,
+    )
+
+
+@pytest.mark.parametrize("duracion", [1, 50, 60, 480, 1440, 100000, 2**31, 2**62])
+def test_duracion_sin_tope_superior(db, ids, duracion):
+    """La única regla de duracion_min es ser > 0: no hay máximo en el esquema."""
+    insertar_hora(db, profesional_id=ids["prof"], duracion_min=duracion)
+
+
+def test_duracion_por_defecto_es_50(db, ids):
+    hora = insertar_hora(db, profesional_id=ids["prof"])
+    assert db.execute("SELECT duracion_min FROM horas WHERE id=?", (hora,)).fetchone()[0] == 50

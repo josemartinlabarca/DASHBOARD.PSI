@@ -5,8 +5,8 @@ Los agentes agregan aquí una entrada al final de cada vuelta. Lo más reciente 
 ## Estado actual
 
 - Fase: 2 (Usuarios) en curso
-- Última tarea hecha: T-02g (esquema: D-018, NUL en `horas.inicio`)
-- Próxima tarea: T-03c (debe quedar HECHA antes de T-04); T-02e también está pendiente (antes de T-05)
+- Última tarea hecha: T-02e (pruebas del esquema fijan el conjunto exacto de valores)
+- Próxima tarea: T-03c (debe quedar HECHA antes de T-04)
 
 ## Bloqueos y dudas abiertas
 
@@ -81,3 +81,9 @@ Los agentes agregan aquí una entrada al final de cada vuelta. Lo más reciente 
 - Cómo se verificó: antes de añadir pruebas, mutación real en una copia temporal del scratchpad (solo su `schema.sql`; `tests/test_esquema.py` por posición): `[0-8]` en las 14 posiciones, sobreviven 14 de 14. Después de añadirlas, las 56 mutaciones (14 posiciones x `[0-8]`, `[1-9]`, `[0-4]`, `[5-9]`): sobreviven 0 de 56 (cada una hace fallar al menos una prueba de `tests/test_esquema.py`); no faltó ninguna prueba adicional. `python3 -m pytest -q` da 357 OK (326 + 31) sin `SECRET_KEY`/`FLASK_DEBUG`, con `SECRET_KEY=abc` y con `FLASK_DEBUG=1`. Copia temporal borrada, sin `.db` ni procesos en el repo.
 - Problemas / dudas: ninguna.
 - Siguiente paso sugerido: T-03c y T-02e (antes de T-04 y T-05).
+
+### [2026-10-08 01:40] T-02e — Fijar el conjunto exacto de valores del esquema en las pruebas — Implementador
+- Qué se hizo: solo `tests/test_esquema.py` (más TASKS.md y esta bitácora; `schema.sql`, ARCHITECTURE, SPEC y DECISIONS intactos). (1) Se compara el SQL de las 3 tablas de `sqlite_master` con el esperado, normalizando espacios (incluye `ON DELETE SET NULL` y el CHECK de `inicio` con `AND instr(inicio, char(0)) = 0`), y una prueba exige que no haya otros objetos (triggers, vistas, índices). (2) `PRAGMA foreign_key_list` se compara fila completa (table, from, to, on_update, on_delete, match) para las 3 tablas. (3) Valores vecinos: `rol` (`Paciente`, `PROFESIONAL`, ` paciente`...), `estado` (`cancelada`, `Libre`, `RESERVADA`...), `tipo` (`otro`, `Recordatorio`, `confirmacion `...) rechazados, y `duracion_min` aceptada sin tope (hasta 2**62), más el defecto 50. (4) R-04: SQLite incluye el texto de la expresión en el mensaje, así que se añadieron constantes `CHECK_*` y TODAS las pruebas de rechazo por CHECK (coherencia, tipo, duracion, recordatorio, leida, inicio y las nuevas) ahora exigen el CHECK concreto, no solo "CHECK constraint failed". No se borró ninguna prueba. Se quitó de TASKS.md la fila R-04 del backlog (resuelta).
+- Cómo se verificó: `python3 -m pytest -q` da 390 OK (357 + 33 nuevas) sin variables de entorno, con `SECRET_KEY=abc` y con `FLASK_DEBUG=1`. Mutaciones REALES en una copia temporal del scratchpad (solo cambió su `schema.sql`, suite completa de 390; copia borrada); fallos: control 0; `tipo` + `'otro'` 9; `estado` + `'cancelada'` 6; `rol` con `lower()` 7; tope `duracion_min <= 1440` 4; `ON UPDATE CASCADE` en `hora_id` 2; extra: quitar `instr(...)` 6 y quitar `COLLATE NOCASE` 3. Ninguna quedó en verde.
+- Problemas / dudas: ninguna. Si el esquema cambia a propósito, hay que actualizar `SQL_ESPERADO` y `FK_ESPERADAS` en `tests/test_esquema.py`.
+- Siguiente paso sugerido: T-03c, luego T-04.
