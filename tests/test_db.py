@@ -6,6 +6,9 @@ from app.db import get_db, init_db
 
 AHORA = "2026-10-07T10:00:00"
 
+# Prueban `init_db` mismo: corren siempre con el real, sin la base de plantilla (D-031).
+pytestmark = pytest.mark.base_real
+
 
 @pytest.fixture
 def db(app):

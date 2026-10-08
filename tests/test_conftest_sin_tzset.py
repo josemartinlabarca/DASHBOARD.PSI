@@ -58,9 +58,21 @@ def _correr(tmp_path, sin_tzset, tz=None):
     )
 
 
+# Varias pruebas miran la misma corrida del subproceso (mismos argumentos): se hace una
+# sola vez por módulo y cada prueba conserva sus aserciones (T-08b, D-031).
+_CORRIDAS = {}
+
+
+def _corrida(tmp_path_factory, sin_tzset, tz=None):
+    clave = (sin_tzset, tz)
+    if clave not in _CORRIDAS:
+        _CORRIDAS[clave] = _correr(tmp_path_factory.mktemp("corrida"), sin_tzset=sin_tzset, tz=tz)
+    return _CORRIDAS[clave]
+
+
 @pytest.fixture
-def sin_tzset(tmp_path):
-    return _correr(tmp_path, sin_tzset=True)
+def sin_tzset(tmp_path_factory):
+    return _corrida(tmp_path_factory, sin_tzset=True)
 
 
 def test_la_simulacion_realmente_quita_tzset(tmp_path):
@@ -92,32 +104,32 @@ def test_sin_tzset_las_pruebas_con_zona_sistema_se_saltan_y_no_fallan(sin_tzset)
     assert sin_tzset.returncode == 0, salida
 
 
-def test_con_tzset_las_mismas_pruebas_si_se_ejecutan_en_las_tres_zonas(tmp_path):
+def test_con_tzset_las_mismas_pruebas_si_se_ejecutan_en_las_tres_zonas(tmp_path_factory):
     # Control: la simulación es lo que produce el salto, no el subproceso en sí.
     if not hasattr(time, "tzset"):
         pytest.skip("sin time.tzset")
-    r = _correr(tmp_path, sin_tzset=False)
+    r = _corrida(tmp_path_factory, sin_tzset=False)
     salida = r.stdout + r.stderr
     assert "skipped" not in salida, salida
     assert "4 passed" in salida, salida
 
 
-def test_con_tzset_la_zona_del_equipo_se_restaura_al_terminar(tmp_path):
+def test_con_tzset_la_zona_del_equipo_se_restaura_al_terminar(tmp_path_factory):
     # La última zona que fija `zona_sistema` en las pruebas mínimas es Santiago; el
     # equipo simulado está en Tokio, así que solo una restauración real lo deja en Tokio.
     if not hasattr(time, "tzset"):
         pytest.skip("sin time.tzset")
-    r = _correr(tmp_path, sin_tzset=False, tz="Asia/Tokyo")
+    r = _corrida(tmp_path_factory, sin_tzset=False, tz="Asia/Tokyo")
     assert "TZFINAL=Asia/Tokyo|JST" in r.stdout, r.stdout
 
 
-def test_con_tzset_si_TZ_no_estaba_definida_no_queda_definida(tmp_path):
+def test_con_tzset_si_TZ_no_estaba_definida_no_queda_definida(tmp_path_factory):
     if not hasattr(time, "tzset"):
         pytest.skip("sin time.tzset")
-    r = _correr(tmp_path, sin_tzset=False)
+    r = _corrida(tmp_path_factory, sin_tzset=False)
     assert "TZFINAL=None|" in r.stdout, r.stdout
 
 
-def test_sin_tzset_la_zona_del_equipo_no_se_toca(tmp_path):
-    r = _correr(tmp_path, sin_tzset=True, tz="Asia/Tokyo")
+def test_sin_tzset_la_zona_del_equipo_no_se_toca(tmp_path_factory):
+    r = _corrida(tmp_path_factory, sin_tzset=True, tz="Asia/Tokyo")
     assert "TZFINAL=Asia/Tokyo|JST" in r.stdout, r.stdout

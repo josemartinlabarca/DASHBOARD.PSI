@@ -1,4 +1,7 @@
+import multiprocessing
+import os
 import unicodedata
+from concurrent.futures import ProcessPoolExecutor
 from functools import partial
 
 import pytest
@@ -55,20 +58,15 @@ def test_las_dos_pasadas_de_nfkc_son_necesarias(entrada, esperado):
     assert normalizar_email(esperado) == esperado
 
 
-def puntos_de_codigo():
-    return (cp for cp in range(0x110000) if not 0xD800 <= cp <= 0xDFFF)
+def puntos_de_codigo(desde=0, hasta=0x110000):
+    return (cp for cp in range(desde, hasta) if not 0xD800 <= cp <= 0xDFFF)
 
 
-def test_exhaustivo_idempotente_y_estable_en_todos_los_puntos_de_codigo():
-    """Recorre 0..0x10FFFF (sin sustitutos): lo aceptado es estable y limpio.
-
-    Para cada punto de código `c`, con `a{c}b@x.cl`: si se acepta, el resultado ya está en NFKC, normalizarlo otra vez no lo
-    cambia y ningún carácter pertenece a una categoría prohibida (se juzga por
-    categoría, no por una lista: depende de la versión de Unicode instalada).
-    """
+def revisar_rango_de_puntos_de_codigo(desde, hasta):
+    """Las comprobaciones de siempre sobre los puntos de código [desde, hasta)."""
     nfkc = partial(unicodedata.normalize, "NFKC")
     category = unicodedata.category
-    for cp in puntos_de_codigo():
+    for cp in puntos_de_codigo(desde, hasta):
         c = chr(cp)
         try:
             resultado = normalizar_email(f"a{c}b@x.cl")
@@ -80,6 +78,31 @@ def test_exhaustivo_idempotente_y_estable_en_todos_los_puntos_de_codigo():
             cat = category(ch)
             assert cat[0] != "C" and cat not in ("Mn", "Mc", "Me"), (hex(cp), cat)
             assert not ch.isspace(), hex(cp)
+
+
+def test_exhaustivo_idempotente_y_estable_en_todos_los_puntos_de_codigo():
+    """Recorre 0..0x10FFFF (sin sustitutos): lo aceptado es estable y limpio.
+
+    Para cada punto de código `c`, con `a{c}b@x.cl`: si se acepta, el resultado ya está en NFKC, normalizarlo otra vez no lo
+    cambia y ningún carácter pertenece a una categoría prohibida (se juzga por
+    categoría, no por una lista: depende de la versión de Unicode instalada).
+
+    T-08b: el recorrido se reparte entre los núcleos del equipo (procesos `fork`) para
+    tardar la mitad en dos núcleos; cada proceso hace exactamente las mismas comprobaciones
+    y cualquier fallo se propaga con el mismo mensaje. Sin `fork` (Windows) o con un solo
+    núcleo se recorre todo en este proceso.
+    """
+    total = 0x110000
+    nucleos = os.cpu_count() or 1
+    if nucleos < 2 or "fork" not in multiprocessing.get_all_start_methods():
+        revisar_rango_de_puntos_de_codigo(0, total)
+        return
+    nucleos = min(nucleos, 8)
+    cortes = [total * k // nucleos for k in range(nucleos + 1)]
+    with ProcessPoolExecutor(nucleos, mp_context=multiprocessing.get_context("fork")) as pool:
+        futuros = [pool.submit(revisar_rango_de_puntos_de_codigo, a, b) for a, b in zip(cortes, cortes[1:])]
+        for futuro in futuros:
+            futuro.result()  # relanza la AssertionError del proceso que falló
 
 
 @pytest.mark.parametrize(

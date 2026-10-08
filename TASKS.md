@@ -159,7 +159,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Término:** Pruebas: cancelar con >24 h funciona, con <24 h se rechaza, la hora queda libre.
 
 ### T-08b — Acelerar la suite de pruebas (R-06 de la revisión de T-07)
-- **Estado:** PENDIENTE
+- **Estado:** HECHA
 - **Depende de:** T-08
 - **Qué:** la suite pasó de ~10 s a ~48 s y cada tarea suma 5–6 s. Medir con `pytest --durations=25`, y reducir sin perder cobertura: fixtures de ámbito `module`/`session` para bases de solo lectura, base SQLite en memoria o plantilla copiada (`init-db` una vez y copiar el archivo) en vez de recrear el esquema en cada prueba, no repetir la prueba exhaustiva de idempotencia (2,4 s) en cada entorno, cache de la zona horaria. Prohibido borrar pruebas o debilitar aserciones.
 - **Guía del revisor de T-08 (R-03):** con 1117 pruebas la suite tarda ~66 s: el *setup* suma ~34 s (972 pruebas × 35 ms creando la base) y las llamadas ~29 s. Copiar una base plantilla no basta: hay que recortar también el costo de `tests/test_horas.py` y `tests/test_cancelar.py` (reutilizar la aplicación y el cliente, desactivar el hash real cuando no importa, evitar reloj real). Medir con `--durations=15` antes y después. La fixture `zona_del_sistema_fija` (TZ=UTC) debe mantenerse y su compatibilidad con Windows (sin `tzset`).

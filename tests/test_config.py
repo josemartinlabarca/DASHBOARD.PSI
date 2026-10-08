@@ -2,6 +2,8 @@ import logging
 import os
 import subprocess
 import sys
+import threading
+import time
 
 import click
 import pytest
@@ -174,13 +176,24 @@ def test_flask_run_real_avisa_al_arrancar_sin_secret_key(tmp_path):
         env=_entorno_sin_clave(tmp_path), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
     )
     try:
-        # `--port 0` no sirve en todos los sistemas; basta con que arranque o falle
-        # tras haber cargado la app, que es cuando se emite el aviso.
-        try:
-            _, error = proceso.communicate(timeout=3)
-        except subprocess.TimeoutExpired:
+        # El aviso sale al cargar la app, antes de servir. En vez de esperar 3 s fijos
+        # a que el proceso termine, se lee su stderr hasta ver el aviso (máx. 15 s) y
+        # entonces se lo detiene (T-08b).
+        leido = []
+        hilo = threading.Thread(
+            target=lambda: [leido.append(linea) for linea in proceso.stderr], daemon=True
+        )
+        hilo.start()
+        limite = time.monotonic() + 15
+        while time.monotonic() < limite and proceso.poll() is None:
+            if "Falta la variable de entorno SECRET_KEY" in "".join(leido):
+                break
+            time.sleep(0.02)
+        if proceso.poll() is None:
             proceso.terminate()
-            _, error = proceso.communicate(timeout=10)
+        proceso.wait(timeout=10)
+        hilo.join(timeout=5)
+        error = "".join(leido)
     finally:
         if proceso.poll() is None:
             proceso.kill()

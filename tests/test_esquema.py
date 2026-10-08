@@ -840,11 +840,13 @@ SQL_ESPERADO = {
 }
 
 
+@pytest.mark.base_real
 @pytest.mark.parametrize("tabla", list(SQL_ESPERADO))
 def test_el_sql_de_cada_tabla_es_exactamente_el_aprobado(db, tabla):
     assert _sql(db, tabla) == SQL_ESPERADO[tabla]
 
 
+@pytest.mark.base_real
 def test_no_hay_otros_objetos_en_la_base(db):
     """Sin triggers, vistas ni índices extra que cambien el comportamiento."""
     filas = db.execute(
@@ -868,6 +870,7 @@ FK_ESPERADAS = {
 }
 
 
+@pytest.mark.base_real
 @pytest.mark.parametrize("tabla", list(FK_ESPERADAS))
 def test_foreign_key_list_completo_incluido_on_update(db, tabla):
     """Compara la fila entera (table, from, to, on_update, on_delete, match)."""
