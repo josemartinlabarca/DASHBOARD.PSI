@@ -26,7 +26,7 @@ agenda-psi/
 |---|---|---|
 | `db.py` | Abrir conexión, inicializar esquema | Lógica de negocio |
 | `auth.py` | Usuarios, sesiones, control de rol | Reservas |
-| `seguridad.py` | Token CSRF y verificación en todo método que modifica estado | Reglas de negocio ni acceso a la base de datos |
+| `seguridad.py` | Token CSRF y verificación en todo método que modifica estado | Reglas de negocio |
 | `profesional.py` | CRUD de horas disponibles | Notificar directamente (llama a `notificaciones.py`) |
 | `paciente.py` | Listar, reservar, cancelar | Modificar horas de otros |
 | `notificaciones.py` | Registrar y "enviar" avisos | Decidir reglas de reserva |

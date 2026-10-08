@@ -166,6 +166,33 @@ Autorizas a que se modifique `ARCHITECTURE.md` (que `CLAUDE.md` reserva al human
 - **Riesgo aceptado conscientemente:** los homoglifos de otros alfabetos (p. ej. la «е» cirílica idéntica a la «e» latina) **siguen siendo aceptados**: la opción 2 no los resuelve. Se mantiene el riesgo ya aceptado en D-013 y debe revisarse en T-14 (revisión final de seguridad).
 - **Consecuencias para la implementación:** las marcas combinantes se rechazan, así que el correo debe llegar **precompuesto** (NFKC ya lo compone; p. ej. `ñ` U+00F1). Las pruebas deben cubrir que `señor@x.cl` precompuesto y descompuesto (`n` + U+0303, que NFKC compone) se normalizan igual y se aceptan, que un combinante suelto se rechaza, y que los puntos de uso privado, no asignados y sustitutos se rechazan. Los Cn dependen de la versión de Python: documentarlo y fijar la prueba a categorías, no a una lista de puntos de código.
 
+## D-016 — Eliminar una hora que llegó a reservarse (T-05) — **PROPUESTA, PENDIENTE DE APROBACIÓN HUMANA**
+- **Fecha:** 2026-10-08
+- **Estado:** PROPUESTA. Origen: hallazgo 1 de la revisión de T-02c (reproducido por el orquestador y el revisor).
+- **Problema:** una hora que se reservó y luego se canceló vuelve a `libre`, pero conserva notificaciones (confirmación y cancelación) con `hora_id` apuntando a ella. Con `PRAGMA foreign_keys = ON` y sin `ON DELETE`, `DELETE FROM horas ...` falla con `FOREIGN KEY constraint failed`. Eso contradice US-5 ("elimino una hora disponible que aún no esté reservada"), porque una hora cancelada está disponible.
+
+### Opciones
+- **1. `ON DELETE SET NULL` en `notificaciones.hora_id` (recomendada).** La garantía vive en la base de datos: ninguna ruta de borrado, presente o futura, puede olvidarla. La notificación conserva su mensaje, solo pierde el enlace a la hora. Costo: **cambia el esquema aprobado en D-007** (hay que editar `schema.sql`, `ARCHITECTURE.md` y `agenda.db` de práctica se borra y recrea) y requiere una prueba nueva.
+- **2. La aplicación limpia antes de borrar.** T-05 ejecuta `UPDATE notificaciones SET hora_id = NULL WHERE hora_id = ?` y luego el `DELETE`, en la misma transacción. No cambia el esquema. Riesgo: cualquier otra ruta de borrado futura debe acordarse de hacerlo.
+- **3. No permitir eliminar horas con historial.** Solo se eliminan las que nunca se reservaron; el profesional recibe un mensaje explicativo. Es lo más simple, pero **restringe US-5** en el caso de una hora cancelada.
+
+### Resolución
+- **Elegida:** ______   **Aprobada por:** ______   **Fecha:** ______
+
+## D-017 — Formato canónico del campo `horas.inicio` (T-05) — **PROPUESTA, PENDIENTE DE APROBACIÓN HUMANA**
+- **Fecha:** 2026-10-08
+- **Estado:** PROPUESTA. Origen: hallazgo 3 de la revisión de T-02c (reproducido por el orquestador y el revisor).
+- **Problema:** `UNIQUE (profesional_id, inicio)` compara **texto**. `2026-12-01T10:00`, `2026-12-01 10:00`, `2026-12-01T10:00:00`, `...-03:00` y `...-04:00` son el mismo instante para una persona y cinco valores distintos para SQLite (aceptados 5 de 5). La regla 3 de SPEC (no solapar) y D-007 D quedarían eludibles. ARCHITECTURE.md solo dice "ISO 8601, hora local de Chile".
+- **Limitación conocida (cualquier opción local):** Chile tiene horario de verano, así que una hora local puede ser ambigua (cuando se retrasa el reloj) o no existir (cuando se adelanta). Hay que revisarlo en T-10 (recordatorio de 24 h) y T-14.
+
+### Opciones
+- **1. Texto canónico `YYYY-MM-DDTHH:MM:SS`, hora local de Chile, sin desfase, validado solo en la aplicación.** Simple; ordena bien como texto. Riesgo: una ruta que no valide puede insertar otro formato.
+- **2. Lo mismo que la opción 1, más un CHECK en el esquema (recomendada).** `CHECK (inicio GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]')` en `horas`. La base rechaza cualquier otro formato, así que la UNIQUE no se puede eludir. Costo: **cambia el esquema aprobado en D-007** (misma consecuencia que D-016, opción 1: editar `schema.sql` y `ARCHITECTURE.md`, recrear `agenda.db`). Nota: el CHECK valida la forma, no que la fecha exista (p. ej. mes 13); eso lo valida la aplicación.
+- **3. UTC con sufijo `Z` (`YYYY-MM-DDTHH:MM:SSZ`).** Elimina la ambigüedad del horario de verano en el almacenamiento, pero contradice "hora local de Chile" de ARCHITECTURE.md y complica el resto (conversiones en cada pantalla y en el recordatorio).
+
+### Resolución
+- **Elegida:** ______   **Aprobada por:** ______   **Fecha:** ______
+
 ## D-00X — Título
 - **Fecha:**
 - **Decisión:**

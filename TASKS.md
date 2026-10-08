@@ -44,6 +44,13 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 
 ## Fase 2 — Usuarios
 
+### T-02e — Fijar el conjunto exacto de valores del esquema en las pruebas (hallazgo de la revisión de T-02c)
+- **Estado:** PENDIENTE
+- **Depende de:** T-02c
+- **Qué:** Las pruebas de T-02c no detectan una restricción **ampliada**: añadir `'otro'` al CHECK de `notificaciones.tipo`, `'cancelada'` al de `horas.estado`, comparar `rol` con `lower()` o añadir un tope superior a `duracion_min` deja las 187 pruebas en verde (comprobado por el orquestador y por el revisor). Hacer que las pruebas fijen el conjunto exacto: la técnica más simple es comparar el SQL de cada tabla de `sqlite_master` con el esperado (normalizando espacios), o probar valores vecinos inválidos. Si D-016 o D-017 cambian el esquema, la comparación debe reflejarlo.
+- **Término:** Las mutaciones "ampliar `tipo` con `'otro'`", "ampliar `estado` con `'cancelada'`", "`rol` con `lower()`" y "tope superior en `duracion_min`" hacen fallar al menos una prueba; `python3 -m pytest` pasa. Debe quedar HECHA **antes** de T-05.
+- **Origen:** REVIEW de T-02c, hallazgo 2.
+
 ### T-03 — Registro de pacientes
 - **Estado:** HECHA
 - **Depende de:** T-02b, T-02d
@@ -74,6 +81,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
   6. **Entradas no `str` (baja):** que `normalizar_email` lance `ValueError` (no `TypeError`) o documentar el contrato.
   7. **Suite lenta (baja):** pasó de 0,2 s a ~5 s por el scrypt real en cada registro. Fixture `autouse` con hash rápido, salvo en pruebas marcadas `hash_real` que verifican el hash; sin debilitar las pruebas de seguridad.
   8. **D-010 desactualizada (baja):** actualizarla para que remita a D-012 y D-013.
+  9. **`IntegrityError` genérico en el registro (baja, hallazgo 7 de la revisión de T-02c):** hoy cualquier violación de la base de datos muestra el mensaje de "correo duplicado"; distinguir la violación de `UNIQUE` sobre `email` de cualquier otra (que debe tratarse como error interno, no como duplicado) y probarlo.
 - **Término:** Las mutaciones "sin primera NFKC", "sin segunda NFKC", "`isspace()` por `== " "`" y "borrar `tzdata` de requirements.txt" hacen fallar al menos una prueba; la prueba de idempotencia pasa; `python3 -m pytest` pasa y es notablemente más rápida. Debe quedar HECHA **antes** de T-04.
 - **Origen:** REVIEW de T-03b (ver historial git de `REVIEW.md`).
 
@@ -87,8 +95,9 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 
 ### T-05 — Profesional agrega y elimina horas
 - **Estado:** PENDIENTE
-- **Depende de:** T-04, T-02c
+- **Depende de:** T-04, T-02c, T-02e
 - **Qué:** Formulario y rutas de US-4 y US-5 con reglas 2, 3 y 4.
+- **Requisitos que vienen de las revisiones de T-02c (resolver al implementar):** (a) **D-016** (eliminar una hora que llegó a reservarse y tiene notificaciones: hoy falla con `FOREIGN KEY constraint failed`, contradice US-5) y **D-017** (formato canónico del campo `inicio`: la UNIQUE compara texto) deben estar **decididas por el humano antes** de empezar; (b) la comprobación de solape (regla §4.3 y §4.5) debe hacerse dentro de una transacción `BEGIN IMMEDIATE`, porque el esquema solo impide inicios idénticos, no solapes parciales; (c) pruebas del flujo real: reservar → cancelar → eliminar la hora debe funcionar.
 - **Término:** Pruebas: crear hora válida, rechazar pasado, rechazar solape, no eliminar reservada.
 
 ### T-06 — Paciente ve horas libres
@@ -170,6 +179,8 @@ en qué tarea conviene absorberlo.
 | T-03 #6 | La página de error 400 de CSRF es la genérica de Werkzeug, en inglés y sin enlace para volver: añadir `errorhandler(400)` con plantilla en español | T-13 |
 | T-03 #8 | El mensaje de duplicado casi confirma que el correo existe (aceptado en D-010) | T-14 (revisar de nuevo) |
 | T-03 #9 | Los límites de longitud cuentan caracteres, no bytes (inocuo) | — |
+| T-02c #4 | `init-db` sobre una base con esquema antiguo termina con éxito y sin aviso, dejando las tablas sin las restricciones nuevas; avisar con `PRAGMA user_version` o comparando `sqlite_master` con `schema.sql` | T-14 |
+| T-02c #9 | En `tests/test_esquema.py` la cobertura de NOT NULL y FK es triplemente redundante y la rama `usuarios` de `test_not_null_rechaza_null` es poco legible | cuando se toque ese archivo |
 
 ---
 
