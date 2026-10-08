@@ -98,9 +98,28 @@ git conserva cada revisión aunque `REVIEW.md` se sobrescriba.
   - *Baja:* faltan CHECK de dominio (`duracion_min` negativa) y de `notificaciones.tipo`.
   - Como cambian el esquema documentado, se convirtieron en **T-02c** y requieren **tu** decisión.
 
+### Vuelta 3 — T-02b Endurecer configuración
+- **Implementador:** `create_app` exige `SECRET_KEY` salvo en debug/testing; `pytest` con versión fija (D-005); sección de `SECRET_KEY` en el README; 5 pruebas nuevas.
+- **Verificación:** 14 pruebas pasan; sin clave y sin debug, la app falla con un mensaje claro.
+- **Revisor: APROBADO**, pero encontró un **defecto real**: `flask --app app init-db` también fallaba sin `SECRET_KEY`, y el README lo manda ejecutar primero. Lo reproduje antes de crear la tarea **T-02d**.
+- **Lección:** una tarea puede cumplir su criterio de término y aun así romper algo que ya estaba documentado. Por eso el criterio de T-02d incluye recorrer el README literalmente en un entorno limpio.
+
+### Vuelta 4 — T-02d Corregir efectos de T-02b
+- **Implementador:** la validación pasó de `create_app` a un `before_request` (D-008). Así los comandos CLI funcionan sin clave, pero una app sin clave **nunca atiende una petición**, la sirva `flask run` o gunicorn. 25 pruebas; 11 fallan si se revierte el cambio.
+- **Hallazgo propio del implementador:** el `pytest` literal del README fallaba en un venv limpio (`No module named 'app'`); lo arregló con `pytest.ini`. Solo lo descubrió porque recorrió el README de verdad.
+- **Revisor: APROBADO**, solo hallazgos bajos. Pasaron al *backlog de baja prioridad* de `TASKS.md`, cada uno asignado a la tarea donde conviene absorberlo.
+- **Dos sorpresas que enseñan más que el código:**
+  1. **Los agentes inventan la hora.** Las horas de `PROGRESS.md` (`23:40`, `23:59`, `10:30`) no coincidían con los commits (`23:36`, `23:42`, `00:05`). Corregí los datos y añadí a `CLAUDE.md` las reglas 8–10: la hora se obtiene con `date`, se reporta solo lo realmente ejecutado y todo archivo no pedido se justifica.
+  2. **Mi propio `pytest` falló** con `No module named 'flask'`. No era un defecto del proyecto: mi shell resolvía a una copia aislada de `uv` que no tiene Flask. Es exactamente el problema que evita un venv. Investigué antes de culpar al agente o al código.
+
 ### Historial git resultante
 
 ```
+T-02d revisión y backlog, reglas 8–10 de CLAUDE.md
+T-02d: validar SECRET_KEY al servir peticiones, no en comandos CLI
+T-02b revisión: REVIEW.md aprobado y tarea de seguimiento T-02d
+T-02b: endurecer SECRET_KEY, fijar pytest y documentar
+docs: TUTORIAL.md con el paso a paso de las vueltas T-01 y T-02
 T-02 revisión: REVIEW.md aprobado y tarea de seguimiento T-02c
 T-02: esquema SQLite, db.py y comando init-db
 T-01 revisión: REVIEW.md aprobado y tarea de seguimiento T-02b
@@ -110,13 +129,14 @@ docs: documentación base del proyecto Agenda Psi
 
 ## 4. Estado actual y qué sigue
 
-- Hecho: **T-01, T-02**.
-- Pendiente inmediato: **T-02b** (endurecer `SECRET_KEY`, versionar `pytest`) → no necesita decisión tuya, puedes lanzarla tal cual.
-- Pendiente de tu decisión: **T-02c**. Lee los hallazgos en el historial (`git log -p -- REVIEW.md`), decide cuáles aceptas, regístralos en `DECISIONS.md` como D-007 y actualiza `ARCHITECTURE.md`. Después se la das a un Implementador.
-- Orden sugerido: T-02b → T-02c → T-03 → T-04 → ... (las dependencias en `TASKS.md` ya lo imponen).
+- Hecho: **T-01, T-02, T-02b, T-02d** (25 pruebas pasando).
+- Pendiente de tu decisión: **T-02c** (refuerzos del esquema). Lee los hallazgos con `git log -p -- REVIEW.md`, decide cuáles aceptas, regístralos en `DECISIONS.md` como D-007 y actualiza `ARCHITECTURE.md`. Debe estar hecha antes de T-05, pero **no bloquea T-03 ni T-04**.
+- Siguiente sin decisión tuya: **T-03** (registro de pacientes).
+- Orden sugerido: T-03 → T-04 → T-02c → T-05 → ... (las dependencias en `TASKS.md` ya lo imponen).
 
-**Tu primer ejercicio:** lanza tú mismo la vuelta de T-02b con el prompt del Paso B y
-revisa el resultado con la lista del Paso C. Hazlo antes de pensar en automatizar.
+**Tu primer ejercicio:** lanza tú mismo la vuelta de T-03 con el prompt del Paso B y
+revisa el resultado con la lista del Paso C. Antes de dar por buena cualquier tarea, haz
+una pregunta extra: *¿esto rompió algo que ya estaba documentado?* Hazlo antes de pensar en automatizar.
 
 ## 5. Consejos profesionales (lo que hace la diferencia)
 
@@ -132,6 +152,10 @@ revisa el resultado con la lista del Paso C. Hazlo antes de pensar en automatiza
 10. **Mide el loop.** Antes de automatizar, mira cuántas rondas necesita cada tarea. Si necesita más de 2, la tarea era demasiado grande o la documentación ambigua.
 11. **Límites siempre:** máximo de vueltas, rama aparte, sin comandos destructivos, revisión humana al final de cada fase.
 12. **Cuidado con la herramienta que se detecta a sí misma.** Ejemplo real de esta sesión: `pgrep -af flask` "encontró" procesos, pero eran el propio comando de verificación. Antes de alarmarte, mira qué proceso es.
+13. **Los agentes no tienen reloj.** Si les pides fecha u hora, las inventan. Dales un comando (`date`) y una regla en `CLAUDE.md`.
+14. **Exige el recorrido literal.** El mejor criterio de término para algo documentado es ejecutar la documentación tal cual, en un entorno limpio. Encontró un defecto que 14 pruebas verdes no veían.
+15. **Reproduce antes de crear una tarea.** Un hallazgo del revisor es una hipótesis hasta que lo reproduces.
+16. **Cuando tu verificación contradice al agente, investiga la causa.** Puede ser tu entorno, el agente o el código; las tres cosas pasaron en esta sesión.
 
 ## 6. Trampas de principiante que ya viste en acción
 

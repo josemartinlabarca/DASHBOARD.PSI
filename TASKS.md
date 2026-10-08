@@ -126,6 +126,22 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 
 ---
 
+## Backlog de baja prioridad (no bloquea nada; recoger cuando se toque la zona)
+
+Hallazgos de severidad baja que las revisiones dejaron anotados. Cada uno indica
+en qué tarea conviene absorberlo.
+
+| Origen | Hallazgo | Absorber en |
+|---|---|---|
+| T-02d #1 | `FLASK_DEBUG=1` heredado en un servidor real usa la clave pública de desarrollo sin aviso | T-14 (revisión final de seguridad) |
+| T-02d #2 | Aviso visible al arrancar si falta `SECRET_KEY` (el 500 solo aparece al llegar la primera petición); `app.logger.warning` una vez, sin molestar en `init-db` | T-04 |
+| T-02d #3 | Las pruebas de D-008 solo hacen `GET /`; añadir `/static`, un 404 y un blueprint | T-04 (primer blueprint real) |
+| T-02d #4 | `pytest.ini` (`pythonpath`, `testpaths`) no quedó registrado en `DECISIONS.md` | T-03 |
+| T-02d #6 | README: aclarar "solo en tu máquina" junto a `--debug`; `FLASK_DEBUG=off` cuenta como verdadero en Flask | T-14 |
+| T-01 #3–4 | `base.html` aún no enlaza `style.css` | T-13 |
+
+---
+
 ## Tareas que pueden correr en paralelo (en ramas separadas)
 
 - T-11 y T-12 (después de T-09).

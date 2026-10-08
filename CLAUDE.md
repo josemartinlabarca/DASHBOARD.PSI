@@ -43,6 +43,14 @@ Una tarea no está terminada si `pytest` no pasa.
    anota la duda en `PROGRESS.md` bajo "Bloqueos" y detén la vuelta.
 7. No edites `SPEC.md` ni `ARCHITECTURE.md` sin que la tarea lo pida; propón el
    cambio en `DECISIONS.md`.
+8. **Nunca inventes la fecha ni la hora.** No tienes reloj propio. Para las
+   entradas de `PROGRESS.md` y `DECISIONS.md` obténlas con
+   `TZ=America/Santiago date '+%Y-%m-%d %H:%M'`.
+9. **Reporta lo que ejecutaste de verdad.** Si dices que verificaste algo
+   (un comando, un recorrido, una prueba que falla al revertir), debe haberse
+   ejecutado y el procedimiento descrito debe ser el real.
+10. Si agregas un archivo que la tarea no pedía (configuración, utilidades),
+    justifícalo en `DECISIONS.md` en la misma tarea.
 
 ## Qué NO tocar
 
