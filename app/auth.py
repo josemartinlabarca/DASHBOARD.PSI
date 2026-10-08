@@ -43,6 +43,19 @@ def zona_chile():
         raise RuntimeError(MENSAJE_SIN_ZONA_HORARIA) from error
 
 
+def es_correo_duplicado(error):
+    """True solo si `error` es la violación de UNIQUE sobre `usuarios.email`.
+
+    Cualquier otra `IntegrityError` (NOT NULL, CHECK, clave foránea, UNIQUE de
+    otra columna) es un fallo del programa y no debe presentarse al usuario
+    como «correo duplicado» (hallazgo 7 de la revisión de T-02c).
+    """
+    return (
+        getattr(error, "sqlite_errorcode", None) == sqlite3.SQLITE_CONSTRAINT_UNIQUE
+        and "UNIQUE constraint failed: usuarios.email" in str(error)
+    )
+
+
 def validar_registro(nombre, email, password):
     """Devuelve un diccionario campo -> mensaje de error (vacío si todo está bien)."""
     errores = {}
@@ -93,8 +106,10 @@ def registro():
                 ),
             )
             db.commit()
-        except sqlite3.IntegrityError:
+        except sqlite3.IntegrityError as error:
             db.rollback()
+            if not es_correo_duplicado(error):
+                raise  # cualquier otra violación es un error interno (500)
             errores["email"] = MENSAJE_DUPLICADO
         else:
             flash("Tu cuenta fue creada correctamente.", "exito")

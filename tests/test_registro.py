@@ -224,6 +224,7 @@ def test_correo_con_comillas_y_html_se_escapa_en_el_atributo_value(client):
     assert 'value="a&#34;b&#39;c&#34;&gt;' in r.text
 
 
+@pytest.mark.hash_real
 def test_hash_usa_scrypt_con_al_menos_los_parametros_por_defecto(app, client):
     """Los mínimos se leen de lo que la versión instalada de werkzeug genera."""
     registrar(client)
@@ -283,3 +284,116 @@ def test_peticion_mayor_a_16_kb_da_413_y_no_crea_usuario(app, client):
 def test_peticion_justo_bajo_el_limite_sigue_funcionando(app, client):
     assert registrar(client).status_code == 302
     assert len(usuarios(app)) == 1
+
+
+@pytest.mark.hash_real
+def test_con_hash_real_el_registro_guarda_scrypt_de_costo_completo(app, client):
+    """Guarda de D-019: sin el hash rápido, el hash guardado es el real de werkzeug."""
+    registrar(client)
+    (u,) = usuarios(app)
+    n_real = int(generate_password_hash("x").split("$")[0].split(":")[1])
+    assert n_real >= 2**14
+    assert int(u["password_hash"].split("$")[0].split(":")[1]) == n_real
+    assert check_password_hash(u["password_hash"], VALIDO["password"])
+
+
+def test_el_hash_rapido_de_conftest_es_scrypt_con_sal_y_no_texto_plano(app, client):
+    """El hash rápido solo baja el costo: sigue siendo scrypt salado y verificable."""
+    registrar(client)
+    registrar(client, email="b@example.cl")
+    a, b = usuarios(app)
+    assert a["password_hash"].startswith("scrypt:")
+    assert a["password_hash"] != b["password_hash"]  # sal distinta
+    assert VALIDO["password"] not in a["password_hash"]
+    assert check_password_hash(a["password_hash"], VALIDO["password"])
+    assert not check_password_hash(a["password_hash"], "otra-clave-123")
+
+
+# --- Hallazgo 7 de la revisión de T-02c: IntegrityError distinto del duplicado ---
+
+class ConexionQueFalla:
+    """Envuelve la conexión real; el INSERT de usuarios lanza `error`."""
+
+    def __init__(self, real, error):
+        self._real, self._error = real, error
+
+    def execute(self, sql, *args):
+        if sql.lstrip().upper().startswith("INSERT INTO USUARIOS"):
+            raise self._error
+        return self._real.execute(sql, *args)
+
+    def __getattr__(self, nombre):
+        return getattr(self._real, nombre)
+
+
+def integrity_error(mensaje, codigo):
+    error = sqlite3.IntegrityError(mensaje)
+    error.sqlite_errorcode = codigo
+    return error
+
+
+@pytest.fixture
+def app_sin_propagar(app):
+    app.config["PROPAGATE_EXCEPTIONS"] = False  # que el 500 llegue como respuesta
+    return app
+
+
+def test_not_null_real_en_el_registro_da_500_y_no_dice_duplicado(app_sin_propagar, client, monkeypatch):
+    """Violación real de la base (password_hash NULL): error interno, no duplicado."""
+    monkeypatch.setattr(auth, "generate_password_hash", lambda *a, **k: None)
+    r = registrar(client)
+    assert r.status_code == 500
+    assert "No pudimos registrarte con ese correo" not in r.text
+    assert usuarios(app_sin_propagar) == []
+
+
+@pytest.mark.parametrize(
+    "mensaje, codigo",
+    [
+        ("NOT NULL constraint failed: usuarios.nombre", sqlite3.SQLITE_CONSTRAINT_NOTNULL),
+        ("CHECK constraint failed: rol IN ('paciente', 'profesional')", sqlite3.SQLITE_CONSTRAINT_CHECK),
+        ("FOREIGN KEY constraint failed", sqlite3.SQLITE_CONSTRAINT_FOREIGNKEY),
+        ("UNIQUE constraint failed: usuarios.otra_columna", sqlite3.SQLITE_CONSTRAINT_UNIQUE),
+        ("UNIQUE constraint failed: otra_tabla.email", sqlite3.SQLITE_CONSTRAINT_UNIQUE),
+        ("UNIQUE constraint failed: usuarios.email", sqlite3.SQLITE_CONSTRAINT_PRIMARYKEY),
+        ("UNIQUE constraint failed: usuarios.email", None),  # sin código: no se presume duplicado
+    ],
+)
+def test_otras_integrity_error_son_error_interno(app_sin_propagar, client, monkeypatch, mensaje, codigo):
+    real = auth.get_db
+    error = integrity_error(mensaje, codigo)
+    monkeypatch.setattr(auth, "get_db", lambda: ConexionQueFalla(real(), error))
+    r = registrar(client)
+    assert r.status_code == 500
+    assert "No pudimos registrarte con ese correo" not in r.text
+    assert usuarios(app_sin_propagar) == []
+
+
+def test_unique_de_usuarios_email_sigue_siendo_duplicado(app, client):
+    assert registrar(client).status_code == 302
+    r = registrar(client, nombre="Otra")
+    assert r.status_code == 200
+    assert "No pudimos registrarte con ese correo" in r.text
+
+
+def test_es_correo_duplicado_con_el_error_real_de_sqlite(app):
+    con = sqlite3.connect(app.config["DATABASE"])
+    try:
+        con.execute(
+            "INSERT INTO usuarios (nombre, email, password_hash, rol, creado_en)"
+            " VALUES ('a', 'a@x.cl', 'h', 'paciente', 'z')"
+        )
+        with pytest.raises(sqlite3.IntegrityError) as dup:
+            con.execute(
+                "INSERT INTO usuarios (nombre, email, password_hash, rol, creado_en)"
+                " VALUES ('b', 'A@X.CL', 'h', 'paciente', 'z')"
+            )
+        with pytest.raises(sqlite3.IntegrityError) as nulo:
+            con.execute(
+                "INSERT INTO usuarios (nombre, email, password_hash, rol, creado_en)"
+                " VALUES ('b', 'b@x.cl', NULL, 'paciente', 'z')"
+            )
+    finally:
+        con.close()
+    assert auth.es_correo_duplicado(dup.value)
+    assert not auth.es_correo_duplicado(nulo.value)

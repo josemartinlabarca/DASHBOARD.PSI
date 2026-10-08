@@ -86,7 +86,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Origen:** REVIEW de T-03, hallazgos 1, 3, 4, 5 y 7 (ver historial git de `REVIEW.md`).
 
 ### T-03c — Cerrar los hallazgos de la revisión de T-03b
-- **Estado:** PENDIENTE — decisión humana del punto 2 **APROBADA** (D-015, opción 2, 2026-10-08 00:38). Ya puede ejecutarse completa.
+- **Estado:** HECHA (2026-10-08 11:28) — decisión humana del punto 2 **APROBADA** (D-015, opción 2, 2026-10-08 00:38).
 - **Depende de:** T-03b
 - **Qué:**
   1. **Pruebas de `normalizar_email` (media):** el implementador afirmó que quitar la primera NFKC era "equivalente"; es **falso** (cambia el resultado en 637 puntos de código y rompe la idempotencia, comprobado por el orquestador). Añadir pruebas con esos casos (p. ej. `ϒ` U+03D2) y una prueba **exhaustiva de idempotencia** sobre todos los puntos de código; corregir en `PROGRESS.md` la frase falsa de la entrada de T-03b.
