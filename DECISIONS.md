@@ -153,9 +153,6 @@ Autorizas a que se modifique `ARCHITECTURE.md` (que `CLAUDE.md` reserva al human
 - **Porqué:** cada registro de prueba pagaba ~0,13 a 0,4 s de scrypt real; `tests/test_registro.py` pasó de 6,3 s a 2,8 s (con 12 pruebas más). No debilita lo que se prueba de seguridad: `check_password_hash` sigue verificando contra el hash guardado, hay sal distinta por usuario, el hash no contiene la contraseña, y las pruebas de método y costo del hash real están marcadas `hash_real` (más una guarda que falla si el marcador deja de desactivar la fixture).
 - **Alternativas descartadas:** bajar el costo en la aplicación con una variable de configuración (cambia código de producción por las pruebas); `pbkdf2:sha256:1` (cambia el algoritmo, y D-010 exige scrypt); `scrypt:16:1:1` (OpenSSL rechaza por memoria).
 
-## Plantilla para nuevas decisiones
-
-```
 ## D-015 — Política de caracteres permitidos en el correo (T-03c) — **APROBADA por el humano (2026-10-08 00:38): opción 2**
 - **Fecha:** 2026-10-08
 - **Estado:** APROBADA el 2026-10-08 00:38 (hora de Chile): el humano eligió la **opción 2**. Origen: hallazgo 2 de la revisión de T-03b. Se implementa en el punto 2 de T-03c.
@@ -224,6 +221,19 @@ Autorizas a que se modifique `ARCHITECTURE.md` (que `CLAUDE.md` reserva al human
 - **Implementación:** T-02g. Autorizada a modificar `app/schema.sql` y la línea `inicio` del "Modelo de datos" de `ARCHITECTURE.md` **solo** para esto. Consecuencia ya conocida (D-006): borrar `agenda.db` y volver a ejecutar `init-db`.
 - **Implementada:** T-02g, 2026-10-08 01:21
 
+## D-020 — Alcance de la política de caracteres del correo (PROPUESTA, pendiente del humano)
+- **Fecha:** 2026-10-08
+- **Estado:** PROPUESTA. No bloquea T-04. Origen: revisión de T-03c, R-01.
+- **Problema:** D-015 (opción 2) rechaza las categorías `C*` y las marcas `Mn/Mc/Me`, pero aún se aceptan caracteres visualmente vacíos o engañosos que no pertenecen a esas categorías: relleno hangul (U+3164, U+115F), braille en blanco (U+2800), U+FFFD, U+FFFC, símbolos U+2400–U+2422, guiones y puntos medios no ASCII (U+2010, U+00B7). Permiten crear cuentas que se ven iguales a otras. No es un vector nuevo (D-013 ya aceptó los homoglifos cirílicos).
+- **Opciones:**
+  - **A.** Aceptar y documentar que es una clase de casos, no tres.
+  - **B (recomendada).** Fuera de ASCII solo letras y números (categorías `L*` y `N*`) más una lista corta de rellenos; rechaza el resto.
+  - **C.** Solo ASCII (opción 1 de D-015): la más simple, pero rechaza `señor@…`.
+- **Implementación si se aprueba B o C:** tarea nueva pequeña (cambia `app/correo.py` y sus pruebas).
+
+## Plantilla para nuevas decisiones
+
+```
 ## D-00X — Título
 - **Fecha:**
 - **Decisión:**

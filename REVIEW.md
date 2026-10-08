@@ -1,149 +1,151 @@
-# REVIEW.md — Revisión de T-02e (commit `f7a0ca3`)
+# REVIEW.md — Revisión de T-03c (commit `e50d5ea`)
 
-Revisor, 2026-10-08. SQLite 3.45.1. Todo se ejecutó en copias del repo dentro del scratchpad
-(`.../scratchpad/w/`); el repo no se tocó (`git status --short` vacío, sin commit).
-Lo revisado: diff de `f7a0ca3` (solo `tests/test_esquema.py`, `TASKS.md`, `PROGRESS.md`), `app/schema.sql`,
-`ARCHITECTURE.md` (modelo de datos), D-007/D-016/D-017/D-018 y la entrada de PROGRESS.
-`schema.sql` coincide con ARCHITECTURE y con `SQL_ESPERADO` (la prueba pasa; leído a mano también).
+Revisor, 2026-10-08. Python 3.13.16 (Unicode 15.1), SQLite 3.45.1, Werkzeug 3.1.8, tzdata 2026.5 instalado.
+Todo lo ejecutado se hizo en copias bajo el scratchpad (`.../scratchpad/{c1,old,new,m}`); el repo no se tocó
+(`git status --short` solo muestra `DECISIONS.md`, el cambio sin commitear del orquestador, ignorado).
+Leído: `git show e50d5ea` completo, `CLAUDE.md`, texto de T-03c y T-04 en `TASKS.md`, D-010 a D-015 y D-019,
+`app/correo.py`, `app/auth.py`, `tests/conftest.py`, `pytest.ini`, las pruebas nuevas y la entrada de PROGRESS (con "Bloqueos").
 
-## Qué se verificó de verdad
+## Qué se verificó ejecutando
 
-- `pytest` en el repo: **390 passed**; también con `SECRET_KEY=abc` y con `FLASK_DEBUG=1` (390 cada una).
-- Conteos: 357 antes (`git archive f7a0ca3~1` + `pytest`) y 390 ahora (`--collect-only`): **+33**, coincide.
-- 49 mutaciones del esquema en copia (suite `tests/test_esquema.py`, 281 pruebas): 36 semánticas y 13 inocuas.
-- 7 mutaciones de PROGRESS repetidas con la **suite completa** (390): `tipo`+`'otro'` 9, `estado`+`'cancelada'` 6,
-  `rol` con `lower()` 7, tope 1440 en `duracion_min` 4, `ON UPDATE CASCADE` 2, quitar `instr` 6, quitar `COLLATE NOCASE` 3.
-  Los siete números **coinciden exactamente** con PROGRESS.
-- 11 mutaciones "otro CHECK distinto" para probar las constantes `CHECK_*` (ver R-05).
-- Valores límite de `duracion_min` directamente contra SQLite (ver R-04).
-- NO verifiqué: el recorrido con `flask run`/curl (T-02e no lo requiere), `init-db` sobre una base antigua,
-  ni otras versiones de SQLite (el texto del mensaje de error de CHECK podría variar entre versiones; ver R-02).
+- `pytest` en el repo: **470 passed** (9,4 s). Conteo: 390 en `d8d00f3` (`git archive` + pytest) y 470 en `e50d5ea` = +80. Coincide con PROGRESS.
+- Tiempos, `git archive` de ambos commits, dos corridas alternadas: antes 11,5 y 11,0 s; después 11,3 y 10,4 s;
+  después sin la prueba exhaustiva 8,3 s; `tests/test_registro.py` 6,7 s (40) -> 2,7 s (52). Coinciden con PROGRESS.
+- Mutaciones en copia con la **suite completa** (fallos; entre paréntesis lo que dice PROGRESS): sin 1.ª NFKC 3 (3), sin 2.ª NFKC 3 (3),
+  `isspace()`->`== " "` 7 (7), sin `tzdata` en requirements 1 (1), solo Cc/Cf 11 (11), sin Mn/Mc/Me 13 (13), solo Mn 4 (4),
+  sin `isinstance` 7 (7), sin Co 5 (5), sin Cn 5 (5), Cc/Cf/Cn (sin Co ni Cs) 7 (PROGRESS dice 9 para "sin Co/Cn/Cs": no es el mismo
+  mutante, no hay discrepancia real), duplicado solo por mensaje 2 (2), cualquier `IntegrityError` como duplicado 9 (8; mi mutante
+  es `return True`), `hash_real` ignorado 2 (2), sin `db.rollback()` **0 (0)**. Todos los números coinciden salvo diferencias de mutante.
+- Las dos mutaciones de NFKC las atrapa la prueba exhaustiva Y las parametrizadas; la frase falsa de T-03b está corregida con nota visible.
+- Sondeo de `normalizar_email` con ~90 casos reales y un barrido de los 1.112.064 puntos de código (ver R-01 a R-03).
+- Hash: `auth.generate_password_hash('x')` sin conftest da `scrypt:32768:8:1`; con `hash_real` el hash guardado es de costo completo.
+- Carrera real: 8 hilos registrando el mismo correo con la app real (3 repeticiones): siempre 1 x 302 + 7 x 200 (mensaje de duplicado), 1 fila.
+- `in_transaction` tras un INSERT fallido por UNIQUE: `True`; tras `rollback()`: `False`.
+- NO verifiqué: nada en navegador (R-04 es por especificación HTML), otras versiones de Python/SQLite, Windows (R-09), servidor con `flask run`
+  (T-03c no lo exigía), ni comportamiento con Unicode distinto de 15.1.
 
 ## Hallazgos
 
-### R-01 — La comparación de `sqlite_master` es sólida contra cambios semánticos — informativa (confirmación)
-Cada una de estas mutaciones hace fallar al menos una prueba (n.º de fallos entre paréntesis):
-valor añadido a un CHECK (7, 6, 9), `DEFAULT 50→51` (2), orden de columnas (1), quitar `NOT NULL` (3), quitar `UNIQUE` del
-correo (2), `COLLATE NOCASE→BINARY` (3), quitar `REFERENCES` (6), `ON DELETE CASCADE` (6 y 4), `ON UPDATE CASCADE` (2),
-`INTEGER→NUMERIC` (1), `INTEGER PRIMARY KEY→INT PRIMARY KEY` (86), añadir columna (1 y 1), añadir índice, trigger o vista (1 cada
-uno, por `test_no_hay_otros_objetos_en_la_base`), `>0→>=0` (3), tope superior (4), `STRICT` (1), `WITHOUT ROWID` (13 + 239 errores),
-`UNIQUE` cambiado de columnas o de orden (4 y 3), `ON CONFLICT REPLACE` (3), `AUTOINCREMENT` (1), `DEFERRABLE` (3),
-`DEFAULT` de `leida` (1) o de `estado` quitado (192), `hora_id NOT NULL` (27), quitar una rama de la coherencia (2),
-espacios dentro del literal del GLOB (76).
-Cambios **inocuos** que NO rompen nada (correcto): sangría de 2 espacios, tabs, CRLF, líneas en blanco extra, comentario `--`
-fuera de las tablas, reordenar las tablas, quitar `IF NOT EXISTS`, quitar el `;` final, espacios de más al final de una línea.
-Recomendación: ignorar.
+### R-01 — D-015 opción 2 está bien implementada, pero deja una clase entera de invisibles y mudos: no solo 3 caracteres — media
+Evidencia: `normalizar_email("a⠀@x.cl")`, `("aㅤ@x.cl")`, `("aᅟ@x.cl")`, `("aﾠ@x.cl")` (-> `aᅠ`), `("a�@x.cl")` se **aceptan**
+(confirmado; el implementador tiene razón). Pero la lista de PROGRESS/D-013 (hangul, braille, U+FFFD) está **incompleta**. Barrido de los
+140.888 puntos que pasan sin cambio: quedan, entre otros, U+FFFC (objeto de reemplazo), U+2400..U+2422 (símbolos de nulo/espacio/en blanco),
+U+303F, U+1D159, U+13441/13442 (jeroglífico en blanco) y siete "gap filler" de puntuación (U+A8F9, U+1144E, U+11945, U+11C44/45, U+11F48, U+10AF6);
+además todo el rango `Po/Pd/Sm/So/Sk/Sc` no ASCII: p. ej. U+2010 (guion) y U+00B7 (punto medio) se ven como `-` y `.`
+(`juan‐perez@x.cl` != `juan-perez@x.cl`). Categorías aceptadas no ASCII: Lo 130.075, So 5.729, Ll 1.501, Sm 900, No 749, Nd 600, Po 552, etc.
+Gravedad: no hay nuevo vector de seguridad respecto al riesgo ya aceptado (D-013: la «е» cirílica da el mismo duplicado visual) y el correo no se
+muestra a terceros en ninguna plantilla actual (solo `registro.html`; SPEC no pide mostrarlo). Efecto real: cuentas duplicadas indistinguibles a la vista
+y usuarios que no pueden reproducir su correo (p. ej. si pegan uno con relleno invisible). Un `a⠀@x.cl` tiene la misma apariencia que `a@x.cl`.
+Opciones para la decisión humana (D-0xx nueva):
+ A. Aceptar y dejarlo documentado como hoy (corregir en D-013 la lista: es una clase, no tres casos).
+ B. Lista de permitidos por categoría: ASCII imprimible tal cual; no ASCII solo si `Ll/Lu/Lt/Lm/Lo/Nd/Nl/No` (se descartan So, Sk, Sm, P*, Sc, Zs) más una lista
+    explícita corta de rellenos `Lo` (U+115F, U+1160, U+3164, U+FFA0, U+13441, U+13442). Cuatro líneas, sigue admitiendo `señor@`, `müller@`, caracteres CJK;
+    elimina todos los blancos/guiones falsos de arriba. Costo: rechazar símbolos no ASCII (nadie los usa en correos reales).
+ C. Volver a la opción 1 de D-015 (solo ASCII): cierra también los homoglifos, pero rechaza `señor@`.
+Recomendación: **decisión humana**; B es el mejor equilibrio con lo ya aprobado. Hasta decidir, cambiar el texto de D-013/PROGRESS a "clase" (baja, ver R-10).
 
-### R-02 — Ciertos reformateos inocuos SÍ rompen las pruebas (más estricta de lo necesario) — baja
-Evidencia (mutación en copia → fallos): minúsculas en `not null`/`primary key` (3), comentario `-- ...` o `/* */` **dentro** de
-un `CREATE TABLE` (1 cada uno), `CHECK ( rol IN (...) )` con espacios tras `(` (1), `IN ('paciente','profesional')` sin espacio tras
-la coma (**7**: SQL + las constantes `CHECK_ROL`), `REFERENCES usuarios(id)` sin espacio (1).
-Causa: SQLite guarda en `sqlite_master` el texto original sin comentarios eliminados ni mayúsculas normalizadas, y el mensaje de
-error del CHECK reproduce el texto de la expresión, de modo que `CHECK_*` también depende del formato exacto. Además, depende de
-que SQLite siga imprimiendo ese texto (comportamiento de 3.45.1, no documentado como contrato).
-Es una elección defendible (más vale estricta que laxa) y el fallo es evidente, pero **nadie lo dejó escrito**: la primera vez que
-alguien ponga un comentario dentro de una tabla de `schema.sql` verá un diff de una sola línea enorme.
-Recomendación: backlog (con T-05 o la siguiente tarea que toque el archivo): añadir al comentario de la prueba "el formato de
-`schema.sql` dentro de cada CREATE TABLE está congelado; los comentarios van fuera de las tablas".
+### R-02 — La opción 2 rechaza correos legítimos de escrituras que usan marcas o ZWNJ — informativa
+Evidencia (rechazados): devanagari `कि` (Mc), tailandés `กิ` (Mn), árabe con `َ`, hebreo con niqqud, ZWNJ persa `‌` (Cf),
+`क्` (virama), `İ` (por casefold -> `i`+U+0307). Aceptados: `ñ` pre/descompuesta, tildes `é`/`josé`, `ü` (`müller@x.de`), kana con dakuten
+(`が`), dominio `münchen.de`, `a@b.cl`, puntos, guiones y `+`. Para el público chileno no hay rechazos razonables. Para correos internacionales en hindi, tailandés,
+persa o jemer sí (D-015 lo implicaba: "el correo debe llegar precompuesto"). No hay falsos negativos de las categorías pedidas (el barrido no encontró ningún
+carácter C*/Mn/Mc/Me aceptado). Recomendación: ignorar; opcionalmente una línea en D-015/D-013 diciendo que quedan excluidas esas escrituras.
 
-### R-03 — El normalizador colapsa espacios dentro de literales — informativa (teórica)
-`" ".join(sql.split())` convierte `'a  b'` y `'a  b'` en `'a b'`, así que un cambio de solo espacios **dentro de un
-literal de cadena** pasaría. Hoy ningún literal del esquema contiene espacios (los valores son `'libre'`, `'reservada'`, el GLOB…),
-así que **no hay hueco real**; el espacio dentro del GLOB se detecta (76 fallos, porque el GLOB está fijado además por las
-pruebas de formato). Pasaría a ser real si una tarea futura añade un `DEFAULT 'sin  datos'` o un `IN ('a  b')`.
-Recomendación: ignorar; mencionarlo si algún día se agrega un literal con espacios.
+### R-03 — Los Cn dependen de la versión de Python: riesgo concreto para el login de T-04 — baja
+Evidencia: Python 3.13 = Unicode 15.1; el proyecto declara Python 3.11+ (Unicode 14). Un correo con un carácter asignado en 15.x se registra en 3.13 y
+`normalizar_email` lo **rechaza** en 3.11 (es Cn allí): ese usuario no podría iniciar sesión tras un despliegue en un Python más viejo. La prueba
+`test_un_punto_sin_asignar...` es sólida (no fija puntos), y la exhaustiva es autoconsistente. Recomendación: anotar en T-04 (ver R-08) que el login no debe
+tratar `ValueError` como 500; no hace falta más hoy. Backlog.
 
-### R-04 — Valores vecinos: aportan poco sobre la comparación del SQL, y falta un límite real: `duracion_min` no entera — baja
-(a) Redundancia. Toda mutación de los valores vecinos (`tipo`+`'otro'`, etc.) ya la detecta la comparación del SQL. Los vecinos solo
-aportan algo si alguien relajara la comparación (p. ej. por R-02), o para reformulaciones equivalentes que la comparación sí rechaza
-(`BETWEEN 0 AND 1`: detecta el SQL y también las pruebas de valores). Son ~21 casos baratos y documentan el contrato; no son ruido
-grave. `test_rol_aprobado_aceptado` y `test_duracion_por_defecto_es_50` repiten lo que ya hacen las fijaciones; `1` y `50`
-en `test_duracion_sin_tope_superior` repiten las pruebas de duración positiva.
-(b) Hueco: con el esquema actual, `duracion_min` **acepta** `'abc'`, `''`, `0.5`, `1.5`, `1e30`, `inf` y BLOB, y `True`→1
-(INTEGER affinity de SQLite no impone tipo; `'abc' > 0` es verdadero en SQLite). Se rechazan `0`, `-1`, `0.0`, `'0'`, `False` y NULL.
-Ninguna prueba lo documenta (solo la comparación del SQL impediría añadir un `typeof(...)`, y tampoco impide que alguien lo quite
-creyendo que ya existe). No es un defecto de T-02e (viene de D-007) pero T-02e prometía "fijar el conjunto exacto de valores".
-`2**63` falla en Python, no en SQLite. `recordatorio_enviado`/`leida` no tienen este problema (el `IN (0,1)` lo cierra).
-Recomendación: T-05 debe validar que `duracion_min` sea entero positivo en la aplicación (anotarlo en T-05, como ya se hizo con
-la fecha en la «Nota R-02/R-09»); decisión humana opcional: añadir `typeof(duracion_min) = 'integer'` al CHECK. Si no se añade,
-backlog: una prueba que documente la limitación como `test_fecha_con_forma_valida_pero_inexistente_se_acepta_en_la_base`.
+### R-04 — `<input type="email">` impide escribir `señor@…` en el navegador, anulando el motivo de elegir la opción 2 — media (a confirmar en navegador)
+Evidencia: `app/templates/registro.html` usa `type="email"` sin `novalidate`. La especificación HTML (`valid e-mail address`) solo admite ASCII en la parte local;
+Chrome y Firefox marcan `señor@x.cl` como inválido y bloquean el envío. No lo ejecuté en un navegador (no tengo uno aquí), así que va como "a confirmar".
+Si es cierto, el humano aprobó la opción 2 "para admitir correos con tildes o ñ" y en la práctica solo se aceptan por clientes que no validan (curl, pruebas).
+Recomendación: **tarea nueva pequeña o incluirlo en T-04** (el formulario de login tiene el mismo campo): `type="text" inputmode="email"` (o `novalidate`) con la
+validación del servidor como única autoridad, y una prueba del HTML; o decidir que no importa si se elige la opción C de R-01.
 
-### R-05 — Las constantes `CHECK_*` sí comprueban qué CHECK falló — informativa, con matices bajos
-Evidencia (cada una hizo fallar pruebas que NO son las de comparación de SQL/FK, es decir, fallan por el mensaje): `leida` con
-`BETWEEN` (2), `recordatorio_enviado` con `BETWEEN` (3), `duracion_min >= 1` (2), `tipo` reordenado (8), `rol` reordenado (6),
-`estado` reordenado (5), ramas de la coherencia intercambiadas (7), `length(inicio)=19 AND` delante (121), `instr` delante (121),
-CHECK de `inicio` nombrado (121), CHECK de coherencia nombrado (7). Son 11 de 11 (se pidieron al menos 6).
-También probé desde el lado de las pruebas: poner por defecto en `insertar_hora` un `inicio` inválido da 27 fallos y poner
-`estado='reservada'` sin paciente da 186; es decir, un valor por defecto roto ya no pasa inadvertido (era el R-04 original de T-02g).
-Matices:
-- El orden de evaluación importa: SQLite informa el **primer** CHECK que falla (columnas en orden, luego los de tabla). Con un
-  `inicio` inválido por defecto, las pruebas de rechazo de `duracion_min`/`recordatorio_enviado` siguen pasando (su CHECK va antes);
-  quien las detecta son las pruebas de aceptación. Aceptable.
-- `CHECK_INICIO` (`"inicio GLOB "`) y `CHECK_COHERENCIA` (prefijo hasta `paciente_id IS NULL`) son prefijos: no distinguen GLOB de
-  `instr` dentro del mismo CHECK, ni qué rama de la coherencia falló. Lo cubren las pruebas de NUL y de coherencia por separado.
-- El mensaje de PROGRESS dice que **TODAS** las pruebas de rechazo por CHECK exigen ya el CHECK concreto. Quedan cuatro sin
-  fragmento: `test_inicio_que_no_es_texto_rechazado`, `test_las_variantes_ya_no_eluden_la_unique` (en `tests/test_esquema.py`, con
-  `pytest.raises(IntegrityError)` desnudo; en la segunda el rechazo podría venir de la UNIQUE) y `test_rol_invalido_rechazado` /
-  `test_estado_invalido_rechazado` de `tests/test_db.py`. Son duplicados de pruebas que sí exigen el fragmento, así que no hay riesgo
-  real; solo la afirmación es ligeramente exagerada.
-Recomendación: ignorar el mecanismo; backlog menor (con la limpieza de redundancias de T-02g R-03 / T-02c #9) para pasar esas cuatro
-a `rechazada(...)` o borrarlas.
+### R-05 — Hash rápido (D-019): no puede filtrarse a producción — informativa (confirmación)
+Evidencia: el reemplazo vive solo en `tests/conftest.py` (`monkeypatch`); `app/` no importa `conftest`; `auth.generate_password_hash('x')` fuera de pytest da
+`scrypt:32768:8:1`. La función de reemplazo conserva la firma de Werkzeug (`password, method, salt_length`) y solo acelera el `method` por defecto exacto (`"scrypt"`),
+respetando cualquier método explícito. Las pruebas de seguridad que verifican algo del hash (`hash_usa_scrypt...`, `con_hash_real...`) llevan `hash_real` y, mutando el
+marcador (ignorado), fallan 2: el marcador **funciona**. `check_password_hash` lee los parámetros del hash guardado, así que verificar hashes rápidos no debilita la
+comprobación de contraseña. Lo que se pierde: ninguna prueba de login/registro corre con el costo real salvo las dos marcadas (aceptable).
 
-### R-06 — Mantenibilidad: el cambio legítimo del esquema obliga a tocar varios sitios y solo se explica uno — media-baja
-Evidencia: si T-05 o una tarea futura añade una columna, un índice o un valor a un CHECK, hay que actualizar a la vez
-`SQL_ESPERADO`, `FK_ESPERADAS` (si hay FK), la constante `CHECK_*` correspondiente (si cambia su texto), las listas de vecinos,
-`test_db.py` (lista de columnas con `PRAGMA table_info`, líneas ~85-110), `test_no_hay_otros_objetos_en_la_base` (si hay un índice
-o trigger) y `ARCHITECTURE.md`. El comentario del código dice solo "hay que actualizar el SQL esperado aquí", y la bitácora nombra
-`SQL_ESPERADO` y `FK_ESPERADAS`. No menciona `CHECK_*`, `test_db.py` ni cómo obtener el texto nuevo (por ejemplo,
-`SELECT sql FROM sqlite_master` normalizado). Un implementador despistado recibirá un fallo largo y tendrá que deducirlo; el riesgo
-más probable es que "arregle" `SQL_ESPERADO` copiando lo que salga sin revisar si el cambio estaba aprobado. Para eso no hay
-protección más que la regla humana de CLAUDE.md (el esquema solo cambia con decisión aprobada).
-Además hay dos fuentes de verdad por diseño (`schema.sql` y `SQL_ESPERADO`); es el punto de la tarea, no un defecto.
-Recomendación: backlog, barato: ampliar el comentario de la sección con la lista de lugares a tocar y la nota "solo con una decisión
-aprobada en DECISIONS.md", junto con R-02. Hacerlo la próxima vez que se toque el archivo.
+### R-06 — Nada comprueba que el hash rápido esté realmente activo; el marcador sin registrar solo avisa — baja
+Evidencia (copia): (a) dejar la fixture `hash_rapido` vacía (`pass`): **470 passed**, la suite solo se vuelve más lenta (9,4 -> ~16 s en esa corrida);
+(b) parchear solo `werkzeug.security` y no `auth`: **470 passed**. Ninguna prueba falla si D-019 deja de funcionar. (c) Sin la línea `markers` de `pytest.ini`: 470 passed, "4 warnings"
+(el marcador funciona igual, solo avisa); con `--strict-markers` y marcador registrado: 470 passed; con `--strict-markers` y sin registrar: error de colección (la protección que se busca).
+Un error de tipeo (`@pytest.mark.hash_rael`) en una prueba futura daría hash rápido y un aviso fácil de ignorar.
+Recomendaciones: (1) **backlog/tarea pequeña**: `addopts = --strict-markers` en `pytest.ini` (una línea, archivo de D-011; no cambia nada hoy);
+(2) una prueba que verifique que sin `hash_real` `generate_password_hash('x')` da `scrypt:1024:8:1` en `werkzeug.security` y en `app.auth` (cierra (a) y (b)).
 
-### R-07 — Veracidad de PROGRESS.md y coherencia con TASKS.md — informativa (con una exageración menor)
-- 390 y 33 nuevos: **verdadero** (357 en `f7a0ca3~1`, 390 ahora, +33).
-- "Se reemplazaron 15 aserciones, no se borró ninguna prueba": **verdadero**. El diff retira 15 líneas con `"CHECK constraint failed"`
-  (14 de nivel normal y 1 anidada en `test_inicio_con_nul_no_elude_la_unique`) y las sustituye por `CHECK_*`; comparando los
-  nombres de funciones `test_*` entre `f7a0ca3~1` y `f7a0ca3`: 0 desaparecidas, 9 nuevas (más parametrizaciones). El resumen del
-  usuario "no se borró ninguna prueba" es cierto; lo que sí cambió es que 15 aserciones pasaron a ser **más estrictas**, lo cual
-  la bitácora dice.
-- Mutaciones: los 7 números reproducidos a mano coinciden (ver arriba). El procedimiento descrito (copia temporal, solo cambia
-  `schema.sql`, suite completa) es el que yo repetí. Sin discrepancias.
-- Fila R-04 del backlog de TASKS.md: **procede quitarla**. La propia fila la asignaba a "T-02e (al fijar el SQL exacto)" y el
-  trabajo la resuelve (R-05). Matiz: el texto de T-02e en TASKS.md no la lista en "También" ni en el "Término", así que el
-  alcance real fue un poco mayor que el escrito; está bien justificado en PROGRESS y es pequeño.
-- `schema.sql`, `ARCHITECTURE.md`, `SPEC.md`, `DECISIONS.md` intactos (`git show --stat`: solo 3 archivos). Cumple la regla 3
-  de CLAUDE.md (sin funciones extra) y la regla 10 (sin archivos nuevos).
-- Lo único que PROGRESS no registra son las fragilidades R-02/R-03; no es un error de veracidad.
+### R-07 — La fixture parcha por nombre en dos módulos: T-04 es el primer punto frágil — media (anotar en T-04)
+`create-professional` y el login (módulo nuevo o `auth.py`) que hagan `from werkzeug.security import generate_password_hash` quedarán con la función **real** (lenta, y
+en el CLI se ejecuta en `invoke`) sin que nada avise. D-019 y PROGRESS ya lo dicen, pero solo como nota. Mejoras baratas para decidir en T-04: la fixture recorre
+`sys.modules` y reemplaza `generate_password_hash` en todo módulo `app.*` que lo tenga; o una prueba (AST/grep) que falle si un archivo de `app/` importa
+`generate_password_hash` y no está en la lista de la fixture. Recomendación: **incluir en T-04** (ver R-08).
 
-### R-08 — Interacción con tareas futuras — informativa
-- T-03c y T-04: no tocan el esquema; sin efecto. T-04 depende de T-03c, no de T-02e.
-- T-05: cualquier `CREATE INDEX` (p. ej. para consultar horas por profesional/estado), cualquier columna nueva o cualquier
-  trigger romperá a propósito `test_no_hay_otros_objetos_en_la_base` / `SQL_ESPERADO`: avisarlo en la tarea (R-06). T-05 además
-  debe validar `duracion_min` entero (R-04b) y la fecha existente (ya anotado).
-- T-10/T-11 (recordatorios y notificaciones): si añaden una columna o un índice único de deduplicación, mismo caso.
-- T-14 y la fila de backlog "T-02c #4" (`init-db` sobre esquema antiguo, comparar `sqlite_master` con `schema.sql`): la lógica de
-  `_sql` y `SQL_ESPERADO` podría reutilizarse, pero hoy está sólo en las pruebas; anotarlo allí si se decide implementarlo.
-- La redundancia nueva (vecinos vs SQL) conviene añadirla a la fila de backlog "T-02g R-03" para que se limpie junto con las
-  demás cuando se toque el archivo.
+### R-08 — Qué anotar para T-04 — media
+1. Login: capturar el `ValueError` de `normalizar_email` (incluye no-`str`, caracteres prohibidos, espacios internos) y responder **el mismo** mensaje genérico de credenciales
+   inválidas, nunca 500 ni "correo inválido"; y ejecutar igualmente un `check_password_hash` contra un hash falso (tiempo uniforme), también cuando `normalizar_email` lanza o el correo no existe (enumeración por tiempo).
+2. Acotar la longitud de la contraseña (128, D-010) antes de hashear en el login (coste de scrypt). El hash ficticio del punto 1 se crearía al importar con costo real (~0,14 s), no con el rápido.
+3. `create-professional`: usar `normalizar_email` + las mismas reglas de longitud/regex que `validar_registro` (hoy viven en `auth.py`), `zona_chile()` para `creado_en`, y
+   reutilizar `es_correo_duplicado` (hoy en `auth.py`: no duplicarlo ni importarlo con ciclos; moverlo a `correo.py` o `db.py` sería razonable) para decir "ya existe" frente a un 500 en otro error; mensaje de error en español por `click`.
+4. La fixture de hash (R-07) y la prueba con `hash_real` de que el profesional se crea con scrypt real.
+5. Bases `agenda.db` creadas antes de T-03c pueden tener correos con U+034F, selectores, U+FFFD, etc. que hoy el login rechaza: solo importa si queda una base de desarrollo con datos (D-006: se recrea).
+6. R-04 (`type="email"`) afecta también al formulario de login.
 
-## Resumen
+### R-09 — `es_correo_duplicado`: sólido en el entorno actual, con una fragilidad futura — baja
+Evidencia: SQLite 3.45.1 / Python 3.13: `IntegrityError('UNIQUE constraint failed: usuarios.email')`, `sqlite_errorcode == 2067 (SQLITE_CONSTRAINT_UNIQUE)`; el mismo
+correo con otra capitalización (COLLATE NOCASE) da el mismo mensaje; un `id` duplicado da `SQLITE_CONSTRAINT_PRIMARYKEY` y no se confunde. `sqlite_errorcode` y la constante existen
+desde Python 3.11 (el mínimo del proyecto). El formato `UNIQUE constraint failed: tabla.columna` es estable desde SQLite 3.8; **si algún día el UNIQUE pasa a un índice de expresión**
+(p. ej. `lower(email)`), el mensaje será `index '…'` y todo duplicado daría 500: la prueba lo detectaría por un caso real solo si existe; las parametrizadas usan errores simulados.
+`db.rollback()`: **es correcto y no sobra**: tras el INSERT fallido `db.in_transaction` es `True` (comprobado); sin rollback la conexión de la petición queda con una transacción abierta que
+el cierre al final descarta, pero cualquier escritura posterior en la misma petición se mezclaría con ella. Sobrevive a mutación porque ninguna prueba lo observa; no es un defecto.
+Carrera real: 8 hilos con el mismo correo, 3 repeticiones: un solo 302, siete 200 con mensaje de duplicado, una fila, sin 500 ni "database is locked" (con el timeout de 5 s por defecto un
+bloqueo largo daría `OperationalError` -> 500, aceptable). Recomendación: backlog opcional: una prueba con el UNIQUE real (dos registros reales ya existen: `test_unique_de_usuarios_email...`) que asegure el mensaje, ya cubierta; ignorar el resto.
 
-| Id | Severidad | Recomendación |
+### R-10 — Pruebas de tzdata: correctas pero con tres detalles — baja
+- `test_con_tzdata_instalado_y_sin_zonas_en_el_sistema_funciona` y `test_requirements_pide_tzdata...` pasan solo con `tzdata` instalado; el mensaje de fallo lo explica. El implementador hizo `pip install tzdata`
+  (2026.5) en el entorno; **no está documentado en el repo más que en D-012 y en PROGRESS/Bloqueos**: `README`/`CLAUDE.md` ya mandan `pip install -r requirements.txt`, que lo instala, así que basta (informativa).
+- `test_las_pruebas_anteriores_no_dejan_la_cache_poblada` depende del orden (pasa sola trivialmente: lo comprobé corriéndola aislada) y solo vigila la prueba contigua, no a las otras. Es la que atrapa la mutación
+  "caché sin limpiar" (1 falla); suficiente, pero frágil con `pytest -p randomly` o `-k`. Backlog muy bajo.
+- Las pruebas por subproceso usan `env={"PYTHONTZPATH", "PATH": "", "SECRET_KEY"}` sin `SYSTEMROOT`; en Windows (que D-012 cita) Python puede no arrancar sin esa variable (no verificado; la suite ya
+  tenía este patrón desde T-03b). Backlog: copiar `SYSTEMROOT` si existe.
+- Aislamiento de caché OK: la fixture limpia antes y después; `test_sin_zona_horaria_el_registro_da_500...` pasa con la caché sucia de `test_registro.py` (ejecutado en conjunto, 61 passed).
+
+### R-11 — Criterio de término "notablemente más rápida" no se cumplió; la explicación es honesta pero el trabajo útil queda por hacer — baja
+Evidencia: 390 pruebas 11,0-11,5 s -> 470 pruebas 10,4-11,3 s. La mejora real está en `test_registro.py` (6,7 -> 2,7 s con 12 pruebas más); se la come +2,4 s de la prueba exhaustiva nueva y +68 pruebas más.
+La causa que da PROGRESS es cierta: con `--durations=0`, `setup` suma ~4,1 s (casi todo `test_esquema.py`, 281 pruebas con una base en disco por prueba) y `call` ~5,0 s. El texto de T-03c (0,2 s -> 5 s "por el scrypt") era una sobreestimación: el scrypt eran ~4 s de 11.
+PROGRESS lo reporta sin maquillar (regla 9), pero marca HECHA una tarea cuyo término literal no se cumplió. Recomendación: **tarea nueva baja** ("T-03d suite rápida"): fixture de `test_esquema` que cree el esquema una vez (base `:memory:` o copia
+de un archivo plantilla), marcar la exhaustiva como lenta o reducirla; meta realista ~6 s. O que el orquestador reescriba el criterio de T-03c como "registro más rápido" y cierre. No bloquea T-04.
+
+### R-12 — Calidad y alcance de lo editado en la documentación — baja
+- Dentro de lo permitido: D-010 (remite a D-012/D-013/D-015 y cambia `zona_chile()`), D-012, D-013 (plegados, `ValueError` no `str`, `isspace` incluye U+2028/2029/1680, y una línea "No cubierto por D-015"), D-014 (límite **global**: texto ahora correcto), D-019 nueva (justifica `conftest.py`/`pytest.ini` según la regla 10), TASKS (estado) y PROGRESS con nota de corrección. No toca SPEC, ARCHITECTURE, `schema.sql` ni REVIEW (`git diff` vacío para esos archivos).
+- D-019: "scrypt:16:1:1 (OpenSSL rechaza)" **verificado** (`memory limit exceeded`); "~0,13 a 0,4 s" de scrypt real: medí 0,14 s por hash y 0,005 s con el rápido.
+- D-013 dice "Hasta T-03b solo se rechazaban Cc y Cf" y el "No cubierto" nombra solo tres casos (ver R-01: es una clase). D-013 sí es larga; legible aún.
+- PROGRESS "Bloqueos": D-015 vs el texto de TASKS (que listaba hangul/braille/U+FFFD como "pasan hoy", dando a entender que se querían rechazar) era una contradicción real; el implementador la anotó e implementó D-015 literal en vez de detenerse (regla 6). Defendible, porque D-015 es la decisión humana y es explícito; la pregunta quedó registrada. La frase falsa de T-03b se corrigió con nota visible sin borrar el original: bien.
+- La pareja de pruebas `test_ni_el_relleno_hangul_ni_braille_ni_fffd_los_cubre_la_categoria` cierra el alcance en una prueba: si se adopta R-01 B hay que invertirla (ya lo dice el docstring).
+
+### R-13 — Otras observaciones menores — informativa
+- La prueba exhaustiva solo prueba un carácter aislado entre `a` y `b`; no cubre secuencias (p. ej. Hangul compuesto/jamo, que NFKC compone). Mutaciones relevantes las cubren las parametrizadas. Cuesta 2,4 s por corrida.
+- `normalizar_email` ahora lanza `ValueError("el correo debe ser texto")` también para `bytes`; el registro nunca la llama con no-`str`.
+- Si `normalizar_email` falla en el registro, el formulario devuelve `email_bruto.strip()` sin normalizar (correcto, se muestra tal cual escapado).
+
+## Resumen de recomendaciones
+
+| Id | Severidad | Destino |
 |---|---|---|
-| R-01 | informativa | ignorar |
-| R-02 | baja | backlog (comentario: formato congelado, comentarios fuera de las tablas) |
-| R-03 | informativa | ignorar |
-| R-04 | baja | T-05 valida `duracion_min` entero; decisión humana opcional sobre `typeof`; backlog: prueba que documente la limitación |
-| R-05 | informativa/baja | ignorar el mecanismo; backlog: 4 pruebas con `IntegrityError` desnudo |
-| R-06 | media-baja | backlog (ampliar la explicación de qué actualizar) |
-| R-07 | informativa | ignorar |
-| R-08 | informativa | anotar en T-05 / backlog existentes |
+| R-01 | media | decisión humana (opciones A/B/C); si B, tarea nueva |
+| R-04 | media (a confirmar) | tarea nueva pequeña o dentro de T-04 |
+| R-07, R-08 | media | anotar en T-04 |
+| R-06 | baja | backlog (`--strict-markers` + prueba de que el hash rápido está activo) |
+| R-11 | baja | tarea nueva baja (suite rápida) o reescribir el criterio |
+| R-03, R-09, R-10, R-12 | baja | backlog / ignorar |
+| R-02, R-05, R-13 | informativa | ignorar |
 
-Nada bloquea. T-02e cumple su criterio de término: las cuatro mutaciones citadas (`tipo`+`'otro'`, `estado`+`'cancelada'`, `rol`
-con `lower()`, tope en `duracion_min`) hacen fallar pruebas (9, 6, 7, 4) y además `ON UPDATE CASCADE` (2) y el `instr` de D-018 (6);
-`pytest` pasa con 390.
+## Veredicto
 
-**Veredicto: APROBADA.**
+**APROBADA.** La política D-015 opción 2 se implementó tal como D-015 la define (barrido exhaustivo sin C*/M* aceptados, `ñ` pre/descompuesta iguales), todas las mutaciones declaradas
+se reproducen, el hash rápido no puede llegar a producción y el marcador funciona, `es_correo_duplicado` es correcto y la carrera no produce 500. Quedan decisiones para el humano (R-01) y
+notas obligatorias para T-04 (R-04, R-07, R-08); el criterio de velocidad no se cumplió (R-11) pero está reportado con honestidad y no bloquea.

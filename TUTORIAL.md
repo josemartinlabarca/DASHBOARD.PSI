@@ -160,6 +160,19 @@ git conserva cada revisión aunque `REVIEW.md` se sobrescriba.
 - **Revisor: APROBADA.** Reprodujo el cierre del NUL con 23 valores (incluidos BLOB, enteros y NUL al inicio, medio y final). Hallazgos solo bajos: pruebas redundantes, un helper que no dice qué CHECK falló, y que T-02e debe incluir `instr(...)` al comparar el SQL. Todos quedaron en `TASKS.md`.
 - **Lección:** las mutaciones que escribe el propio autor reflejan lo que ya pensó. Una mutación **sistemática** (todas las posiciones × todas las variantes) encuentra lo que no pensó.
 
+### Vuelta 10 — T-02e Fijar el conjunto exacto del esquema
+- **Implementador:** comparó el SQL de cada tabla en `sqlite_master` con el esperado, la fila completa de `foreign_key_list` y valores vecinos inválidos. 390 pruebas; 5 mutaciones pedidas y 2 extra detectadas. Además hizo que cada rechazo falle por el CHECK **concreto**, no por "algún CHECK".
+- **Mi verificación:** diff solo en `tests/`, 3 entornos en verde, y 8 mutaciones propias (UNIQUE, DEFAULT, NOT NULL, ON DELETE, COLLATE…) todas detectadas.
+- **Revisor: APROBADA.** Probó 49 mutaciones (36 semánticas, todas detectadas; 13 inocuas). Hallazgos bajos al backlog; el esquema acepta valores no enteros en `duracion_min`, así que T-05 debe validarlo.
+- **Lección:** una prueba que compara el SQL exacto es una alarma de "esquema cambiado": falla también con reformateos inocuos, y eso es un costo de mantenimiento que conviene conocer.
+
+### Vuelta 11 — T-03c Cerrar hallazgos de T-03b (9 ítems)
+- **Implementador:** política de correo D-015 opción 2, `tzdata` incondicional, `ValueError` en entradas no `str`, `IntegrityError` distinguido, hash rápido en pruebas (D-019), pruebas exhaustivas de idempotencia NFKC. 470 pruebas.
+- **Honestidad útil:** reportó que el criterio "suite notablemente más rápida" **no** se cumplió (la lentitud viene de otro archivo) y que D-015 no cubre el relleno hangul ni el braille en blanco.
+- **Mi verificación:** diff dentro de lo autorizado, 3 entornos, 10 mutaciones propias: 9 detectadas y 1 sobrevive (quitar el registro del marcador `hash_real` solo da avisos; se pasa a T-04 con `--strict-markers`). También arreglé la plantilla de `DECISIONS.md`, que tragaba D-015…D-018 dentro de un bloque de código.
+- **Revisor: APROBADA** (R-01…R-13). Dos cosas a tener en cuenta: el campo `type="email"` del navegador bloquearía `señor@…` y anula el motivo de elegir la opción 2 (pasa a T-04), y una **nueva decisión tuya, D-020**, sobre qué hacer con caracteres invisibles que D-015 no cubre (no bloquea nada).
+- **Lección:** que un agente reporte con claridad lo que *no* logró es más valioso que un "todo bien". Premia esa conducta en tus prompts: "reporta lo que no se cumplió".
+
 ### Historial git resultante
 
 ```
@@ -190,9 +203,9 @@ docs: documentación base del proyecto Agenda Psi
 
 ## 4. Estado actual y qué sigue
 
-- Hecho: **T-01, T-02, T-02b, T-02d, T-03, T-03b, T-02c, T-02f, T-02g** (357 pruebas pasando).
-- **Decisiones tuyas ya tomadas:** D-007 (esquema), D-015 (correo), D-016 (borrar horas), D-017 (formato de fecha), D-018 (carácter nulo). No hay ninguna pendiente.
-- Siguiente, todas sin decisión tuya: **T-02e** (pruebas con el conjunto exacto de valores) → **T-03c** (hallazgos de T-03b) → **T-04** (login) → **T-05**.
+- Hecho: **T-01, T-02, T-02b, T-02d, T-03, T-03b, T-02c, T-02f, T-02g, T-02e, T-03c** (470 pruebas pasando).
+- **Decisiones tuyas ya tomadas:** D-007 (esquema), D-015 (correo), D-016 (borrar horas), D-017 (formato de fecha), D-018 (carácter nulo). Pendiente (no bloquea): **D-020** (caracteres invisibles en el correo; ver DECISIONS.md).
+- Siguiente, todas sin decisión tuya: **T-04** (login) → **T-05**.
 - Pendiente solo tuyo: autorizar (o no) que `app/correo.py` figure en `ARCHITECTURE.md`; es una línea de documentación.
 
 **Tu primer ejercicio:** lanza tú mismo la vuelta de T-02e con el prompt del Paso B y revisa el resultado con la lista del Paso C. Antes de dar por buena cualquier tarea, haz cinco preguntas extra: *¿rompió algo documentado?*, *¿las pruebas fallarían si quitara la protección?*, *¿el reporte afirma algo que no ejecutó?*, *¿cómo interactúa esto con las tareas futuras?* y *¿el arreglo propuesto realmente funciona?*
