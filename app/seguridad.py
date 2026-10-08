@@ -43,8 +43,26 @@ def verificar_csrf():
         abort(400, description=MENSAJE_CSRF)
 
 
+def no_almacenar_paginas_de_sesion(respuesta):
+    """`Cache-Control: no-store` y `Pragma: no-cache` en toda respuesta dinámica (R-03).
+
+    Se aplica a todo lo que no sea un archivo estático, en vez de enumerar rutas
+    privadas: así «atrás» tras el logout no muestra un panel guardado y una ruta
+    futura queda cubierta sin acordarse de nada. No se puede decidir por "la
+    vista leyó la sesión" porque Flask 3.1 marca `session.accessed` como True
+    siempre, y de todos modos `base.html` lee los mensajes flash en cada página.
+    Las respuestas dinámicas de esta app son pequeñas, así que perder su caché
+    no cuesta nada; los estáticos (endpoint `static`) conservan la suya.
+    """
+    if request.endpoint != "static":
+        respuesta.headers["Cache-Control"] = "no-store"
+        respuesta.headers["Pragma"] = "no-cache"
+    return respuesta
+
+
 def init_app(app):
     # Debe registrarse después de la exigencia de SECRET_KEY (D-008), que así
     # se ejecuta primero: sin clave no hay sesión que firmar.
     app.before_request(verificar_csrf)
+    app.after_request(no_almacenar_paginas_de_sesion)
     app.jinja_env.globals["csrf_token"] = generar_token

@@ -6,7 +6,7 @@ import pytest
 from werkzeug import security
 
 import app as paquete_app
-from app import auth, create_app
+from app import create_app
 
 # Se importan todos los módulos de `app` para que la fixture los encuentre: así
 # un módulo nuevo que haga `from werkzeug.security import generate_password_hash`
@@ -41,15 +41,13 @@ def _modulos_de_la_app_con_hash():
 
 @pytest.fixture(autouse=True)
 def hash_rapido(request, monkeypatch):
-    # El hash falso del login se cachea: se limpia para que no cruce pruebas
-    # con distinto costo (rápido / real).
-    auth.hash_falso.cache_clear()
+    # El hash falso del login vive en cada app (app.extensions), así que no
+    # cruza pruebas con distinto costo (rápido / real).
     if not request.node.get_closest_marker("hash_real"):
         monkeypatch.setattr(security, "generate_password_hash", generate_password_hash_rapido)
         for modulo in _modulos_de_la_app_con_hash():
             monkeypatch.setattr(modulo, "generate_password_hash", generate_password_hash_rapido)
     yield
-    auth.hash_falso.cache_clear()
 
 
 @pytest.fixture

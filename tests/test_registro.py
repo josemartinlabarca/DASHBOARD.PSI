@@ -397,3 +397,70 @@ def test_es_correo_duplicado_con_el_error_real_de_sqlite(app):
         con.close()
     assert auth.es_correo_duplicado(dup.value)
     assert not auth.es_correo_duplicado(nulo.value)
+
+
+# ------------------------------------------------ caracteres del nombre (R-07)
+
+NOMBRES_PROHIBIDOS = {
+    "salto de línea": "Ana\nPérez",
+    "retorno de carro": "Ana\rPérez",
+    "CRLF": "Ana\r\n[FALSO] Pérez",
+    "tabulación": "Ana\tPérez",
+    "ESC": "Ana\x1b[31mroja",
+    "nulo": "Ana\x00",
+    "NEL": "Ana\x85Pérez",
+    "separador de línea U+2028": "Ana Pérez",
+    "separador de párrafo U+2029": "Ana Pérez",
+    "bidi RLO": "Ana‮Érez",
+    "bidi LRM": "Ana‎",
+    "bidi aislante": "Ana⁦Pérez",
+    "ancho cero": "An​a",
+    "marca de orden de bytes": "﻿Ana",
+    "uso privado": "Ana",
+    "sin asignar": "Ana͸",
+}
+
+
+@pytest.mark.parametrize("nombre", list(NOMBRES_PROHIBIDOS.values()), ids=list(NOMBRES_PROHIBIDOS))
+def test_nombre_con_caracteres_de_control_o_invisibles_se_rechaza(app, client, nombre):
+    r = registrar(client, nombre=nombre)
+    assert r.status_code == 200
+    assert auth.MENSAJE_NOMBRE_CARACTERES in r.text
+    assert "saltos de línea" in auth.MENSAJE_NOMBRE_CARACTERES
+    assert usuarios(app) == []
+
+
+@pytest.mark.parametrize(
+    "nombre",
+    [
+        "Ana Pérez", "José Ñuñoa", "María-José O'Higgins", "D’Arcy", "Ana  María",
+        "Ângela Müller", "Nguyễn Văn", "李 小龍", "Zoë", "Dra. Pro", "Pérez, Ana",
+        "Ñuñez",  # ñ descompuesta: combinante Mn, no es categoría C*
+    ],
+)
+def test_nombres_legitimos_se_aceptan(app, client, nombre):
+    assert registrar(client, nombre=nombre).status_code == 302
+    assert usuarios(app)[0]["nombre"] == nombre
+
+
+def test_nombre_con_salto_de_linea_solo_en_los_bordes_se_recorta_y_se_acepta(app, client):
+    assert registrar(client, nombre="  Ana\n").status_code == 302
+    assert usuarios(app)[0]["nombre"] == "Ana"
+
+
+def test_validar_registro_comparte_la_regla_con_create_professional():
+    errores = auth.validar_registro("Ana\nPérez", "a@b.cl", "clave-segura-1")
+    assert errores == {"nombre": auth.MENSAJE_NOMBRE_CARACTERES}
+
+
+def test_un_sustituto_suelto_tambien_se_rechaza_aunque_no_pueda_llegar_por_http():
+    assert "nombre" in auth.validar_registro("Ana\ud800", "a@b.cl", "clave-segura-1")
+
+
+@pytest.mark.parametrize("posicion", [0, 5, 6, 50, 98, 99])
+def test_el_caracter_prohibido_se_detecta_en_cualquier_posicion_del_nombre(app, client, posicion):
+    nombre = "a" * posicion + "\u200e" + "a" * (99 - posicion)
+    assert len(nombre) == 100
+    r = registrar(client, nombre=nombre)
+    assert auth.MENSAJE_NOMBRE_CARACTERES in r.text
+    assert usuarios(app) == []

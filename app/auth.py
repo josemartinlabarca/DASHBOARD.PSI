@@ -2,6 +2,8 @@
 import re
 import secrets
 import sqlite3
+import threading
+import unicodedata
 from datetime import datetime
 from functools import lru_cache, wraps
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -10,6 +12,7 @@ import click
 from flask import (
     Blueprint,
     abort,
+    current_app,
     flash,
     g,
     make_response,
@@ -42,6 +45,9 @@ MENSAJE_SIN_ZONA_HORARIA = (
 MENSAJE_DUPLICADO = (
     "No pudimos registrarte con ese correo. Si ya tienes una cuenta, inicia "
     "sesión; si no, prueba con otro correo."
+)
+MENSAJE_NOMBRE_CARACTERES = (
+    "El nombre no puede incluir saltos de línea ni caracteres de control o invisibles."
 )
 MENSAJE_LOGIN_INVALIDO = "Correo o contraseña incorrectos."
 CLAVE_SESION_USUARIO = "usuario_id"
@@ -94,6 +100,16 @@ def crear_usuario(db, nombre, email, password, rol):
     db.commit()
 
 
+def tiene_caracteres_no_permitidos(texto):
+    """True si `texto` trae categorías `C*` (control, formato/bidi, uso privado...)
+    o separadores de línea/párrafo (`Zl`, `Zp`). Los espacios internos normales,
+    tildes, ñ, guiones y apóstrofes no entran aquí."""
+    return any(
+        unicodedata.category(c).startswith("C") or unicodedata.category(c) in ("Zl", "Zp")
+        for c in texto
+    )
+
+
 def validar_registro(nombre, email, password):
     """Devuelve un diccionario campo -> mensaje de error (vacío si todo está bien)."""
     errores = {}
@@ -101,6 +117,8 @@ def validar_registro(nombre, email, password):
         errores["nombre"] = "Escribe tu nombre."
     elif len(nombre) > NOMBRE_MAX:
         errores["nombre"] = f"El nombre no puede superar los {NOMBRE_MAX} caracteres."
+    elif tiene_caracteres_no_permitidos(nombre):
+        errores["nombre"] = MENSAJE_NOMBRE_CARACTERES
     if not email:
         errores["email"] = "Escribe tu correo."
     elif len(email) > EMAIL_MAX or not PATRON_EMAIL.match(email):
@@ -149,16 +167,44 @@ def registro():
 # ---------------------------------------------------------------- login ----
 
 
-@lru_cache(maxsize=1)
-def hash_falso():
+class HashFalso:
     """Hash de una contraseña aleatoria que nadie conoce, con el costo normal.
 
     Se verifica cuando el usuario no existe (o el correo es inaceptable) para
-    que esa respuesta tarde lo mismo que la de una contraseña errónea. Se crea
-    al usarlo (no al importar) con el mismo `generate_password_hash` que usa el
-    registro, de modo que siempre tiene el mismo costo que los hashes reales.
+    que esa respuesta tarde lo mismo que la de una contraseña errónea. Se usa
+    el mismo `generate_password_hash` del registro, así que tiene el costo real.
+    `obtener()` es seguro entre hilos: aunque lleguen varias peticiones a la vez
+    antes de que exista, el hash se calcula una sola vez (R-06).
     """
-    return generate_password_hash(secrets.token_urlsafe(16))
+
+    def __init__(self):
+        self._candado = threading.Lock()
+        self._valor = None
+
+    def obtener(self):
+        if self._valor is None:
+            with self._candado:
+                if self._valor is None:
+                    self._valor = generate_password_hash(secrets.token_urlsafe(16))
+        return self._valor
+
+
+def preparar_hash_falso(app, calcular_ahora):
+    """Crea el `HashFalso` de la app; lo calcula ya si la app va a servir.
+
+    En `flask run`, gunicorn y pruebas se calcula al construir la app, así el
+    primer login de un correo inexistente no es más lento (R-06). En los
+    comandos CLI de mantenimiento (`init-db`, `create-professional`...) no se
+    calcula: sumaría ~0,15 s de scrypt que no usan (se calcularía igual, bajo
+    candado, si alguna vez lo necesitaran).
+    """
+    app.extensions["hash_falso"] = HashFalso()
+    if calcular_ahora:
+        app.extensions["hash_falso"].obtener()
+
+
+def hash_falso():
+    return current_app.extensions["hash_falso"].obtener()
 
 
 def buscar_usuario_por_credenciales(email_bruto, password):

@@ -108,7 +108,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Término:** Pruebas: login correcto/incorrecto, paciente no accede a `/profesional` (US-3), el token CSRF cambia tras el login, el mensaje de error es idéntico para correo inexistente y contraseña errónea.
 
 ### T-04b — Cerrar hallazgos de la revisión de T-04 (sin decisiones humanas)
-- **Estado:** PENDIENTE
+- **Estado:** HECHA
 - **Depende de:** T-04
 - **Qué:** (1) **R-01 (media):** pruebas de CSRF en `/login` (POST sin token → 400; con token de otra sesión → 400; el token anterior al login ya no sirve); la mutación "eximir `/login` del CSRF" debe hacer fallar una prueba. (2) **R-03 (media):** `Cache-Control: no-store` (y `Pragma: no-cache`) en toda respuesta de páginas privadas y en `/login` tras autenticarse, con pruebas; verificar que el botón «atrás» tras el logout no muestra el panel (documenta lo que se pueda comprobar). (3) **R-05 (baja):** una prueba que compare cabeceras y código de estado entre los distintos fallos de login, y el borde del id de sesión (`2**63 - 1`, `2**63`, `0`, `-1`) sin 500. (4) **R-07 (baja):** el nombre (registro y `create-professional`) rechaza caracteres de control, saltos de línea, ESC y marcas bidi (categorías `C*`), con mensaje en español; pruebas. (5) **R-06 (baja):** crear `hash_falso()` al construir la app (o al primer arranque) para que el primer login de un correo inexistente no sea más lento y no se calcule varias veces en paralelo; prueba que lo fije.
 - **Término:** Las mutaciones "eximir `/login` del CSRF", "quitar `no-store`", "nombre con salto de línea aceptado" y "id `2**63` sin validar" hacen fallar al menos una prueba; `python3 -m pytest` pasa. Debe quedar HECHA **antes** de T-05.

@@ -1,10 +1,13 @@
 import re
 import sqlite3
+import threading
+import time
+from unittest.mock import patch
 
 import pytest
 from werkzeug.security import check_password_hash
 
-from app import auth
+from app import auth, create_app
 from app.db import init_db
 from tests.test_seguridad import extraer_token
 
@@ -300,23 +303,82 @@ def test_el_hash_falso_se_usa_solo_cuando_no_hay_usuario(app, client, monkeypatc
     iniciar(client, "nadie@example.cl", CLAVE)
     real, falso = llamadas
     assert real != falso
-    assert falso == auth.hash_falso()
+    with app.app_context():
+        assert falso == auth.hash_falso()
 
 
-def test_el_hash_falso_no_corresponde_a_ninguna_contrasena_conocida():
-    assert not check_password_hash(auth.hash_falso(), "")
-    assert not check_password_hash(auth.hash_falso(), CLAVE)
+def test_el_hash_falso_no_corresponde_a_ninguna_contrasena_conocida(app):
+    with app.app_context():
+        assert not check_password_hash(auth.hash_falso(), "")
+        assert not check_password_hash(auth.hash_falso(), CLAVE)
 
 
 @pytest.mark.hash_real
-def test_el_hash_falso_tiene_el_costo_real_de_los_hashes_de_usuario():
-    assert auth.hash_falso().startswith("scrypt:32768:8:1$")
+def test_el_hash_falso_tiene_el_costo_real_de_los_hashes_de_usuario(app):
+    with app.app_context():
+        assert auth.hash_falso().startswith("scrypt:32768:8:1$")
 
 
-def test_el_hash_falso_se_crea_al_usarlo_y_una_sola_vez():
-    assert auth.hash_falso.cache_info().currsize == 0
-    assert auth.hash_falso() == auth.hash_falso()
-    assert auth.hash_falso.cache_info().misses == 1
+def test_el_hash_falso_ya_existe_al_construir_la_app_y_no_se_recalcula(monkeypatch, tmp_path):
+    """R-06: el primer login de un correo inexistente no paga el scrypt extra."""
+    llamadas = []
+    real = auth.generate_password_hash
+
+    def contado(*args, **kwargs):
+        llamadas.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(auth, "generate_password_hash", contado)
+    app = create_app({"TESTING": True, "DATABASE": str(tmp_path / "x.db")})
+    assert len(llamadas) == 1  # calculado al construir, antes de cualquier petición
+    with app.app_context():
+        init_db()
+        primero = auth.hash_falso()
+        assert auth.hash_falso() == primero
+    cliente = app.test_client()
+    iniciar(cliente, "nadie@example.cl", CLAVE)
+    assert len(llamadas) == 1  # ni el hash falso ni el login lo recalculan
+
+
+def test_el_hash_falso_se_calcula_una_sola_vez_con_hilos_en_concurrencia():
+    """R-06: sin candado, 8 hilos en frío generarían 8 hashes distintos."""
+    llamadas = []
+    real = auth.generate_password_hash
+
+    def lento(*args, **kwargs):
+        llamadas.append(1)
+        time.sleep(0.05)  # ensancha la ventana de la carrera
+        return real(*args, **kwargs)
+
+    obtenido = auth.HashFalso()
+    resultados = []
+    barrera = threading.Barrier(8)
+
+    def trabajo():
+        barrera.wait()
+        resultados.append(obtenido.obtener())
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(auth, "generate_password_hash", lento)
+        hilos = [threading.Thread(target=trabajo) for _ in range(8)]
+        for h in hilos:
+            h.start()
+        for h in hilos:
+            h.join()
+    assert len(llamadas) == 1
+    assert len(set(resultados)) == 1 and len(resultados) == 8
+
+
+def test_los_comandos_cli_no_calculan_el_hash_falso(tmp_path):
+    """Decisión: init-db y similares no pagan el scrypt (se mide en PROGRESS)."""
+    app = create_app({"TESTING": True, "DATABASE": str(tmp_path / "x.db")})
+    assert app.extensions["hash_falso"]._valor is not None  # servir (sin click): calculado
+    with patch("app.click.get_current_context") as ctx:
+        ctx.return_value.command.name = "init-db"
+        otra = create_app({"TESTING": True, "DATABASE": str(tmp_path / "y.db")})
+    assert otra.extensions["hash_falso"]._valor is None
+    with otra.app_context():  # sigue funcionando si alguna vez se necesita
+        assert otra.extensions["hash_falso"].obtener()
 
 
 # ----------------------------------------------------- redirecciones
@@ -358,10 +420,167 @@ def test_usuario_borrado_con_sesion_viva_queda_sin_acceso(app, client):
     assert r.status_code == 302 and r.headers["Location"] == "/login"
 
 
-@pytest.mark.parametrize("valor", ["1", True, 1.0, None, [1], {"a": 1}, -1, 10**30])
-def test_id_de_sesion_con_tipo_o_valor_raro_no_autentica(app, client, valor):
+@pytest.mark.parametrize(
+    "valor, autentica",
+    [
+        ("1", False), (True, False), (1.0, False), (None, False), ([1], False),
+        ({"a": 1}, False), (-1, False), (0, False), (10**30, False),
+        (2**63, False),  # no cabe en un INTEGER de SQLite: sin esta guarda sería 500 (R-05)
+        (2**63 - 1, False),  # cabe, pero no existe ese usuario
+        (1, True),
+    ],
+)
+def test_id_de_sesion_con_tipo_o_valor_raro_no_autentica(app, client, valor, autentica):
     crear(app)
     client.get("/login")
     with client.session_transaction() as s:
         s["usuario_id"] = valor
-    assert client.get("/paciente").status_code == 302
+    r = client.get("/paciente")
+    assert r.status_code == (200 if autentica else 302)  # nunca 500
+
+
+# ------------------------------------------------------------ CSRF en /login
+
+
+def test_login_sin_token_da_400_y_no_inicia_sesion(app, client):
+    crear(app)
+    r = client.post("/login", data={"email": "ana@example.cl", "password": CLAVE})
+    assert r.status_code == 400
+    assert "usuario_id" not in sesion(client)
+
+
+@pytest.mark.parametrize("token", ["", "X", "0" * 64])
+def test_login_con_token_incorrecto_da_400(app, client, token):
+    crear(app)
+    client.get("/login")
+    datos = {"email": "ana@example.cl", "password": CLAVE, "csrf_token": token}
+    assert client.post("/login", data=datos).status_code == 400
+    assert "usuario_id" not in sesion(client)
+    r = client.post("/login", data={**datos, "csrf_token": ""}, headers={"X-CSRFToken": token})
+    assert r.status_code == 400
+
+
+def test_login_con_token_de_otra_sesion_da_400(app):
+    """Login CSRF: el atacante no puede usar su propio token en el navegador de la víctima."""
+    crear(app)
+    atacante, victima = app.test_client(), app.test_client()
+    token_ajeno = extraer_token(atacante.get("/login").text)
+    victima.get("/login")  # la víctima tiene su propia sesión y su propio token
+    datos = {"email": "ana@example.cl", "password": CLAVE, "csrf_token": token_ajeno}
+    assert victima.post("/login", data=datos).status_code == 400
+    assert "usuario_id" not in sesion(victima)
+
+
+def test_el_token_anterior_al_login_ya_no_sirve_para_volver_a_iniciar_sesion(app, client):
+    crear(app)
+    token_viejo = extraer_token(client.get("/login").text)
+    datos = {"email": "ana@example.cl", "password": CLAVE, "csrf_token": token_viejo}
+    assert client.post("/login", data=datos).status_code == 302  # el primero sirve
+    assert sesion(client)["csrf_token"] != token_viejo
+    assert client.post("/login", data=datos).status_code == 400  # ya rotó
+    assert client.post("/logout", data={"csrf_token": token_viejo}).status_code == 400
+
+
+def test_login_con_token_correcto_por_cabecera_funciona(app, client):
+    crear(app)
+    token = extraer_token(client.get("/login").text)
+    r = client.post(
+        "/login", data={"email": "ana@example.cl", "password": CLAVE},
+        headers={"X-CSRFToken": token},
+    )
+    assert r.status_code == 302
+
+
+# ------------------------------------------- fallos de login: cabeceras iguales
+
+CABECERAS_VARIABLES = {"date", "content-length", "set-cookie"}
+
+
+def cabeceras_estables(respuesta):
+    return {k.lower(): v for k, v in respuesta.headers.items() if k.lower() not in CABECERAS_VARIABLES}
+
+
+def test_los_fallos_de_login_tienen_las_mismas_cabeceras_y_estado(app, client):
+    """R-05: un fallo no puede distinguirse por una cabecera ni por el código."""
+    crear(app)
+    crear(app, email="pro@example.cl", rol="profesional")
+    casos = dict(CASOS_INVALIDOS)
+    casos["correo de un profesional con otra clave"] = ("pro@example.cl", "otra-clave-9")
+    vistos = {}
+    for nombre, (email, password) in casos.items():
+        r = iniciar(client, email, password)
+        vistos[nombre] = (r.status_code, cabeceras_estables(r))
+    referencia = vistos["contraseña errónea"]
+    assert referencia[0] == 200
+    for nombre, visto in vistos.items():
+        assert visto == referencia, nombre
+
+
+# ------------------------------------------------ no-store en páginas privadas
+
+
+def exigir_no_store(r):
+    assert r.headers.get("Cache-Control") == "no-store", (r.status_code, r.headers)
+    assert r.headers.get("Pragma") == "no-cache"
+
+
+@pytest.mark.parametrize(
+    "rol,panel", [("paciente", "/paciente"), ("profesional", "/profesional")]
+)
+def test_los_paneles_privados_no_se_almacenan(app, client, rol, panel):
+    crear(app, rol=rol)
+    r = iniciar(client)
+    exigir_no_store(r)  # el 302 del propio login
+    r = client.get(panel)
+    assert r.status_code == 200
+    exigir_no_store(r)
+
+
+@pytest.mark.parametrize(
+    "rol,ajeno", [("paciente", "/profesional"), ("profesional", "/paciente")]
+)
+def test_el_acceso_denegado_de_un_usuario_autenticado_no_se_almacena(app, client, rol, ajeno):
+    crear(app, rol=rol)
+    iniciar(client)
+    r = client.get(ajeno)
+    assert r.status_code == 403
+    exigir_no_store(r)
+
+
+def test_logout_y_las_redirecciones_a_login_no_se_almacenan(app, client):
+    crear(app)
+    exigir_no_store(client.get("/paciente"))  # sin sesión: 302 a /login
+    iniciar(client)
+    token = sesion(client)["csrf_token"]
+    r = client.post("/logout", data={"csrf_token": token})
+    assert r.status_code == 302
+    exigir_no_store(r)
+    exigir_no_store(client.get("/paciente"))  # tras el logout: 302 a /login
+
+
+@pytest.mark.parametrize("ruta", ["/login", "/registro", "/", "/no-existe"])
+def test_las_paginas_publicas_dinamicas_tampoco_se_almacenan(client, ruta):
+    exigir_no_store(client.get(ruta))
+
+
+def test_el_fallo_de_login_y_el_400_de_csrf_no_se_almacenan(app, client):
+    crear(app)
+    exigir_no_store(iniciar(client, "ana@example.cl", "otra-clave-9"))
+    exigir_no_store(client.post("/login", data={}))
+
+
+def test_una_ruta_futura_queda_cubierta_sin_hacer_nada(app, client):
+    @app.route("/ruta-futura")
+    def ruta_futura():
+        return "hola"
+
+    exigir_no_store(client.get("/ruta-futura"))
+
+
+def test_los_archivos_estaticos_conservan_su_cache(app, client, tmp_path):
+    (tmp_path / "x.css").write_text("body{}")
+    app.static_folder = str(tmp_path)
+    r = client.get("/static/x.css")
+    assert r.status_code == 200
+    assert "no-store" not in r.headers.get("Cache-Control", "")
+    assert "Pragma" not in r.headers

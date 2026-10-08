@@ -45,6 +45,7 @@ def create_app(test_config=None):
     app.register_blueprint(paciente.bp)
     app.register_blueprint(profesional.bp)
     app.cli.add_command(auth.create_professional_command)
+    auth.preparar_hash_falso(app, calcular_ahora=_se_va_a_servir())
 
     @app.route("/")
     def inicio():

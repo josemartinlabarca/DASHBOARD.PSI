@@ -124,6 +124,9 @@ def test_otra_integrityerror_no_se_disfraza_de_duplicado(runner, monkeypatch):
         (["--email", "pro​@example.cl", "--nombre", "X"], CLAVE, "correo válido"),
         (["--email", "sin-arroba", "--nombre", "X"], CLAVE, "correo válido"),
         (["--email", "pro@example.cl", "--nombre", "   "], CLAVE, "nombre"),
+        (["--email", "pro@example.cl", "--nombre", "Eve\nroja"], CLAVE, "saltos de línea"),
+        (["--email", "pro@example.cl", "--nombre", "Eve\x1b[31m"], CLAVE, "control"),
+        (["--email", "pro@example.cl", "--nombre", "Eve\u202e"], CLAVE, "invisibles"),
         (["--email", "pro@example.cl", "--nombre", "X"], "corta", "al menos 8"),
         (["--email", "pro@example.cl", "--nombre", "X"], "a" * 129, "128"),
     ],
@@ -158,3 +161,9 @@ def test_el_comando_esta_registrado_y_funciona_sin_secret_key(tmp_path):
     con = sqlite3.connect(tmp_path / "cli.db")
     assert con.execute("SELECT rol FROM usuarios").fetchall() == [("profesional",)]
     con.close()
+
+
+def test_nombre_legitimo_con_tilde_enie_y_apostrofe_se_acepta(app, runner):
+    r = crear_pro(runner, ["--email", "pro@example.cl", "--nombre", "Dra. María Ñanco-O'Higgins"])
+    assert r.exit_code == 0, r.output
+    assert filas(app)[0]["nombre"] == "Dra. María Ñanco-O'Higgins"
