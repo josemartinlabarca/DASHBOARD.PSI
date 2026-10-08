@@ -137,6 +137,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Estado:** PENDIENTE
 - **Depende de:** T-05, T-05b
 - **Qué:** `/paciente/horas` con horas libres futuras ordenadas (US-7).
+- **Nota (revisión de T-05b, R-01):** el filtro «futuras» debe usar la hora de Chile (no UTC) y llevar una prueba que lo fije: con el reloj entre «ahora» y «ahora en UTC» (3-4 h de diferencia), una hora de hoy aún futura debe aparecer; la mutación «comparar con la hora UTC» debe hacer fallar una prueba. Reutiliza `ahora_chile()`. Considera mover `a_segundos_utc` y `ahora_chile` a un módulo compartido (p. ej. `app/tiempo.py`, justificado en DECISIONS.md) porque T-07/T-08/T-10 lo necesitan.
 - **Término:** Prueba: solo aparecen horas libres y futuras.
 
 ### T-07 — Reservar hora
@@ -144,6 +145,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Depende de:** T-06
 - **Qué:** `POST /horas/<id>/reservar` con UPDATE atómico (D-003) y reglas 1 y 5.
 - **Nota (revisión de T-04b, R-10):** acotar el `id` de la ruta (`<int:id>`) a un máximo razonable (< 2**63) para que un id gigante dé 404 y no un 500; con prueba.
+- **Nota (revisión de T-05b, R-06):** las reglas de anticipación (24 h, §4) se calculan con instantes absolutos (aware → UTC), nunca con el reloj de pared; pruebas en las noches de cambio de horario.
 - **Término:** Pruebas: reserva exitosa; segunda reserva de la misma hora falla; paciente no puede tener dos a la misma hora.
 
 ### T-08 — Cancelar reserva
@@ -151,6 +153,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Depende de:** T-07
 - **Qué:** `POST /horas/<id>/cancelar` con anticipación mínima de 24 h (US-9); la hora vuelve a `libre`.
 - **Nota (revisión de T-04b, R-10):** acotar el `id` de la ruta (`<int:id>`) a un máximo razonable (< 2**63) para que un id gigante dé 404 y no un 500; con prueba.
+- **Nota (revisión de T-05b, R-06):** las reglas de anticipación (24 h, §4) se calculan con instantes absolutos (aware → UTC), nunca con el reloj de pared; pruebas en las noches de cambio de horario.
 - **Término:** Pruebas: cancelar con >24 h funciona, con <24 h se rechaza, la hora queda libre.
 
 ## Fase 4 — Notificaciones
@@ -239,6 +242,7 @@ en qué tarea conviene absorberlo.
 | T-05 R-06 | Werkzeug acepta dígitos Unicode en la URL (`%D9%A1` borró la hora 1): inocuo, pero ids de ruta deberían ser solo ASCII si se endurece | T-14 |
 | T-05 R-07 | El panel oculta las horas ya iniciadas pero aún no terminadas; decidir si se muestran | T-06/T-08 |
 | T-05 R-12 | La suite supera 35 s; el umbral de acción es 60 s | cuando supere 60 s |
+| T-05b R-02 | `buscar_solape` lee todas las horas del profesional (también las pasadas) dentro del bloqueo de escritura; con 50 000 filas y 12 procesos aparece «database is locked». Limitar a una ventana de fechas alrededor del candidato (0,16 ms medido) | T-14 |
 | T-02c #9 | En `tests/test_esquema.py` la cobertura de NOT NULL y FK es triplemente redundante y la rama `usuarios` de `test_not_null_rechaza_null` es poco legible | cuando se toque ese archivo |
 
 ---
