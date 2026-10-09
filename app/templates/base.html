@@ -3,15 +3,28 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <title>{% block titulo %}Agenda Psi{% endblock %}</title>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-  <main>
-    {% with mensajes = get_flashed_messages(with_categories=true) %}
-      {% for categoria, mensaje in mensajes %}
-        <p class="mensaje {{ categoria }}" role="status">{{ mensaje }}</p>
-      {% endfor %}
-    {% endwith %}
+  <a class="saltar" href="#contenido">Saltar al contenido</a>
+  <header class="cabecera">
+    <div class="cabecera-interior">
+      <a class="marca" href="{{ url_for('inicio') }}">
+        Agenda Psi
+      </a>
+    </div>
+  </header>
+  <main id="contenido">
+    {% block mensajes %}
+      {% with mensajes = get_flashed_messages(with_categories=true) %}
+        {% for categoria, mensaje in mensajes %}
+          <p class="mensaje {{ categoria }}" role="status">{{ mensaje }}</p>
+        {% endfor %}
+      {% endwith %}
+    {% endblock %}
     {% block contenido %}{% endblock %}
   </main>
 </body>

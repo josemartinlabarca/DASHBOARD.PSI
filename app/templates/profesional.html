@@ -6,6 +6,7 @@
   <section aria-labelledby="titulo-agenda">
     <h2 id="titulo-agenda">Próximas reservas</h2>
     {% if proximas %}
+      <div class="tabla-scroll" role="region" aria-label="Tabla de próximas reservas" tabindex="0">
       <table>
         <caption>Sesiones reservadas que aún no terminan (hora de Chile)</caption>
         <thead>
@@ -17,11 +18,13 @@
               <th scope="row">{{ sesion.inicio }}</th>
               <td>{{ sesion.duracion_min }} min</td>
               <td>{{ sesion.paciente }}</td>
-              <td>Reservada{% if sesion.en_curso %} (<strong>en curso</strong>){% endif %}. Para eliminarla, el paciente debe cancelar primero.</td>
+              <td>Reservada{% if sesion.en_curso %} (<strong>en curso</strong>){% endif %}</td>
             </tr>
           {% endfor %}
         </tbody>
       </table>
+      </div>
+      <p class="nota">Para eliminar una hora reservada, el paciente debe cancelarla primero.</p>
     {% else %}
       <p>No tienes sesiones reservadas próximas.</p>
     {% endif %}
@@ -30,6 +33,7 @@
   <section aria-labelledby="titulo-libres">
     <h2 id="titulo-libres">Horas libres</h2>
     {% if libres %}
+      <div class="tabla-scroll" role="region" aria-label="Tabla de horas libres" tabindex="0">
       <table>
         <caption>Horas publicadas sin reservar (hora de Chile)</caption>
         <thead>
@@ -51,17 +55,19 @@
           {% endfor %}
         </tbody>
       </table>
-    {% elif proximas %}
+      </div>
+    {% elif proximas or pasadas %}
       <p>No tienes horas libres publicadas.</p>
     {% else %}
       <p>Aún no tienes horas publicadas.</p>
     {% endif %}
-    <p><a href="{{ url_for('profesional.nueva_hora') }}">Agregar hora</a></p>
+    <p class="acciones"><a href="{{ url_for('profesional.nueva_hora') }}">Agregar hora</a></p>
   </section>
 
   <section aria-labelledby="titulo-pasadas">
     <h2 id="titulo-pasadas">Sesiones pasadas</h2>
     {% if pasadas %}
+      <div class="tabla-scroll" role="region" aria-label="Tabla de sesiones pasadas" tabindex="0">
       <table>
         <caption>Sesiones ya terminadas (hora de Chile)</caption>
         <thead>
@@ -77,6 +83,8 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
+      {% if hay_mas_pasadas %}<p class="nota">Se muestran las {{ tope_pasadas }} sesiones pasadas más recientes.</p>{% endif %}
     {% else %}
       <p>Todavía no tienes sesiones pasadas.</p>
     {% endif %}

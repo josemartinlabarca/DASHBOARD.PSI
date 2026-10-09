@@ -1,0 +1,378 @@
+/* Agenda Psi — hoja de estilos (T-13). Sin fuentes ni recursos externos: funciona sin conexión.
+   Tema claro por defecto; tema oscuro automático con prefers-color-scheme (contraste verificado). */
+
+:root {
+  --fondo: #f4f1ea;
+  --superficie: #ffffff;
+  --texto: #1f2a30;
+  --suave: #475660;
+  --borde: #cfc8b9;
+  --borde-campo: #6f7b85;
+  --primario: #2c6e69;
+  --primario-hover: #235a56;
+  --sobre-primario: #ffffff;
+  --enlace: #1b5a85;
+  --foco: #0b57d0;
+  --peligro: #a3231b;
+  --peligro-hover: #861c16;
+  --sobre-peligro: #ffffff;
+  --exito-fondo: #e4f1e8;
+  --exito-borde: #2b7a4b;
+  --exito-texto: #163a22;
+  --error-fondo: #fbe9e7;
+  --error-borde: #b3261e;
+  --error-texto: #5c1511;
+  --nueva-fondo: #e3f0ee;
+  --radio: 10px;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fondo: #12181b;
+    --superficie: #1b2327;
+    --texto: #e8edf0;
+    --suave: #aab6bd;
+    --borde: #36444b;
+    --borde-campo: #8896a0;
+    --primario: #7cc4bd;
+    --primario-hover: #95d3cc;
+    --sobre-primario: #0d1a19;
+    --enlace: #8fc5ea;
+    --foco: #8ab4f8;
+    --peligro: #f0948c;
+    --peligro-hover: #f7b0aa;
+    --sobre-peligro: #2a0b09;
+    --exito-fondo: #17301f;
+    --exito-borde: #5fb37c;
+    --exito-texto: #c3e8cf;
+    --error-fondo: #3a1818;
+    --error-borde: #f08a82;
+    --error-texto: #ffd3cf;
+    --nueva-fondo: #1c3533;
+    color-scheme: dark;
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--fondo);
+  color: var(--texto);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 1.0625rem;
+  line-height: 1.6;
+  overflow-wrap: break-word;
+}
+
+/* --- Estructura --------------------------------------------------------- */
+
+.saltar {
+  position: absolute;
+  left: 0.5rem;
+  top: -4rem;
+  z-index: 10;
+  padding: 0.7rem 1rem;
+  background: var(--superficie);
+  color: var(--enlace);
+  border: 2px solid var(--enlace);
+  border-radius: var(--radio);
+}
+.saltar:focus { top: 0.5rem; }
+
+.cabecera {
+  background: var(--superficie);
+  border-bottom: 1px solid var(--borde);
+}
+.cabecera-interior {
+  max-width: 64rem;
+  margin: 0 auto;
+  padding: 0.25rem 1rem;
+}
+.marca {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  font-weight: 700;
+  font-size: 1.15rem;
+  color: var(--texto);
+  text-decoration: none;
+}
+
+main {
+  max-width: 64rem;
+  margin: 0 auto;
+  padding: 1.25rem 1rem 3rem;
+}
+
+h1 { font-size: 1.75rem; line-height: 1.25; margin: 0.5rem 0 1rem; }
+h2 { font-size: 1.3rem; line-height: 1.3; margin: 0 0 0.75rem; }
+p { margin: 0 0 0.9rem; }
+
+section {
+  background: var(--superficie);
+  border: 1px solid var(--borde);
+  border-radius: var(--radio);
+  padding: 1rem;
+  margin: 0 0 1.25rem;
+}
+
+/* --- Enlaces y foco ------------------------------------------------------- */
+
+a { color: var(--enlace); text-underline-offset: 0.2em; }
+a:hover { text-decoration-thickness: 2px; }
+
+main a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+}
+
+:focus-visible {
+  outline: 3px solid var(--foco);
+  outline-offset: 2px;
+}
+
+/* --- Botones -------------------------------------------------------------- */
+
+button,
+.accion-principal a,
+.acciones a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.75rem;
+  min-width: 2.75rem;
+  padding: 0.55rem 1.15rem;
+  border: 2px solid var(--primario);
+  border-radius: var(--radio);
+  background: var(--primario);
+  color: var(--sobre-primario);
+  font: inherit;
+  font-weight: 600;
+  line-height: 1.25;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+button:hover,
+.accion-principal a:hover,
+.acciones a:hover {
+  background: var(--primario-hover);
+  border-color: var(--primario-hover);
+  text-decoration: none;
+}
+
+/* Reservar hora: la acción principal del paciente, más grande. */
+.accion-principal a {
+  min-height: 3.25rem;
+  padding-inline: 1.6rem;
+  font-size: 1.15rem;
+}
+
+/* Acciones secundarias: contorno, sin relleno. */
+form[action="/logout"] button,
+form[action$="/leidas"] button,
+.acciones a.secundaria {
+  background: transparent;
+  color: var(--texto);
+  border-color: var(--borde-campo);
+}
+form[action="/logout"] button:hover,
+form[action$="/leidas"] button:hover,
+.acciones a.secundaria:hover {
+  background: var(--nueva-fondo);
+  border-color: var(--texto);
+}
+
+/* Acciones que deshacen algo: cancelar y eliminar. */
+form[action$="/cancelar"] button,
+form[action$="/eliminar"] button {
+  background: transparent;
+  color: var(--peligro);
+  border-color: var(--peligro);
+}
+form[action$="/cancelar"] button:hover,
+form[action$="/eliminar"] button:hover {
+  background: var(--peligro);
+  color: var(--sobre-peligro);
+}
+
+form[action="/logout"] { margin-top: 1.5rem; }
+section form { margin: 0 0 0.9rem; }
+td form, th form { margin: 0; }
+
+/* --- Formularios ---------------------------------------------------------- */
+
+form p { margin-bottom: 1.1rem; }
+form br { display: none; }
+
+label {
+  display: block;
+  margin-bottom: 0.3rem;
+  font-weight: 600;
+}
+
+input[type="text"],
+input[type="password"],
+input[type="date"],
+input[type="time"],
+input[type="number"] {
+  display: block;
+  width: 100%;
+  max-width: 28rem;
+  min-height: 2.75rem;
+  padding: 0.5rem 0.75rem;
+  border: 2px solid var(--borde-campo);
+  border-radius: 8px;
+  background: var(--superficie);
+  color: var(--texto);
+  font: inherit;
+}
+
+input[aria-invalid="true"] { border-color: var(--error-borde); }
+
+/* --- Mensajes: se distinguen por texto y borde, no solo por color ---------- */
+
+.mensaje,
+.error {
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  border: 1px solid var(--borde-campo);
+  border-left-width: 8px;
+  background: var(--superficie);
+  color: var(--texto);
+}
+.mensaje { margin: 0 0 1rem; }
+.error {
+  display: block;
+  margin: 0.4rem 0 0;
+  background: var(--error-fondo);
+  border-color: var(--error-borde);
+  color: var(--error-texto);
+}
+form > .error { margin: 0 0 1.1rem; }
+.mensaje.exito {
+  background: var(--exito-fondo);
+  border-color: var(--exito-borde);
+  color: var(--exito-texto);
+}
+.mensaje.error {
+  background: var(--error-fondo);
+  border-color: var(--error-borde);
+  color: var(--error-texto);
+}
+.mensaje.exito::before { content: "Listo: "; font-weight: 700; }
+.mensaje.error::before,
+.error:not(.mensaje)::before { content: "Error: "; font-weight: 700; }
+
+/* --- Tablas: el desplazamiento horizontal queda dentro de la tabla -------- */
+
+.tabla-scroll {
+  overflow-x: auto;
+  margin: 0 0 1rem;
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.97rem;
+}
+caption {
+  caption-side: top;
+  padding: 0.6rem 0.75rem;
+  text-align: left;
+  font-weight: 600;
+  color: var(--suave);
+}
+th, td {
+  padding: 0.6rem 0.75rem;
+  text-align: left;
+  vertical-align: top;
+  border-top: 1px solid var(--borde);
+}
+thead th { background: var(--nueva-fondo); font-size: 0.9rem; }
+tbody th { font-weight: 600; min-width: 7rem; }
+td .nota-fila { color: var(--suave); }
+
+@media (max-width: 40em) {
+  main { padding-inline: 0.75rem; }
+  section { padding: 0.65rem; }
+  th, td { padding: 0.5rem 0.45rem; }
+  tbody th { min-width: 5.7rem; }
+  td:nth-child(2) { white-space: nowrap; }
+  table { font-size: 0.9rem; }
+  thead th { font-size: 0.8rem; }
+  td button { padding-inline: 0.45rem; font-size: 0.85rem; }
+}
+
+/* --- Notificaciones ------------------------------------------------------- */
+
+.campana {
+  display: inline-block;
+  min-width: 1.9em;
+  padding: 0.05em 0.55em;
+  border-radius: 999px;
+  background: var(--primario);
+  color: var(--sobre-primario);
+  font-size: 0.8em;
+  font-weight: 700;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.notificaciones {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+}
+.notificaciones li {
+  margin: 0 0 0.6rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--borde);
+  border-left-width: 8px;
+  border-radius: 8px;
+}
+.notificaciones li.no-leida {
+  background: var(--nueva-fondo);
+  border-color: var(--primario);
+  border-left-style: solid;
+}
+.notificaciones li.no-leida strong { text-decoration: underline; text-underline-offset: 0.2em; }
+.notificaciones li.leida {
+  color: var(--suave);
+  border-left-color: var(--borde);
+}
+.notificaciones li.leida strong { color: var(--texto); }
+
+.notificaciones a { display: flex; width: fit-content; }
+
+.nota { color: var(--suave); font-size: 0.95rem; }
+
+/* --- Pantalla ancha ------------------------------------------------------- */
+
+@media (min-width: 48em) {
+  main { padding-top: 2rem; }
+  h1 { font-size: 2.1rem; }
+  section { padding: 1.4rem 1.6rem; }
+}
+
+/* --- Preferencias de movimiento ------------------------------------------- */
+
+@media (prefers-reduced-motion: no-preference) {
+  html { scroll-behavior: smooth; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition: none !important;
+    animation: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+.acciones { display: flex; flex-wrap: wrap; gap: 0.6rem; }

@@ -25,6 +25,7 @@ from .tiempo import FORMATO_GUARDADO, mostrar_inicio
 bp = Blueprint("profesional", __name__)
 
 DURACION_DEFECTO = 50  # US-4
+TOPE_PASADAS = 20  # T-13: el panel muestra las 20 sesiones pasadas más recientes
 DURACION_MAX = 480  # minutos (8 horas); límite de la aplicación, no del esquema
 ID_MAX = 2**63 - 1  # mayor INTEGER de SQLite: un id mayor es 404, no 500 (R-10)
 FORMATO_FECHA = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")  # solo dígitos ASCII
@@ -322,6 +323,8 @@ def dashboard():
     usuario = usuario_actual()
     db, ahora = get_db(), tiempo.ahora_chile()
     proximas, pasadas = listar_agenda(db, usuario["id"], ahora)
+    hay_mas_pasadas = len(pasadas) > TOPE_PASADAS  # solo se muestran las más recientes
+    pasadas = pasadas[:TOPE_PASADAS]
     libres = listar_horas_libres(db, usuario["id"], ahora)
     avisos, sin_leer, hay_mas = notificaciones.listar_de_usuario(db, usuario["id"])
     # Solo se enlaza a una reserva que está en la agenda de ESTE profesional (la lista sale
@@ -331,6 +334,7 @@ def dashboard():
         aviso["enlazable"] = aviso["hora_id"] is not None and aviso["hora_id"] in propias
     return render_template(
         "profesional.html", usuario=usuario, proximas=proximas, pasadas=pasadas, libres=libres,
+        hay_mas_pasadas=hay_mas_pasadas, tope_pasadas=TOPE_PASADAS,
         notificaciones=avisos, sin_leer=sin_leer, hay_mas=hay_mas,
         tope=notificaciones.TOPE_PANEL, endpoint_leidas="profesional.marcar_notificaciones_leidas",
     )

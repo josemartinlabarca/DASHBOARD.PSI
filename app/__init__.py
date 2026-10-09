@@ -39,10 +39,11 @@ def create_app(test_config=None):
 
     db.init_app(app)
 
-    from . import auth, notificaciones, paciente, profesional, seguridad
+    from . import auth, errores, notificaciones, paciente, profesional, seguridad
 
     # Después de _preparar_secret_key: su before_request (D-008) corre primero.
     seguridad.init_app(app)
+    errores.init_app(app)
     app.register_blueprint(auth.bp)
     app.register_blueprint(paciente.bp)
     app.register_blueprint(profesional.bp)

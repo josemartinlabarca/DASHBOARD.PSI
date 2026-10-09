@@ -54,7 +54,8 @@ def no_almacenar_paginas_de_sesion(respuesta):
     Las respuestas dinámicas de esta app son pequeñas, así que perder su caché
     no cuesta nada; los estáticos (endpoint `static`) conservan la suya.
     """
-    if request.endpoint != "static":
+    # Un error de un estático (404, 403) sí es una página dinámica de error: también no-store.
+    if request.endpoint != "static" or respuesta.status_code >= 400:
         respuesta.headers["Cache-Control"] = "no-store"
         respuesta.headers["Pragma"] = "no-cache"
     return respuesta

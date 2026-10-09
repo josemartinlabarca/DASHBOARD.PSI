@@ -146,8 +146,8 @@ def test_agenda_con_paciente_duracion_y_orden(app, pro_id, pro, ana, beto):
     insertar(app, pro_id, "2026-10-14T09:00:00")  # libre: no es una reserva
     html = panel(pro)
     assert agenda(html) == [
-        "13-10-2026 09:00 45 min Beto Soto Reservada. Para eliminarla, el paciente debe cancelar primero.",
-        "15-10-2026 10:00 50 min Ana Pérez Reservada. Para eliminarla, el paciente debe cancelar primero.",
+        "13-10-2026 09:00 45 min Beto Soto Reservada",
+        "15-10-2026 10:00 50 min Ana Pérez Reservada",
     ]
     assert "(hora de Chile)" in seccion(html, "Próximas reservas")
 

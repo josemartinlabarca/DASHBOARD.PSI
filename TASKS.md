@@ -237,7 +237,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Término:** Prueba de contenido por rol; revisión visual en navegador.
 
 ### T-13 — Estilo y plantilla base amigable
-- **Estado:** PENDIENTE
+- **Estado:** HECHA (2026-10-09 10:55)
 - **Depende de:** T-11, T-12
 - **Qué:** `style.css` con tonos calmados, diseño responsivo, mensajes de error claros.
 - **Notas de las revisiones de T-11, T-11b y T-12 (para no perderlas):** (a) clases CSS ya presentes y sin estilo: `campana`, `no-leida`, `leida`, `notificaciones`, `mensaje`; no suprimir `:focus-visible` y no indicar «nueva/leída» solo por color; (b) favicon: hoy `/favicon.ico` da 404 en la primera carga; (c) las pruebas dependen del HTML literal (`<h2>Mis reservas</h2>`, `<h2>Historial</h2>`, `th scope`, `caption`): si T-13 los cambia, actualizar a la vez los ayudantes de prueba; (d) 400/413 en español con enlace para volver (backlog T-03 #6); enlazar `style.css` en `base.html`; (e) contenido del panel del profesional: «Horas libres» dice «Aún no tienes horas publicadas» cuando solo hay sesiones pasadas, la frase «Para eliminarla, el paciente debe cancelar primero» se repite en cada fila, y las sesiones pasadas no tienen tope; (f) botón/enlace «Reservar hora» destacado en el panel del paciente.

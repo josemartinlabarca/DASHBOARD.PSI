@@ -19,7 +19,7 @@
             <strong>{{ {'confirmacion': 'Confirmación', 'recordatorio': 'Recordatorio', 'cancelacion': 'Cancelación'}[n.tipo] }}</strong>
             ({{ 'leída' if n.leida else 'nueva' }}{% if n.creada %}, {{ n.creada }}{% endif %})<br>
             {{ n.mensaje }}
-            {% if n.enlazable %}<a href="#reserva-{{ n.hora_id }}">Ver la reserva</a>{% endif %}
+            {% if n.enlazable and n.tipo != 'cancelacion' %}<a href="#reserva-{{ n.hora_id }}">Ver la reserva</a>{% endif %}
           </li>
         {% endfor %}
       </ul>

@@ -3,9 +3,11 @@
 {% block contenido %}
   <h1>Horas disponibles</h1>
   {% if horas %}
+    <div class="tabla-scroll" role="region" aria-label="Tabla de horas disponibles" tabindex="0">
     <table>
+      <caption>Horas libres que se pueden reservar (hora de Chile)</caption>
       <thead>
-        <tr><th>Fecha y hora</th><th>Duración</th><th>Profesional</th><th>Reservar</th></tr>
+        <tr><th scope="col">Fecha y hora</th><th scope="col">Duración</th><th scope="col">Profesional</th><th scope="col">Reservar</th></tr>
       </thead>
       <tbody>
         {% for hora in horas %}
@@ -23,6 +25,7 @@
         {% endfor %}
       </tbody>
     </table>
+    </div>
   {% else %}
     <p>Por ahora no hay horas disponibles. Vuelve a revisar más tarde.</p>
   {% endif %}

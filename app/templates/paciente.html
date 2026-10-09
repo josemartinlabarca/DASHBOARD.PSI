@@ -15,10 +15,12 @@
     {% endif %}
   </section>
 
-  <p><a href="{{ url_for('paciente.horas_libres') }}">Reservar hora</a></p>
+  <p class="accion-principal"><a href="{{ url_for('paciente.horas_libres') }}">Reservar hora</a></p>
 
+  <section>
   <h2>Mis reservas</h2>
   {% if reservas %}
+    <div class="tabla-scroll" role="region" aria-label="Tabla de mis reservas" tabindex="0">
     <table>
       <caption>Reservas que aún no empiezan (hora de Chile)</caption>
       <thead>
@@ -44,12 +46,16 @@
         {% endfor %}
       </tbody>
     </table>
+    </div>
   {% else %}
     <p>No tienes reservas próximas.</p>
   {% endif %}
+  </section>
 
+  <section>
   <h2>Historial</h2>
   {% if pasadas %}
+    <div class="tabla-scroll" role="region" aria-label="Tabla del historial" tabindex="0">
     <table>
       <caption>Sesiones ya terminadas (hora de Chile)</caption>
       <thead>
@@ -65,9 +71,11 @@
         {% endfor %}
       </tbody>
     </table>
+    </div>
   {% else %}
     <p>Todavía no tienes sesiones pasadas.</p>
   {% endif %}
+  </section>
 
   {% include "_notificaciones.html" %}
 

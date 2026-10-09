@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block titulo %}Crear cuenta · Agenda Psi{% endblock %}
 {% block contenido %}
+  <section>
   <h1>Crear cuenta</h1>
   <form method="post" action="{{ url_for('auth.registro') }}" novalidate>
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -8,25 +9,26 @@
     <p>
       <label for="nombre">Nombre</label><br>
       <input type="text" id="nombre" name="nombre" value="{{ nombre }}"
-             maxlength="100" required autocomplete="name">
+             maxlength="100" required autocomplete="name"{% if errores.nombre %} aria-invalid="true"{% endif %}>
       {% if errores.nombre %}<br><span class="error" role="alert">{{ errores.nombre }}</span>{% endif %}
     </p>
 
     <p>
       <label for="email">Correo</label><br>
       <input type="text" inputmode="email" id="email" name="email" value="{{ email }}"
-             maxlength="254" required autocomplete="email">
+             maxlength="254" required autocomplete="email"{% if errores.email %} aria-invalid="true"{% endif %}>
       {% if errores.email %}<br><span class="error" role="alert">{{ errores.email }}</span>{% endif %}
     </p>
 
     <p>
       <label for="password">Contraseña (mínimo 8 caracteres)</label><br>
       <input type="password" id="password" name="password"
-             minlength="8" maxlength="128" required autocomplete="new-password">
+             minlength="8" maxlength="128" required autocomplete="new-password"{% if errores.password %} aria-invalid="true"{% endif %}>
       {% if errores.password %}<br><span class="error" role="alert">{{ errores.password }}</span>{% endif %}
     </p>
 
     <p><button type="submit">Crear cuenta</button></p>
   </form>
   <p><a href="{{ url_for('inicio') }}">Volver al inicio</a></p>
+  </section>
 {% endblock %}

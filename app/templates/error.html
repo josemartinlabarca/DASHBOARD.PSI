@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block titulo %}{{ titulo }} · Agenda Psi{% endblock %}
+{# Las páginas de error no leen los mensajes flash ni la sesión: así también salen cuando la causa es la sesión o la clave. #}
+{% block mensajes %}{% endblock %}
+{% block contenido %}
+  <section>
+    <h1>{{ titulo }}</h1>
+    <p>{{ mensaje }}</p>
+    {% if detalle %}<p>{{ detalle }}</p>{% endif %}
+    <p class="nota">Código del error: {{ codigo }}</p>
+    <p class="acciones"><a href="{{ url_for('inicio') }}">Volver al inicio</a></p>
+  </section>
+{% endblock %}
