@@ -245,6 +245,13 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 
 ## Fase 6 — Cierre
 
+### T-13b — Eliminar la prueba intermitente por el token CSRF (hallazgo del orquestador en T-13)
+- **Estado:** PENDIENTE
+- **Depende de:** T-13
+- **Qué:** `tests/test_dashboard_profesional.py::test_filas_ilegibles_se_omiten_sin_romper` (T-12) afirma `"abc" not in html`, pero la página lleva el token CSRF (64 caracteres hexadecimales aleatorios) y a veces contiene «abc» por azar: la suite falla de forma intermitente (reproducido 2 veces en ~25 corridas completas; salida guardada: `'abc' is contained here: ... value="cabcb8136c8f...">`). (1) Corregir esa prueba para que busque el valor ilegible en el lugar correcto (p. ej. en el texto de las filas/tablas de agenda, no en toda la página) o use un marcador imposible de generar por azar (p. ej. `duracion_min='no-numero-xyz!'`). (2) **Auditar todas las pruebas** que afirmen la ausencia de una subcadena corta en una página completa (`not in html`, `not in r.text`, etc.) cuando la página incluye el token CSRF u otro valor aleatorio, y corregir las que puedan fallar por azar (sin debilitar las aserciones). (3) Añadir una prueba/guarda que reproduzca el problema de forma determinista (por ejemplo fijando el token de sesión a un valor que contenga «abc» y verificando que las pruebas de paneles siguen pasando).
+- **Término:** con el token CSRF forzado a un valor que contiene «abc», «xyz», «00», «<», etc., las pruebas de paneles y de ausencia de texto pasan; la mutación «volver a `"abc" not in html` sobre toda la página» hace fallar al menos una prueba; `python3 -m pytest` pasa 3 veces seguidas sin variables.
+- **Origen:** corrida repetida de la suite del orquestador durante la verificación de T-13.
+
 ### T-14 — Recorrido de punta a punta y revisión final
 - **Estado:** PENDIENTE
 - **Depende de:** T-13
