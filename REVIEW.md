@@ -1,89 +1,82 @@
-# REVIEW.md — Revisión de T-12 (dashboard del profesional)
+# REVIEW.md — Revisión de T-13 (estilo, errores, favicon) y T-13b (guarda del token CSRF)
 
-Revisor: commit `2f5bb74` (más `a06e9d9`, que solo corrige una hora en PROGRESS), rama `agentes/loop`.
-Contrastado con SPEC (US-6, US-4, US-5, §4, §5, §6), D-016, D-029, D-033, D-034, D-035, D-036 y la entrada de PROGRESS.
-Todo lo medido se ejecutó en copias bajo el scratchpad (`r12`, `r12p`, `mut12/*`, `r12nav`); el repo no se tocó.
+Revisor: commits `b386820` (T-13) y `33a614b` (T-13b), rama `agentes/loop`. Contrastado con SPEC §6, TASKS (T-13 con las notas a–f, T-13b), D-008, D-009, D-014, D-024, D-037, D-038 y las últimas entradas de PROGRESS.
+Todo lo medido se ejecutó en copias bajo el scratchpad (`base`, `rep1..6`, `shot`, `f500`, `mut_*`, `iso`); el repo no se tocó (`git status` limpio, sin `agenda.db` ni `outbox.log`). Servidor de capturas en el puerto 5191, cerrado por PID.
 
-## Resumen de lo que se verificó ejecutando
+## Qué se verificó ejecutando
 
-- Suite completa en copia de `HEAD`: **1677 OK** (47,96 s) y también con los archivos en orden inverso (1677 OK, 48,6 s). Sin `outbox.log` ni `agenda.db` residuales; `git status` del repo limpio.
-- `tests/test_dashboard_profesional.py` también en orden inverso de pruebas (53 OK).
-- 25 mutaciones propias sobre `app/` (ver R-07).
-- Servidor real (Flask, puerto 5121, base y outbox en el scratchpad, cerrado por PID) + `curl` para roles/CSRF/`no-store`, y Chromium de `/opt/pw-browsers` con Playwright para el recorrido.
-- Comparación byte a byte del HTML de `/paciente` antes (`8d85ee6`) y después del commit.
+- Suite completa sobre copias de `HEAD`: **9 corridas, 9 × 1711 OK** (6 repeticiones sin variables, 1 de control, 1 con los archivos de `tests/` en orden inverso, 1 con `AGENDA_PSI_CSRF_TOKEN=abcdeadbeef0000cabc00abcdeadbeef0000cabc00abcdeadbeef0000cabc00a`). Tiempos 50–62 s (las más lentas, mientras yo corría capturas en paralelo en una máquina de 2 núcleos). Con 9 corridas no se puede *medir* una intermitencia del ~8 %; la garantía real es que no queda ninguna aserción vulnerable (ver abajo). `tests/test_estilo.py` y `tests/test_token_csrf_hostil.py` pasan solos y en cualquier orden; sin archivos residuales.
+- Capturas reales con Chromium + Playwright a **360, 390 y 1280 px, tema claro y oscuro**: inicio, registro (y con errores), login (y con error), 404, 405, panel del paciente (reservas, historial, 4 notificaciones, nueva/leída), horas libres, panel del profesional (agenda, libres, una «no reservable», pasadas, notificaciones), agregar hora (y con error), flash de reserva, foco con Tab. Mirados los PNG; medí con JavaScript el desbordamiento de página y de cada `.tabla-scroll` y el tamaño de todos los enlaces/botones/campos.
+- Contraste WCAG con mi propio script sobre los colores reales de `style.css` (29 pares × 2 temas). Texto: peor par 5,07 (primario sobre `nueva-fondo`, claro) y 5,93 (blanco sobre botón); texto principal 11–15; borde de campos 3,84–4,33 (claro) y 5,25–5,90 (oscuro); foco ≥ 5,46. Coincide con lo declarado en PROGRESS. Sin hallazgos de contraste.
+- Errores contra servidor real y en copia: 404, 405 (con `Allow`), 400 de CSRF (D-009 intacto: un POST a ruta inexistente o con `PUT` sigue dando 400), 413 (cuerpo de 20 kB), 403, todos en español, con `Cache-Control: no-store` y sin trazas. 500 forzado con una excepción propia y con `sqlite3.OperationalError` de ruta inexistente, con `create_app()` de producción (sin TESTING): la página (889 bytes) no contiene el texto de la excepción, la ruta, «Traceback» ni «nonexistent». Con `render_template` roto sale el HTML mínimo en español. Sin `SECRET_KEY` el 500 sale en español y sin «SECRET_KEY»/«RuntimeError».
+- `/static`: `/static/../app/schema.sql`, `%2e%2e`, `..%2f`, `..\`, `%00`, `/static/` y `/static` dan 404 en español (sin listado de directorio, sin lectura fuera de `static/`); `/static//etc/passwd` redirige (308) sin leer nada. `/favicon.ico` sigue en 404 pero el `<link rel="icon">` evita la petición. Sin `style=` ni `<script>` en `/`; sin URL externas en HTML ni en la hoja.
+- 18 mutaciones propias (ver R-05 y la tabla al final).
+- Fechas de PROGRESS/DECISIONS/TASKS contra `git log` (comprobado mecánicamente, ver R-08).
+
+## Qué vi en las capturas
+
+Diseño limpio y calmado, coherente en claro y oscuro; jerarquía clara; botones de ≥ 44 px (ningún enlace, botón ni campo de las páginas medidas mide menos de 44 px); sin scroll horizontal de página en ningún ancho (`scrollWidth == clientWidth` en las 58 capturas); formularios y errores legibles (borde + prefijo «Error:», no solo color); nueva/leída se distinguen por texto «(nueva)/(leída)», subrayado del título y borde, no solo por color; el enlace «Saltar al contenido» aparece al primer Tab con anillo de foco; el foco es visible en tablas, botones y campos. A 390 y 1280 px no vi defectos. A **360 px** vi los defectos R-01 y R-02. No probé 320 px, Firefox/Safari, lector de pantalla ni un celular real.
 
 ## Hallazgos
 
-### R-01 (baja) «Ver la reserva» engañoso en avisos viejos cuando la hora se vuelve a reservar
-`enlazable` solo comprueba que `hora_id` esté en la agenda propia (`proximas`), no que el aviso hable de esa reserva. Reproducido (copia, prueba ad hoc): Ana reserva la hora, la cancela y Beto la reserva. El profesional ve tres avisos y **los tres** llevan «Ver la reserva» apuntando a la fila de Beto, incluido «Cancelación: Ana Pérez canceló… **La hora quedó libre.** Ver la reserva» (contradictorio). No hay fuga de datos (la fila es propia) y el enlace es solo un ancla en la misma página; el mismo patrón existe en `/paciente` (si el paciente reserva de nuevo la misma hora).
-Recomendación: backlog para T-13/T-14 (p. ej. no enlazar los avisos de tipo `cancelacion`, o solo el aviso más reciente por `hora_id`). No bloquea.
+### R-01 (media) A 360 px la columna «Cancelar»/«Eliminar» queda cortada, también con el foco, y las fechas se parten
+Medido: `Tabla de mis reservas` 339 px de contenido en 311 visibles (paciente); `Tabla de próximas reservas` 317>311 y `Tabla de horas libres` 337>311 (profesional), en claro y oscuro. Se ve el encabezado «Cancelar» recortado y el botón como «Cancela» (`png/light-360-pac-panel.png`, `dark-360-pro-panel.png`); al tabular hasta el botón, el anillo de foco también queda cortado por el borde derecho (`f-light-tab-cancelar.png`). No hay pista visual de que se puede deslizar (en celular la barra no se ve). Además las fechas se parten a mitad («12-10-» / «2026 11:00»), lo que a esta anchura cuesta leerlas. El implementador lo reconoció como «respaldo previsto»; contra el Término («sin texto ilegible») es un defecto menor pero real: la acción más destructiva de la pantalla es la que se ve cortada. A 390 px no ocurre.
+Recomendación: tarea nueva chica antes o dentro de T-14 (solo CSS): quitar `white-space: nowrap` de la 2.ª columna o acortar «50 min», reducir `padding` y `min-width` de `tbody th`, no partir la fecha (`white-space: nowrap` en la primera columna con fuente menor) o mostrar el botón bajo la fecha en móvil; medir también 320 px.
 
-### R-02 (baja) El orden por fecha de agenda y de libres depende del plan de consulta y las pruebas no lo distinguen
-Las mutaciones «quitar `horas.sort(...)` en `listar_horas_libres`» (M21), «quitar `por_venir.sort(...)` en `listar_agenda`» (M22) y «ordenar solo por inicio sin desempate» (M23) **sobreviven** las 423 pruebas de paneles/horas/notificaciones. Causa: el `SELECT` no tiene `ORDER BY` y SQLite devuelve las filas por el índice `UNIQUE(profesional_id, inicio)`, que ya está en orden de fecha; el `sort` de Python (instantes absolutos, D-034) solo cambia algo con datos que el flujo normal no produce (horas ambiguas/inexistentes insertadas por SQL). En la práctica son mutantes casi equivalentes, pero el orden «garantizado» hoy es accidental (un cambio de índice o de plan lo rompería sin aviso). Las pasadas sí están protegidas (`reverse=True`, M15 muere).
-Recomendación: backlog (T-14): una prueba unitaria que alimente `listar_horas_libres`/`listar_agenda` con filas en orden distinto al del índice (p. ej. una base sin ese índice con `DROP INDEX`, igual que `permitir_varios_profesionales`) o un `ORDER BY` explícito además del `sort`.
+### R-02 (baja) Flash de reserva dice «Listo: Listo, reservaste tu hora…»
+La hoja antepone «Listo: » a todo flash de éxito (`.mensaje.exito::before`) y `paciente.MENSAJE_CONFIRMACION` ya empieza con «Listo,». Capturado en `f-dark-flash-reserva.png`. Es el único flash que repite la palabra.
+Recomendación: tarea nueva (una línea: quitar «Listo, » del mensaje y ajustar las pruebas que lo fijan) o backlog.
 
-### R-03 (baja) La hora inventada sigue en `TASKS.md` y en `DECISIONS.md` (regla 8)
-`a06e9d9` corrigió solo PROGRESS (09:35, la hora real del commit). Quedan con **09:45** (posterior al propio commit): `TASKS.md` línea 230 («HECHA (2026-10-09 09:45)») y `DECISIONS.md` D-036 («Fecha: 2026-10-09 09:45»). Es la misma hora inventada; tres documentos ya no concuerdan. (Tercera vez que el implementador inventa la hora: T-06 R-07 dejó anotado endurecer con una comprobación automática «si reincide».)
-Recomendación: el orquestador corrige las dos líneas (el revisor no edita esos archivos) y decide si abre la tarea de la comprobación automática del backlog (`T-06 R-07`), que ya reincidió.
+### R-03 (media-baja) Con sesión iniciada, la marca del encabezado y «Volver al inicio» llevan a un inicio que parece de visitante
+Reproducido con `curl` con la cookie de Ana: `GET /` muestra «Crear cuenta» e «Iniciar sesión»; la cabecera nueva (T-13) solo tiene un enlace, la marca, que va a `/`. Desde `/paciente/horas`, `/profesional/horas/nueva` o una página de error no hay forma visible de volver al panel (solo «Volver a mi panel» en las dos primeras) ni de cerrar sesión. El implementador anotó solo lo de las páginas de error; el problema es mayor porque la marca está en todas las páginas. Las páginas de error no pueden leer la sesión (D-008), así que la solución no está allí.
+Recomendación: **decisión humana** (SPEC §6.1 dice «Inicio / login»): redirigir `/` al panel si hay sesión, o mostrar «Ir a mi panel» en `inicio.html` si la hay; luego tarea pequeña con prueba. Entra también «cierre de sesión en `/paciente/horas`» (T-06 R-04).
 
-### R-04 (baja) D-036 dice «función única» para las 24 h, pero `reservar_hora` conserva su propia comparación
-`paciente.es_reservable` la usan `listar_horas_libres_futuras` y el rótulo del profesional, pero `reservar_hora` (`app/paciente.py:276`) sigue con `faltan_s <= ANTICIPACION_RESERVAR_S`. Son equivalentes hoy (revisé el borde a mano y con la prueba de 24 h exactas, que además compara con lo que ofrece `/paciente/horas`), pero la prueba nueva no ata el rótulo a la **acción** de reservar: si alguien cambia solo uno, el panel podría decir «reservable» y el POST rechazar.
-Recomendación: backlog; que `reservar_hora` llame a `es_reservable` o una prueba de coherencia (POST a 24 h exactas y a 24 h + 1 s).
+### R-04 (media) La guarda de T-13b tiene falsos negativos por detectar nombres de variable
+`tests/test_token_csrf_hostil.py` selecciona pruebas con la regex `not in <…>(html|.text|texto|cuerpo|.data)`. Mutación en copia (3 pruebas nuevas añadidas a `test_dashboard_paciente.py`, token hostil forzado; las tres fallan al forzarlo): solo se selecciona la que usa `html`; **no** se detectan `assert "abc" not in ana.get("/paciente").get_data(as_text=True)` ni `pagina = ana.get(...).text; assert "dead" not in pagina`. Hoy hay también 7 aserciones reales de ausencia sobre `x.get(...).text`/`panel(pro)` que la regex no selecciona (`test_dashboard_profesional.py:354,355,421,453`, `test_cancelar.py:123`, `test_reservar.py:407`, `test_estilo.py:210,269,292`); revisé las 9: ninguna usa un texto hexadecimal, así que **no hay riesgo vigente**. Mi barrido con `ast` de *todas* las constantes de texto de `tests/` en `not in`/`.count()` que sean solo `0-9a-f` encontró una sola (`'db'`, `test_crear_profesional.py:353`, que mira una lista de sentencias SQL, no una página). La guarda sí mata la mutación declarada (volver a `"abc" not in html`: falla `...[abc-dead-beef-ceros]`) y suma ~9 s a la suite (que ya anda en ~57 s; el umbral del backlog T-04b R-08 es 60 s). El nombre `AGENDA_PSI_CSRF_TOKEN` solo se lee en `tests/conftest.py` (grep en `app/`: ninguna ruta lee esa variable; `app/` solo lee `SECRET_KEY`, `DATABASE`, `OUTBOX_PATH`) y el marcador `token_aleatorio` es de pytest: no hay filtración a producción.
+Recomendación: backlog / tarea chica en T-14: añadir una prueba determinista sin subproceso que recorra `tests/` con `ast` y falle ante cualquier `x not in …`/`.count(x) == 0` cuyo literal sea hexadecimal corto (sin depender de nombres de variable), o correr la suite completa con un token hostil en el recorrido final (+~55 s).
 
-### R-05 (informativa) La suite ya era de ~48 s antes de T-12; las pruebas nuevas cuestan 1,3 s
-Medido en la misma máquina: padre `8d85ee6` 1621 pruebas en 47,6 s; `HEAD` 1677 en 48,0 s. `--durations=0` sobre `test_dashboard_profesional.py`: 94 fases (setup+call) suman 1,32 s (máximo 0,03 s cada una). Las 25 más lentas de toda la suite son las de siempre (exhaustivas de `correo`, procesos, `tzset`). El «antes ~37 s» no se reproduce: no hay causa evitable en T-12; es variación de la máquina. El umbral de acción del backlog (60 s) no se alcanza.
-Recomendación: ignorar.
+### R-05 (baja) Funciones de accesibilidad sin prueba: sobreviven 5 mutaciones
+Con `tests/test_estilo.py` + paneles + `test_horas`/`test_roles`/`test_seguridad` (358 pruebas) NO falla nada al: (a) quitar el enlace «Saltar al contenido»; (b) quitar `id="contenido"` (deja el enlace roto); (c) quitar `tabindex="0"` de las tablas con scroll (no se podrían recorrer con teclado); (d) quitar el subrayado de las notificaciones nuevas (queda el texto «(nueva)», pero la prueba no lo ata a la hoja); (e) quitar `aria-invalid` de los campos de «Agregar hora» (solo se prueba el de registro; login sin prueba, como ya anotaba T-04 R-09). Las pruebas de la hoja son de subcadena (`min-height: 2.75rem in CSS` basta con que aparezca en cualquier regla). Mueren, con el motivo declarado: `description` de Werkzeug visible, estado 200 en error, sin `Allow` en el 405, sin `no-store` en error de estático, `lang="en"`, enlazar avisos de cancelación, sin tope de pasadas, contraste bajo, sin `prefers-reduced-motion: reduce`, `style=` en línea, `outline` de foco en 0, 500 que filtra la excepción, sin `<link rel="icon">`.
+Recomendación: backlog (T-14 o cuando se toque `test_estilo.py`).
 
-### R-06 (informativa) Pruebas eliminadas/reescritas: iguales o más fuertes
-- `test_con_pocas_notificaciones_no_hay_aviso_de_tope` → `test_aviso_de_tope_solo_si_hay_mas_que_el_tope[19/20/21]` (más fuerte: añade 20 → sin aviso, 21 → aviso, cuenta de `<li>` y contador) y `test_el_tope_del_panel_del_paciente_sale_de_la_constante`.
-- Aserción de orden en `tests/test_horas.py`: pasó de «01-03 antes de 02-03» (orden por fecha entre libre y reservada) a «02-03 (reservada) antes de 01-03 (libre)» (solo orden de secciones). Es más débil en sí misma, pero el orden por fecha dentro de cada sección se prueba en el archivo nuevo (agenda, libres, pasadas; salvo la salvedad de R-02) y las secciones separadas hacen que la aserción antigua ya no tenga sentido.
-- No hay pérdida de cobertura que detecte una mutación: todas las mutaciones relevantes mueren (R-07).
+### R-06 (informativa) Filas del backlog etiquetadas «T-13» que no se absorbieron ni se re-etiquetaron
+Hechas: T-01 #3–4, T-03 #6, T-05 R-04, T-06 R-04 (caption/scope en horas libres), T-12 R-01. Sin hacer ni mencionadas en PROGRESS: **T-06 R-01** (`/paciente/horas` sin tope), **T-06 R-04** (cierre de sesión, día de la semana, hora de término), **T-08e R-11** (mensaje de las 24 h exactas «menos» → «no más de», mensaje de solape, README regla 7), **T-04 R-09** (mensajes de Click, pruebas de accesibilidad del login). La tarea T-13 no las exigía, pero la tabla las dejó con «T-13».
+Recomendación: orquestador las reetiqueta a T-14/backlog.
 
-### R-07 (informativa) Mutaciones propias (25, sobre copias; pruebas: paneles, horas, horas libres y notificaciones)
-Mueren por la razón declarada (primer fallo): `es_reservable` con `>=` (borde 24 h, test parametrizado); agenda y libres sin filtro de profesional (`test_la_agenda_filtra_por_profesional`); enlace sin comprobar propiedad y enlace por «hora_id no nulo» (`test_enlace_solo_a_una_reserva…`); `hay_mas` con `>=` (caso 20) y sin recorte (caso 21); `20` fijo en la plantilla (`test_el_tope_sale_de_la_constante`); `|safe` en el mensaje y en el nombre del paciente (prueba de XSS); ruta de leídas con `login_requerido` (`test_el_paciente_no_puede_usar_la_ruta…`); libres que incluyen las ya empezadas; «reservable» siempre verdadero; pasadas con `>=` (borde exacto de «termina ahora»); orden por `creada_en`; pasadas en orden ascendente; mostrar el correo en vez del nombre; singular del flash; `th scope="row"`; botón de leídas siempre visible; contador acotado al tope.
-**Sobreviven:** M21, M22, M23 (ver R-02) y M16 (`en_curso` con `<= fin`), que es equivalente: una sesión que termina justo ahora ya es «pasada» y nunca llega a esa condición.
-El truco `permitir_varios_profesionales` es honesto y está aislado: es un ayudante previo de `tests/test_login.py` (docstring explícito), hace `DROP INDEX IF EXISTS un_solo_profesional` solo en la base temporal de la prueba (una base nueva por prueba, fixture `app`); la suite en orden inverso pasa y `test_esquema`/`test_crear_profesional` siguen probando la regla real. Límite: esas pruebas modelan un escenario que la base real no admite (D-023), pero solo para comprobar el filtro por `profesional_id`.
+### R-07 (informativa) Los «cambios fuera del alcance» son legítimos y están probados
+`app/profesional.py` (`TOPE_PASADAS = 20` y `hay_mas_pasadas`) cumple la nota (e) de T-13; la mutación «quitar el tope» muere (`test_las_sesiones_pasadas_del_profesional_tienen_tope`). `app/seguridad.py` (`or respuesta.status_code >= 400`) hace que el 404/403 de `/static` lleve `no-store` (D-024); la mutación de revertirlo muere (`test_404_de_un_estatico_tambien_es_no_store`) y los 200 de estáticos conservan su caché (`Cache-Control: no-cache` con ETag, comprobado). `_notificaciones.html` (sin «Ver la reserva» en cancelaciones, R-01 de T-12) probado y la mutación muere. Todo está descrito en D-037. `errores.py` no cambia códigos de estado (mutación a 200 muere), conserva `Allow` y deja el 400 de CSRF (D-009) y el 413 (D-014, `MAX_CONTENT_LENGTH` = 16 kB) como estaban. Una observación menor: `HTML_MINIMO` usa `lang="es-CL"` sin `<head>`/viewport (aceptable como último recurso).
 
-### R-08 (informativa) Aislamiento y seguridad: sin hallazgos
-Verificado con servidor real y `curl`: anónimo `GET /profesional` 302 a `/login`, `POST` ruta de leídas sin sesión 400 (CSRF antes que rol); paciente 403 en ambas rutas (el cuerpo no contiene datos del profesional); POST sin token 400, token falso 400, token de **otro usuario** 400; `GET` a la ruta POST 405; `Cache-Control: no-store` en `/profesional` (profesional y 403 del paciente). XSS: nombre de profesional `Dra. <i>Pro</i>`, pacientes `Ana <b>Pérez</b>` y `Beto <img src=x onerror=alert(1)>` salen como texto en agenda, avisos y saludo; ningún diálogo en Chromium. Solo se muestra el nombre del paciente (nunca el correo; prueba y mutación). Flujo T-05 intacto (comprobado con prueba ad hoc): reservar → eliminar da 302 sin borrar → cancelar → eliminar OK → los dos avisos quedan con `hora_id` NULL, sin enlace y sin «reserva-None».
+### R-08 (informativa) Documentación: veraz; horas coinciden con `git log`
+Comprobado mecánicamente: cada encabezado `### [fecha hora]` de PROGRESS coincide al minuto con el commit que lo introdujo (`T-13 10:55` = `b386820` 10:55:39; `T-13b 11:35` = `33a614b` 11:35:32), igual `Fecha` de D-037/D-038 y `HECHA (…)` de TASKS (T-13 10:55, T-13b 11:35); ninguna es posterior a su commit (la hora real al revisar es 11:51). Las cifras de PROGRESS que pude comprobar son ciertas: 1711 pruebas, contrastes (5,93; 3,84–4,33), 28 pruebas en `test_estilo.py`, 7 pruebas con `token_aleatorio` (1 + 2 + 4), reproducción de `abc` con el token hostil. Una imprecisión leve: PROGRESS dice «capturas a 390 y 1280 px» y luego cita el problema de 360 px (medido a mano, no capturado); y T-13b afirma «revisadas 185 líneas»: mi barrido independiente confirma su conclusión.
+**Pendientes del humano en `ARCHITECTURE.md`** (el archivo no se actualiza desde T-08d): `errores.py`, `error.html`, `_notificaciones.html`, `static/style.css` y `favicon.svg` (solo figura `static/ # style.css`), `correo.py`, `tiempo.py`, `notificaciones.py`, y las rutas `POST /notificaciones/leidas` (paciente) y `POST /profesional/notificaciones/leidas`, más el comando `send-reminders`. Solo `seguridad.py` y `static/` están.
 
-### R-09 (informativa) Plantilla compartida y panel del paciente
-Diff del HTML de `/paciente` (mismo estado, 3 no leídas + 1 leída, nombre con HTML) entre `8d85ee6` y `HEAD`: **idéntico salvo una línea en blanco** que añade el `include`. `th scope`, `caption`, `aria-label` de la campana y clases `campana`, `notificaciones`, `leida`, `no-leida` intactos. Aviso de tope: profesional con 19/20/21/25 (parametrizado) y `TOPE_PANEL` leído de Python (con 3 y con 5), paciente con 19/20/21 y constante; el 25 del paciente lo cubre la prueba de T-11b. El contador cuenta todas (consulta `COUNT` aparte) aunque solo se vean 20.
+## Para T-14
 
-### R-10 (informativa) Detalles de contenido y UX (para T-13, sin tarea nueva)
-- Con solo sesiones pasadas y ninguna hora libre, «Horas libres» dice «Aún no tienes horas publicadas» (el `elif proximas` ignora `pasadas`); inexacto, no grave.
-- «Para eliminarla, el paciente debe cancelar primero.» se repite en cada fila de la agenda (ya lo dice el implementador).
-- La hora libre ya empezada no aparece en ninguna parte y no se puede eliminar (T-05 R-07 del backlog, sin cambio); `Sesiones pasadas` no tiene tope ni paginación (como T-06 R-01 para libres del paciente): con años de uso crecerá sin límite.
-- Las notificaciones quedan al final de la página; en 390 px hay que bajar tres secciones para ver «Confirmación» nueva (SPEC §6.5 lista agenda, libres y notificaciones en ese orden, así que cumple; decisión de diseño para T-13).
+1. Recorrido §9 (registro → reserva → confirmación → recordatorio → cancelación): el recordatorio exige adelantar `inicio` por SQL o ajustar la redacción de §9 (D-029; nota de T-10). Hacerlo también a 360/390 px con la hoja real y mirar R-01.
+2. README: cron con periodicidad < 24 h (p. ej. cada 15 min) y ejemplo de crontab; `DATABASE` y `OUTBOX_PATH` iguales a los del servidor web; el comando sale con código 1 si falla; `OUTBOX_PATH` relativo/enlaces (T-09 R-04); regla 7 de la cancelación; «solo en tu máquina» junto a `--debug`.
+3. Cabeceras/CSP: no hay `style=` ni scripts en línea ni recursos externos, así que una CSP `default-src 'self'` debería funcionar (probarlo de verdad; el SVG del favicon es propio); faltan `X-Content-Type-Options`, `X-Frame-Options`/`frame-ancestors`, cookie `Secure` (T-03 #2, T-11b R-04).
+4. Backlog completo con severidad «T-14» más R-03 (inicio con sesión), R-04 y R-05 de esta revisión, y las filas de R-06.
+5. `AGENDA_PSI_CSRF_TOKEN` es solo de pruebas: no documentarla en el README de usuario; correr una vez la suite con token hostil en el cierre.
 
-### R-11 (informativa) Navegador (Chromium + Playwright, servidor real)
-Profesional con 5 horas (una a ~3 h «no reservable», cuatro más), dos pacientes que reservan 3. A 1280 y a 390 px: `scrollWidth == clientWidth` (sin scroll horizontal). La hora a menos de 24 h sale «Libre · no reservable (faltan 24 horas o menos…)»; la agenda lista pacientes y duraciones; avisos con «Ver la reserva» a las filas propias. Con Tab hasta «Marcar todas como leídas» y Enter: flash «Marcaste 3 notificaciones como leídas.», contador 0, botón ausente, avisos pasan a «leída». Sin estilos aún (T-13): las tablas a 390 px se ven apretadas (fechas en tres líneas) pero legibles. **No probé:** 25 notificaciones ni cancelación que borra la hora en navegador (cubiertas por pruebas), lector de pantalla, ni foco visible más allá del anillo por defecto.
+## Mutaciones ejecutadas (copia de `HEAD`, `-x`, 358 pruebas de estilo/paneles/horas/roles/seguridad)
 
-### R-12 (informativa) Documentación
-- PROGRESS es veraz en lo que pude reproducir (1677 OK; mutaciones; navegador; cambios en pruebas existentes). La hora de la entrada ya está corregida (ver R-03 para TASKS/DECISIONS). Admite que reutilizó trabajo sin confirmar de una vuelta interrumpida y que lo revisó; el diff final es coherente y completo (no encontré código muerto ni restos).
-- «Estado actual» (Fase 5, T-12 hecha, próxima T-13) es coherente con TASKS. Sin contradicciones de contenido entre SPEC, D-029/D-034/D-035/D-036 y el código.
-- **Pendientes del humano en `ARCHITECTURE.md`** (el agente no puede editarlo; conviene juntarlos en una sola edición): (1) `POST /profesional/notificaciones/leidas` (profesional) — D-036; (2) `POST /notificaciones/leidas` (paciente) — D-035, aún sin añadir; (3) plantilla `_notificaciones.html` (compartida) y las filas de `profesional.py` («dashboard con agenda, libres y notificaciones») y `paciente.py`/`notificaciones.py` (`marcar_leidas`, `mensaje_marcadas`, `listar_de_usuario`); (4) `app/correo.py` (D-013) y `app/tiempo.py` no figuran en el árbol de módulos; D-036 solo menciona (1) y la plantilla, así que (2) y (4) solo quedan en D-035/D-013.
+| Mutación | Resultado |
+|---|---|
+| mostrar `error.description` | muere (`test_404_en_espanol`) |
+| error con estado 200 | muere (`test_404_en_espanol`) |
+| 405 sin `Allow` | muere (`test_405_en_espanol_conserva_allow`) |
+| error de estático sin `no-store` | muere (`test_404_de_un_estatico_tambien_es_no_store`) |
+| `lang="en"` | muere (`test_todas_las_paginas_enlazan_la_hoja_y_el_favicon`) |
+| enlazar avisos de cancelación | muere (`test_los_avisos_de_cancelacion_no_enlazan_a_la_reserva`) |
+| sin tope de pasadas | muere (`test_las_sesiones_pasadas_del_profesional_tienen_tope`) |
+| `--suave` #aaaaaa | muere (`test_contraste_de_la_paleta[claro]`) |
+| sin `prefers-reduced-motion: reduce` / foco con `outline: 0` | mueren (`test_la_hoja_cuida_foco_movimiento_y_tema`) |
+| `style=` en línea en `login.html` | muere (`test_ninguna_plantilla_usa_estilos_ni_scripts_en_linea`) |
+| 500 que añade la excepción | muere (`test_500_en_espanol_sin_filtrar_la_excepcion`) |
+| sin `<link rel="icon">` | muere |
+| sin enlace «Saltar», sin `id="contenido"`, sin `tabindex`, sin subrayado de «nueva», sin `aria-invalid` en `nueva_hora` | **sobreviven** (R-05) |
+| guarda T-13b: `get_data(as_text=True)` y variable intermedia | **no detectadas** (R-04) |
 
-### R-13 (informativa) Notas para T-13 y T-14
-- **T-13:** las pruebas de T-12 dependen de HTML literal: `<h1>` sin atributos y `<h2` (cuatro), `<caption>` (3), `<th scope="col">` (11) y `<th scope="row">` (3), `<h2 ...>` + texto inicial («Próximas reservas», «Horas libres», «Sesiones pasadas», «Notificaciones»), cierre `</main>` en `base.html` y `class="no-leida"`/`"leida"`; si se añaden clases, actualizar a la vez `test_el_html_es_accesible`, `seccion()` y `mensajes_listados`. Las pruebas importan ayudantes de otros 5 archivos de pruebas (acoplamiento). Estilos pendientes: `.campana`, `li.leida`/`li.no-leida`, tablas a 390 px, el «no reservable» (hoy solo `<strong>` + texto, no depende del color: mantenerlo así), resumir el texto repetido de la agenda, anillo de foco. Favicon 404 (R-09 de T-11) y páginas 400/404 en español siguen en T-13. Orden de secciones: decidir si el profesional prefiere avisos primero (R-10).
-- **T-14:** recorrido §9 con el profesional: crear horas, una a <24 h («no reservable»), reservar con dos pacientes, cancelar, eliminar y ver `hora_id` NULL; «Marcar todas como leídas» con más de 20; README: cron < 24 h, `DATABASE`/`OUTBOX_PATH` iguales a los del servidor y código de salida 1 (T-10 R-05/R-06); backlog: R-01, R-02, R-04 de este informe; comprobación automática de la hora (R-03).
+## Veredicto
 
-## Resumen
-
-| # | Severidad | Tema | Recomendación |
-|---|---|---|---|
-| R-01 | baja | «Ver la reserva» en avisos viejos tras re-reservar la hora | backlog T-13/T-14 |
-| R-02 | baja | Orden de agenda/libres solo por índice; mutantes M21–M23 sobreviven | backlog T-14 |
-| R-03 | baja | Hora 09:45 inventada aún en TASKS y D-036 | orquestador corrige; hora automática si reincide |
-| R-04 | baja | «Función única» de 24 h no incluye `reservar_hora` | backlog |
-| R-05 | informativa | Suite 48 s: no es de T-12 (+1,3 s) | ignorar |
-| R-06 | informativa | Pruebas reescritas iguales o más fuertes | ignorar |
-| R-07 | informativa | 25 mutaciones: mueren salvo R-02 y una equivalente | ignorar |
-| R-08 | informativa | Aislamiento, CSRF, XSS, `no-store`, T-05: sin hallazgos | ignorar |
-| R-09 | informativa | Panel del paciente intacto; tope 19/20/21/25 | ignorar |
-| R-10 | informativa | Detalles de contenido/UX | T-13 |
-| R-11 | informativa | Navegador a 390 y 1280 px sin scroll horizontal | ignorar |
-| R-12 | informativa | Docs veraces; pendientes del humano en ARCHITECTURE | decisión humana |
-| R-13 | informativa | Notas T-13 y T-14 | anotar en TASKS (orquestador) |
-
-**Veredicto: APROBADA.** No hay hallazgos de severidad alta ni media; R-03 es una corrección de dos líneas de documentación que le toca al orquestador.
+**APROBADA.** T-13 cumple el Término en 390 y 1280 px y en ambos temas, y casi en 360 px (R-01); las páginas de error, `no-store`, `/static` y los códigos de estado funcionan como D-009/D-014/D-024 piden, sin fugas; T-13b elimina la intermitencia de raíz (no queda ninguna aserción hexadecimal vulnerable; 9 corridas completas sin fallos). Ningún hallazgo es alto. Antes de cerrar el proyecto conviene abrir tarea para R-01 y R-02, decidir R-03 con el humano, y absorber R-04/R-05/R-06 en T-14 o el backlog.

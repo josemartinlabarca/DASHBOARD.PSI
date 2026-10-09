@@ -250,6 +250,13 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Término:** con el token CSRF forzado a un valor que contiene «abc», «xyz», «00», «<», etc., las pruebas de paneles y de ausencia de texto pasan; la mutación «volver a `"abc" not in html` sobre toda la página» hace fallar al menos una prueba; `python3 -m pytest` pasa 3 veces seguidas sin variables.
 - **Origen:** corrida repetida de la suite del orquestador durante la verificación de T-13.
 
+### T-13c — Cerrar los hallazgos de la revisión de T-13 (D-039 aprobada)
+- **Estado:** PENDIENTE
+- **Depende de:** T-13, T-13b
+- **Qué:** (1) **R-01 (media):** a 360 px la columna «Cancelar»/«Eliminar» queda cortada (339 px de contenido en 311 visibles, también con el foco) y las fechas se parten a mitad («12-10-» / «2026 11:00»): que las tablas de reservas y de agenda sean usables a 320, 360 y 390 px (por ejemplo, formato de tarjeta en pantallas angostas conservando `th scope`, `caption` y el HTML del que dependen las pruebas, o columnas que no se partan y acciones siempre alcanzables); medir con Playwright a 320, 360, 390 y 1280 px, claro y oscuro. (2) **R-02:** el flash dice «Listo: Listo, reservaste…»: la hoja antepone «Listo: » y el mensaje ya empieza con «Listo,»; arreglar sin duplicar y con prueba. (3) **R-03 / D-039 (aprobada):** con sesión iniciada, el logo del encabezado lleva a `/paciente` o `/profesional` según el rol; sin sesión, al inicio; con pruebas por rol y anónimo. (4) **R-04 (media):** la guarda de T-13b detecta pruebas por nombre de variable y no ve `get_data(as_text=True)` ni variables intermedias: hacerla robusta (p. ej. interceptar la respuesta/ejecutar todas las pruebas de páginas con el token hostil forzado en una pasada en lugar de depender de nombres) sin sumar más de unos segundos. (5) **R-05:** pruebas para las 5 mutaciones de accesibilidad que sobreviven: enlace «Saltar», `id="contenido"`, `tabindex` de las tablas con scroll, subrayado de «nueva» y `aria-invalid` en «Agregar hora». (6) Corregir las 4 filas del backlog marcadas «T-13» que ya no aplican o quedaron sin hacer (R-06): hacerlas o reasignarlas a T-14 con motivo.
+- **Término:** a 320, 360 y 390 px no hay contenido cortado ni scroll horizontal de página y todas las acciones son alcanzables con teclado; las mutaciones de R-01…R-05 hacen fallar al menos una prueba; `python3 -m pytest` pasa 3 veces seguidas.
+- **Origen:** REVIEW de T-13 (R-01…R-06) y D-039.
+
 ## Fase 6 — Cierre
 
 ### T-14 — Recorrido de punta a punta y revisión final
@@ -329,6 +336,7 @@ en qué tarea conviene absorberlo.
 | T-12 R-01 | «Ver la reserva» es engañoso en avisos viejos: si Ana reserva, cancela y Beto reserva la misma hora, los avisos del profesional (incluido «La hora quedó libre») enlazan a la fila de Beto | T-13 (rotular el enlace o quitarlo en cancelaciones) |
 | T-12 R-02 | Las mutaciones que quitan el `sort` de libres/agenda o su desempate por id sobreviven: el orden sale del índice `UNIQUE(profesional_id, inicio)`, no del código ni de las pruebas | cuando se toque `tests/test_dashboard_profesional.py` |
 | T-12 R-04 | D-036 dice «función única» para las 24 h, pero `reservar_hora` (`app/paciente.py`) conserva su propia comparación en vez de `es_reservable` | T-14 (unificar) |
+| T-13 R-08 | Pendientes del humano en `ARCHITECTURE.md`: `errores.py`, `error.html`, `_notificaciones.html`, `static/`, las rutas POST de «leídas» (paciente y profesional), `correo.py`, `tiempo.py` | el humano |
 | T-02c #9 | En `tests/test_esquema.py` la cobertura de NOT NULL y FK es triplemente redundante y la rama `usuarios` de `test_not_null_rechaza_null` es poco legible | cuando se toque ese archivo |
 
 ---

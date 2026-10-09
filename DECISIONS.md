@@ -392,6 +392,12 @@ Autorizas a que se modifique `ARCHITECTURE.md` (que `CLAUDE.md` reserva al human
 - **Porqué:** `"abc" not in html` falló de forma intermitente (el token contiene «abc» en ~1 de cada 15 páginas). La guarda lo hace determinista y falla siempre si alguien lo reintroduce.
 - **Alternativas descartadas:** fijar el token en producción o añadir una opción de configuración en la app (toca lógica por una necesidad de las pruebas); reejecutar la suite completa con el token forzado (duplica ~50 s); lista fija de archivos (se desactualiza).
 
+## D-039 — Destino del logo del encabezado con sesión iniciada (decisión humana, revisión de T-13)
+- **Fecha:** 2026-10-09 11:54 — **APROBADA** por el humano.
+- **Decisión:** con sesión iniciada, el logo/nombre «Agenda Psi» del encabezado lleva al panel del usuario (`/paciente` para el paciente, `/profesional` para el profesional); sin sesión sigue llevando al inicio. El inicio (`/`) no cambia.
+- **Porqué:** evita que una persona dentro de su cuenta vea «Crear cuenta / Iniciar sesión» al pulsar el logo. SPEC §6.1 dice «Inicio / login» y se refiere al visitante sin sesión.
+- **Alternativas descartadas:** dejar el inicio tal cual; adaptar el inicio con «Ir a mi panel».
+
 ## Plantilla para nuevas decisiones
 
 ```
