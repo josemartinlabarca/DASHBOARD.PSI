@@ -227,7 +227,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Origen:** REVIEW de T-11 (R-01…R-06) y D-035.
 
 ### T-12 — Dashboard del profesional
-- **Estado:** HECHA (2026-10-09 09:45)
+- **Estado:** HECHA (2026-10-09 09:35)
 - **Depende de:** T-09, T-11b
 - **Qué:** `/profesional` con agenda, horas libres y notificaciones (US-6).
 - **Nota de revisión de T-02f (`hora_id` puede ser NULL, D-016):** T-12: igual que T-11: `LEFT JOIN` y mensaje sin enlace cuando `hora_id` es NULL (D-016).
@@ -240,6 +240,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Estado:** PENDIENTE
 - **Depende de:** T-11, T-12
 - **Qué:** `style.css` con tonos calmados, diseño responsivo, mensajes de error claros.
+- **Notas de las revisiones de T-11, T-11b y T-12 (para no perderlas):** (a) clases CSS ya presentes y sin estilo: `campana`, `no-leida`, `leida`, `notificaciones`, `mensaje`; no suprimir `:focus-visible` y no indicar «nueva/leída» solo por color; (b) favicon: hoy `/favicon.ico` da 404 en la primera carga; (c) las pruebas dependen del HTML literal (`<h2>Mis reservas</h2>`, `<h2>Historial</h2>`, `th scope`, `caption`): si T-13 los cambia, actualizar a la vez los ayudantes de prueba; (d) 400/413 en español con enlace para volver (backlog T-03 #6); enlazar `style.css` en `base.html`; (e) contenido del panel del profesional: «Horas libres» dice «Aún no tienes horas publicadas» cuando solo hay sesiones pasadas, la frase «Para eliminarla, el paciente debe cancelar primero» se repite en cada fila, y las sesiones pasadas no tienen tope; (f) botón/enlace «Reservar hora» destacado en el panel del paciente.
 - **Término:** Revisión en pantalla de escritorio y de celular; sin texto ilegible.
 
 ## Fase 6 — Cierre
@@ -318,6 +319,9 @@ en qué tarea conviene absorberlo.
 | T-11b R-01 | «Marcar todas» marca también una notificación que llegó después de cargar el panel y que el usuario no vio (efecto: pierde el estado «nueva»); arreglarlo exige un `hasta_id`, que choca con «ignora ids» de D-035 | decisión humana si se quiere; sin urgencia |
 | T-11b R-02 | Con la base bloqueada más de 5 s, cualquier POST lanza `database is locked` (500); es de toda la app, no solo de esta ruta | T-14 |
 | T-11b R-04 | Sin `X-Frame-Options` ni CSP en ninguna respuesta; el CSRF también se acepta por la cabecera `X-CSRFToken` | T-14 |
+| T-12 R-01 | «Ver la reserva» es engañoso en avisos viejos: si Ana reserva, cancela y Beto reserva la misma hora, los avisos del profesional (incluido «La hora quedó libre») enlazan a la fila de Beto | T-13 (rotular el enlace o quitarlo en cancelaciones) |
+| T-12 R-02 | Las mutaciones que quitan el `sort` de libres/agenda o su desempate por id sobreviven: el orden sale del índice `UNIQUE(profesional_id, inicio)`, no del código ni de las pruebas | cuando se toque `tests/test_dashboard_profesional.py` |
+| T-12 R-04 | D-036 dice «función única» para las 24 h, pero `reservar_hora` (`app/paciente.py`) conserva su propia comparación en vez de `es_reservable` | T-14 (unificar) |
 | T-02c #9 | En `tests/test_esquema.py` la cobertura de NOT NULL y FK es triplemente redundante y la rama `usuarios` de `test_not_null_rechaza_null` es poco legible | cuando se toque ese archivo |
 
 ---

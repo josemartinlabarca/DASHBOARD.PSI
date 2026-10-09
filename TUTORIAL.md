@@ -220,6 +220,13 @@ Aquí el ciclo ya es rutina: implementador → mi verificación → revisor → 
 - **T-11b:** 14 pruebas netas más (1621), 14 mutaciones; y el revisor confirmó que las 12 líneas de prueba eliminadas se reescribieron con aserciones iguales o más fuertes. Encontró además que una frase del reporte del implementador no era exacta (qué prueba mataba una mutación); la corregí en `PROGRESS.md` con una nota visible.
 - **Lección:** cuando falta una regla de producto, *el agente correcto es el que se detiene y pregunta*. Aquí dos agentes lo hicieron bien (el implementador no inventó, el revisor propuso opciones) y por eso tu respuesta cabía en un mensaje.
 
+### Vuelta 28 — T-12 Dashboard del profesional
+- **Implementador:** `/profesional` con agenda (próximas sesiones e historial), horas libres con el rótulo «no reservable» cuando faltan 24 h o menos (usa la **misma** función `es_reservable` que el paciente, para que ambos paneles nunca discrepen), y notificaciones con el mismo criterio de D-035 (plantilla compartida y ruta POST delgada para el profesional). 1677 pruebas, 17 mutaciones detectadas, recorrido real en Chromium.
+- **Dos hechos de proceso que vale la pena notar:** (1) al empezar, el árbol ya tenía un T-12 casi completo **sin commit** de una vuelta interrumpida; el implementador lo leyó, lo verificó y lo completó en vez de rehacerlo. (2) Escribió la hora de su entrada de PROGRESS como 09:45 cuando eran las 09:39: **otra hora inventada**, la tercera vez, a pesar de la regla 8. La corregí con nota visible en PROGRESS, TASKS y DECISIONS.
+- **Mi verificación:** diff, 1677 pruebas en 4 entornos, 6 mutaciones propias (todas detectadas) y comparar la hora de la entrada con el reloj.
+- **Revisor: APROBADA** (4 bajos, 9 informativos). Probó el servidor real con `curl` (anónimo, paciente, tokens falsos o de otro usuario) y comprobó que la suite lenta no la causó T-12 (el commit anterior ya tardaba lo mismo). Hallazgo curioso: si Ana reserva, cancela y Beto reserva la misma hora, los avisos viejos de Ana enlazan a la fila de Beto. Queda para T-13.
+- **Lección:** una regla escrita no basta para evitar un error repetido; hay que comprobarlo mecánicamente. La próxima vez que se pueda, conviene que la verificación compare las horas de PROGRESS contra `git log` automáticamente.
+
 ### Historial git resultante
 
 ```
@@ -250,12 +257,12 @@ docs: documentación base del proyecto Agenda Psi
 
 ## 4. Estado actual y qué sigue
 
-- Hecho: **T-01 a T-11b** (incluidas T-02b–g, T-03b/c, T-04b, T-05b y T-08b–e; 1621 pruebas pasando).
+- Hecho: **T-01 a T-12** (incluidas T-02b–g, T-03b/c, T-04b, T-05b, T-08b–e y T-11b; 1677 pruebas pasando).
 - **Decisiones tuyas ya tomadas (D-035 incluida):** D-007 (esquema), D-015 (correo), D-016 (borrar horas), D-017 (formato de fecha), D-018 (carácter nulo). Pendientes: **D-020** (caracteres invisibles en el correo), **D-022** (revocar la cookie al cerrar sesión), **D-023** (un solo profesional) y **D-029** (reservar con menos de 24 h; conviene antes de T-09).
-- Siguiente: **T-12** (dashboard del profesional) → T-13 → T-14.
+- Siguiente: **T-13** (estilo) → T-14 (recorrido final).
 - Pendiente solo tuyo: autorizar (o no) que `app/correo.py` figure en `ARCHITECTURE.md`; es una línea de documentación.
 
-**Tu primer ejercicio:** lanza tú mismo la vuelta de T-12 con el prompt del Paso B y revisa el resultado con la lista del Paso C. Antes de dar por buena cualquier tarea, haz cinco preguntas extra: *¿rompió algo documentado?*, *¿las pruebas fallarían si quitara la protección?*, *¿el reporte afirma algo que no ejecutó?*, *¿cómo interactúa esto con las tareas futuras?* y *¿el arreglo propuesto realmente funciona?*
+**Tu primer ejercicio:** lanza tú mismo la vuelta de T-13 con el prompt del Paso B y revisa el resultado con la lista del Paso C. Antes de dar por buena cualquier tarea, haz cinco preguntas extra: *¿rompió algo documentado?*, *¿las pruebas fallarían si quitara la protección?*, *¿el reporte afirma algo que no ejecutó?*, *¿cómo interactúa esto con las tareas futuras?* y *¿el arreglo propuesto realmente funciona?*
 
 ## 5. Consejos profesionales (lo que hace la diferencia)
 
@@ -298,6 +305,7 @@ docs: documentación base del proyecto Agenda Psi
 37. **Un mutante vivo no siempre es una prueba que falta.** Comprueba si es equivalente (¿otra protección hace lo mismo?) y si juntas se detectan; si lo son, anótalo como defensa redundante.
 38. **Si falta una regla de producto, el agente se detiene y propone; no inventa.** Dos opciones, costo y riesgo bastan para que el humano decida en un mensaje.
 39. **El reporte de un agente también se revisa.** Una frase inexacta sobre qué prueba mataba una mutación se corrigió con una nota visible, no en silencio.
+40. **Automatiza lo que se repite.** Tres horas inventadas pese a una regla escrita: la regla no basta, hay que verificarlo con un comando.
 
 ## 6. Trampas de principiante que ya viste en acción
 
