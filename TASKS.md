@@ -259,12 +259,27 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 
 ## Fase 6 — Cierre
 
-### T-14 — Recorrido de punta a punta y revisión final
+### T-14a — Seguridad de acceso (D-041, D-042, D-043 aprobadas) y cabeceras
 - **Estado:** PENDIENTE
-- **Depende de:** T-13
-- **Qué:** Verificador ejecuta el recorrido completo de `SPEC.md` §9; Revisor contrasta código contra SPEC.
-- **Notas de la revisión de T-10 (R-05, R-06):** (a) README: periodicidad del cron **menor que 24 h** (p. ej. cada 15 min), ejemplo de crontab, `DATABASE` y `OUTBOX_PATH` iguales a los del servidor web, y que el comando sale con código 1 si falla; (b) con D-029 el recorrido de SPEC §9 «recordatorio → cancelación» solo coincide a las 24 h exactas: el Verificador adelanta el `inicio` por SQL y cancela otra reserva, o el humano ajusta la redacción de §9.
-- **Término:** Todas las casillas de "Definición de terminado" marcadas; hallazgos en `REVIEW.md` resueltos.
+- **Depende de:** T-13c
+- **Qué:** (1) **D-041:** límite de intentos de login y registro con bloqueo temporal (tabla nueva, autorizada solo para esto; ver D-041); (2) **D-042:** `SESSION_COOKIE_SECURE` por variable de entorno y aviso; (3) **D-043:** negarse a arrancar con debug en un host no local; (4) cabeceras de seguridad: `X-Frame-Options`/`frame-ancestors`, `X-Content-Type-Options: nosniff`, `Referrer-Policy` y una CSP que no rompa la hoja ni las páginas (sin `style=` en línea ni scripts: `default-src 'self'`), y revisar que el CSRF no se acepte también por `X-CSRFToken` si no hace falta (T-11b R-04); (5) T-08d R-04 (login simultáneo a un logout puede nacer ya revocado) y T-03c R-12 (versión mínima de Python/Unicode: fijarla en README y `requirements`/`pytest` o probar el login con un correo ya registrado); (6) T-03 #8 (revisar de nuevo el mensaje de duplicado de D-010) y T-08e R-04/R-05 (letras en blanco U+13441/U+13442 y cuenta ya guardada con un carácter hoy rechazado) como **propuestas** a la decisión humana si exigen política: no inventar.
+- **Término:** pruebas por cada punto con mutaciones que fallan al quitarlos; `python3 -m pytest` pasa 3 veces seguidas; verificación con navegador (Chromium+Playwright) de que login, registro, paneles y errores siguen funcionando con la CSP y el bloqueo (incluido el mensaje al bloquear).
+- **Origen:** backlog de T-02d #1/#6, T-03 #2/#4/#8, T-04 R-08, T-08d R-04, T-11b R-04, D-041…D-043.
+
+### T-14b — Robustez y datos (D-044 aprobada)
+- **Estado:** PENDIENTE
+- **Depende de:** T-14a
+- **Qué:** (1) **D-044:** `/paciente/horas` con ventana de 60 días y tope de 100; (2) base ocupada: con el bloqueo de SQLite retenido más de 5 s, que reservar, cancelar, agregar, eliminar y marcar leídas respondan con un mensaje en español y permitan reintentar (no un 500), y `buscar_solape` con ventana de fechas alrededor del candidato (T-05b R-02); (3) `init-db`: aviso claro o migración mínima con `PRAGMA user_version` cuando la base tiene un esquema antiguo o hay 2+ profesionales (T-02c #4, T-08d R-02), sin borrar datos; (4) `send-reminders` con `DATABASE` inexistente, directorio inexistente o sin tablas: mensaje claro y código ≠ 0 sin traza ni crear un `.db` vacío (T-10 R-01/R-02); (5) `outbox.log`: permisos restrictivos (0600 o configurable), documentar crecimiento y rotación, `OUTBOX_PATH` relativa o con enlaces (T-09 R-02/R-03/R-04); (6) unificar la comprobación de 24 h de `reservar_hora` con `es_reservable` y el orden de comprobaciones de T-08e R-03 (no distinguir libre de ocupada en un POST forzado a una hora oculta); ids de ruta solo ASCII (T-05 R-06); (7) textos de T-08e R-11 (mensaje a las 24 h exactas «no más de», mensaje de solape) y T-09 R-06 (hora repetida de abril en el mensaje de límite).
+- **Término:** pruebas con mutaciones por punto; `python3 -m pytest` pasa 3 veces seguidas; las mediciones citadas (50 000 filas) se repiten y se reportan.
+- **Origen:** backlog de T-02c #4, T-05 R-02/R-06, T-05b R-02, T-06 R-01, T-08d R-02, T-08e R-03/R-11, T-09, T-10, T-11b R-02, T-12 R-04, D-044.
+
+### T-14c — README, recorrido de punta a punta y revisión final
+- **Estado:** PENDIENTE
+- **Depende de:** T-14b
+- **Qué:** (1) README completo: instalación, variables (`SECRET_KEY`, `DATABASE`, `OUTBOX_PATH`, `SESSION_COOKIE_SECURE`), cron de `send-reminders` (periodo < 24 h, ejemplo de crontab, mismas variables que el servidor web, código de salida 1 si falla), despliegue detrás de HTTPS y proxy, advertencia sobre `--debug` (solo local; `FLASK_DEBUG=off` cuenta como verdadero en Flask), reglas de negocio incluida la regla 7, y el recorrido manual; (2) el **Verificador** ejecuta el recorrido completo de `SPEC.md` §9 con navegador real (registro → reserva → confirmación → recordatorio → cancelación; con D-029 el recordatorio solo coincide a las 24 h exactas: adelantar el `inicio` por SQL y cancelar otra reserva) y marca la «Definición de terminado»; (3) **Revisión final** del Revisor contra SPEC (todas las US y reglas §4), con la suite completa corrida con un token CSRF hostil una vez (propuesta de T-13c) y la lista de pendientes del humano en `ARCHITECTURE.md` (`errores.py`, `error.html`, `_notificaciones.html`, `static/`, rutas POST de «leídas», `correo.py`, `tiempo.py`, tablas nuevas de D-041); (4) accesibilidad de las tablas en tarjetas con lector de pantalla (`display:block` puede perder la semántica; probar o documentar) y backlog restante reasignado con motivo o cerrado; (5) Windows: las pruebas con `zona_sistema` se saltan (T-08 R-08), documentarlo.
+- **Término:** todas las casillas de «Definición de terminado» de SPEC marcadas; hallazgos en `REVIEW.md` resueltos o reasignados con motivo por el humano.
+- **Origen:** T-14 original (dividida el {ts}).
+
 
 ---
 

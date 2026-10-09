@@ -406,6 +406,27 @@ Autorizas a que se modifique `ARCHITECTURE.md` (que `CLAUDE.md` reserva al human
 - **Pruebas existentes cambiadas:** `tests/test_notificaciones.py::test_un_fallo_del_log_no_cambia_el_mensaje_de_exito` (el texto esperado pasa de «Listo, reservaste tu hora» a «Reservaste tu hora»; es el mensaje que se cambió a propósito). La guarda de T-13b se reescribió (no se debilitó: ahora selecciona un superconjunto).
 - **Alternativas descartadas:** `role=` en las celdas para conservar la semántica (rompería los literales `<th scope="col">` que cuentan las pruebas); reejecutar toda la suite en la guarda automática (~51 s más); cambiar `horas_libres.html` a `th scope="row"` (rompe una prueba).
 
+## D-041 — Límite de intentos de login y registro con bloqueo temporal en SQLite (decisión humana)
+- **Fecha:** 2026-10-09 20:40 — **APROBADA** por el humano (opción «Bloqueo temporal en SQLite»). **Autoriza el cambio de esquema** de esta decisión (tabla nueva) como excepción a D-007, solo para esto.
+- **Decisión:** tabla nueva (p. ej. `intentos_acceso`) con los intentos fallidos de login y los registros por clave (correo normalizado y/o IP) y marca de tiempo; tras N fallos en una ventana (propuesta inicial: 5 fallos en 15 minutos) la acción se rechaza con un mensaje en español y un tiempo de espera, sin revelar si el correo existe (D-010). El implementador fija N, ventana, clave y limpieza de filas viejas, y los documenta en una decisión de detalle; debe funcionar con varios procesos y no debe permitir que un atacante bloquee a un tercero de forma trivial más allá de la ventana (documentar el riesgo de bloqueo por correo ajeno y su mitigación).
+- **Porqué:** protege contra fuerza bruta y contra el costo de CPU del scrypt sin depender de un servicio externo; funciona con varios procesos.
+- **Alternativas descartadas:** demora en memoria por proceso (se pierde al reiniciar, no vale con varios procesos), dejarlo solo al despliegue.
+
+## D-042 — Cookie de sesión `Secure` por variable de entorno (decisión humana)
+- **Fecha:** 2026-10-09 20:40 — **APROBADA** por el humano.
+- **Decisión:** `SESSION_COOKIE_SECURE` se activa con una variable de entorno (p. ej. `SESSION_COOKIE_SECURE=1`) pensada para producción con HTTPS; apagada por defecto para poder probar en http local. El README lo documenta junto con el resto de variables de despliegue; la app avisa en el log si está en producción sin ella (criterio exacto: lo propone el implementador).
+- **Alternativas descartadas:** siempre activada (rompe el login en http://localhost salvo en debug).
+
+## D-043 — `FLASK_DEBUG` en un servidor no local (decisión humana)
+- **Fecha:** 2026-10-09 20:40 — **APROBADA** por el humano.
+- **Decisión:** con debug activo y un host que no sea local (`127.0.0.1`, `localhost`, `::1`), la app **se niega a arrancar** con un mensaje claro que explica el riesgo (la clave de desarrollo es pública y permitiría forjar una sesión de profesional); en local sigue funcionando igual. Se debe poder verificar sin arrancar un servidor real (por ejemplo, en el comando de arranque o en `create_app` según el contexto) y cubrir `FLASK_DEBUG=off`/`0`/`false`, que Flask trata de forma particular.
+- **Alternativas descartadas:** solo aviso en el log y el README.
+
+## D-044 — Horas libres del paciente: próximos 60 días y máximo 100 (decisión humana)
+- **Fecha:** 2026-10-09 20:40 — **APROBADA** por el humano.
+- **Decisión:** `/paciente/horas` muestra solo las horas libres reservables que empiezan dentro de los próximos 60 días y, como máximo, las 100 primeras por inicio, con un aviso («Mostramos las próximas 100 horas; hay más disponibles más adelante») cuando se recorta. Sin paginación. La ventana se calcula con instantes absolutos como el resto.
+- **Alternativas descartadas:** paginación; dejarlo sin tope.
+
 ## Plantilla para nuevas decisiones
 
 ```
