@@ -652,7 +652,9 @@ def test_el_panel_lista_solo_horas_futuras_propias_con_su_estado(app, pro, pro2)
     assert f"/profesional/horas/{libre}/eliminar" in html
     assert f"/profesional/horas/{reservada}/eliminar" not in html  # sin botón si está reservada
     assert html.count("Reservada") == 1 and "Libre" in html
-    assert html.index("01-03-2027") < html.index("02-03-2027")  # ordenadas por fecha
+    # T-12: la agenda (reservas) y las horas libres son secciones separadas; el orden por
+    # fecha dentro de cada una se prueba en tests/test_dashboard_profesional.py
+    assert html.index("02-03-2027") < html.index("01-03-2027")
 
 
 def test_panel_sin_horas(pro):

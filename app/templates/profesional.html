@@ -3,36 +3,86 @@
 {% block contenido %}
   <h1>Hola, {{ usuario.nombre }}</h1>
 
-  <h2>Tus próximas horas</h2>
-  {% if horas %}
-    <table>
-      <thead>
-        <tr><th>Fecha y hora</th><th>Duración</th><th>Estado</th><th>Acción</th></tr>
-      </thead>
-      <tbody>
-        {% for hora in horas %}
-          <tr>
-            <td>{{ hora.inicio }}</td>
-            <td>{{ hora.duracion_min }} min</td>
-            <td>{{ "Reservada" if hora.reservada else "Libre" }}</td>
-            <td>
-              {% if hora.reservada %}
-                No se puede eliminar (cancela la reserva primero)
-              {% else %}
+  <section aria-labelledby="titulo-agenda">
+    <h2 id="titulo-agenda">Próximas reservas</h2>
+    {% if proximas %}
+      <table>
+        <caption>Sesiones reservadas que aún no terminan (hora de Chile)</caption>
+        <thead>
+          <tr><th scope="col">Fecha y hora</th><th scope="col">Duración</th><th scope="col">Paciente</th><th scope="col">Estado</th></tr>
+        </thead>
+        <tbody>
+          {% for sesion in proximas %}
+            <tr id="reserva-{{ sesion.id }}">
+              <th scope="row">{{ sesion.inicio }}</th>
+              <td>{{ sesion.duracion_min }} min</td>
+              <td>{{ sesion.paciente }}</td>
+              <td>Reservada{% if sesion.en_curso %} (<strong>en curso</strong>){% endif %}. Para eliminarla, el paciente debe cancelar primero.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p>No tienes sesiones reservadas próximas.</p>
+    {% endif %}
+  </section>
+
+  <section aria-labelledby="titulo-libres">
+    <h2 id="titulo-libres">Horas libres</h2>
+    {% if libres %}
+      <table>
+        <caption>Horas publicadas sin reservar (hora de Chile)</caption>
+        <thead>
+          <tr><th scope="col">Fecha y hora</th><th scope="col">Duración</th><th scope="col">Estado</th><th scope="col">Eliminar</th></tr>
+        </thead>
+        <tbody>
+          {% for hora in libres %}
+            <tr id="hora-{{ hora.id }}">
+              <th scope="row">{{ hora.inicio }}</th>
+              <td>{{ hora.duracion_min }} min</td>
+              <td>Libre{% if not hora.reservable %} &middot; <strong>no reservable</strong> (faltan 24 horas o menos: ningún paciente podrá reservarla){% endif %}</td>
+              <td>
                 <form method="post" action="{{ url_for('profesional.eliminar_hora', hora_id=hora.id) }}">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   <button type="submit">Eliminar</button>
                 </form>
-              {% endif %}
-            </td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  {% else %}
-    <p>Aún no tienes horas publicadas.</p>
-  {% endif %}
-  <p><a href="{{ url_for('profesional.nueva_hora') }}">Agregar hora</a></p>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% elif proximas %}
+      <p>No tienes horas libres publicadas.</p>
+    {% else %}
+      <p>Aún no tienes horas publicadas.</p>
+    {% endif %}
+    <p><a href="{{ url_for('profesional.nueva_hora') }}">Agregar hora</a></p>
+  </section>
+
+  <section aria-labelledby="titulo-pasadas">
+    <h2 id="titulo-pasadas">Sesiones pasadas</h2>
+    {% if pasadas %}
+      <table>
+        <caption>Sesiones ya terminadas (hora de Chile)</caption>
+        <thead>
+          <tr><th scope="col">Fecha y hora</th><th scope="col">Duración</th><th scope="col">Paciente</th></tr>
+        </thead>
+        <tbody>
+          {% for sesion in pasadas %}
+            <tr>
+              <th scope="row">{{ sesion.inicio }}</th>
+              <td>{{ sesion.duracion_min }} min</td>
+              <td>{{ sesion.paciente }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p>Todavía no tienes sesiones pasadas.</p>
+    {% endif %}
+  </section>
+
+  {% include "_notificaciones.html" %}
 
   <form method="post" action="{{ url_for('auth.logout') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

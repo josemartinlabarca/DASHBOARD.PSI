@@ -64,6 +64,15 @@ SELECT_HORA_Y_PARTES = (
 )
 
 
+def es_reservable(inicio_s, ahora_s):
+    """D-029: se puede reservar si faltan MÁS de 24 h (estricto; a las 24 h exactas ya no).
+
+    Instantes absolutos en segundos. Es la única definición: la usan la lista de horas
+    libres del paciente y el rótulo «no reservable» del panel del profesional.
+    """
+    return inicio_s - ahora_s > ANTICIPACION_RESERVAR_S
+
+
 def listar_horas_libres_futuras(db, ahora):
     """Horas `libre` que todavía se pueden reservar, por inicio (T-08e, D-029).
 
@@ -92,7 +101,7 @@ def listar_horas_libres_futuras(db, ahora):
         except (ValueError, TypeError):
             continue
         inicio_s = tiempo.a_segundos_utc(local)
-        if inicio_s is None or inicio_s - ahora_s <= ANTICIPACION_RESERVAR_S:
+        if inicio_s is None or not es_reservable(inicio_s, ahora_s):
             continue
         horas.append((inicio_s, fila["id"], fila))
     horas.sort(key=lambda t: (t[0], t[1]))
@@ -190,7 +199,7 @@ def dashboard():
     db, ahora = get_db(), tiempo.ahora_chile()
     reservas = listar_reservas_futuras(db, usuario["id"], ahora)
     proxima, pasadas = listar_sesiones(db, usuario["id"], ahora)
-    avisos, sin_leer = notificaciones.listar_de_usuario(db, usuario["id"])
+    avisos, sin_leer, hay_mas = notificaciones.listar_de_usuario(db, usuario["id"])
     # Solo se enlaza a una reserva que sigue siendo de este paciente (está en su propia lista),
     # nunca por lo que diga `hora_id` (R-07 de T-10).
     propias = {r["id"] for r in reservas}
@@ -198,7 +207,8 @@ def dashboard():
         aviso["enlazable"] = aviso["hora_id"] is not None and aviso["hora_id"] in propias
     return render_template(
         "paciente.html", usuario=usuario, reservas=reservas, proxima=proxima,
-        pasadas=pasadas, notificaciones=avisos, sin_leer=sin_leer,
+        pasadas=pasadas, notificaciones=avisos, sin_leer=sin_leer, hay_mas=hay_mas,
+        tope=notificaciones.TOPE_PANEL, endpoint_leidas="paciente.marcar_notificaciones_leidas",
     )
 
 
@@ -207,12 +217,7 @@ def dashboard():
 def marcar_notificaciones_leidas():
     """D-035: marca como leídas las del usuario en sesión; no lee ningún id del formulario."""
     cantidad = notificaciones.marcar_leidas(get_db(), usuario_actual()["id"])
-    if cantidad == 1:
-        flash("Marcaste 1 notificación como leída.", "exito")
-    elif cantidad:
-        flash(f"Marcaste {cantidad} notificaciones como leídas.", "exito")
-    else:
-        flash("No tenías notificaciones sin leer.", "exito")
+    flash(notificaciones.mensaje_marcadas(cantidad), "exito")
     return redirect(url_for("paciente.dashboard"))
 
 

@@ -494,10 +494,23 @@ def test_el_contador_incluye_no_leidas_fuera_de_las_20_visibles(app, ana):
     assert len(formularios_de_leidas(html)) == 1  # el botón sigue, aunque ninguna visible sea nueva
 
 
-def test_con_pocas_notificaciones_no_hay_aviso_de_tope(app, ana):
-    for i in range(19):
+@pytest.mark.parametrize("cantidad,aviso", [(19, False), (20, False), (21, True)])
+def test_aviso_de_tope_solo_si_hay_mas_que_el_tope(app, ana, cantidad, aviso):
+    """R-03 de T-11b: con exactamente 20 no hay más, así que no se avisa."""
+    for i in range(cantidad):
+        notificar(app, ANA, f"aviso {i:02d}")
+    html = ana.get("/paciente").text
+    assert len(mensajes_listados(html)) == min(cantidad, 20)
+    assert ("Se muestran tus 20 notificaciones más recientes." in html) is aviso
+    assert f"Campana de notificaciones: {cantidad} sin leer" in html
+
+
+def test_el_tope_del_panel_del_paciente_sale_de_la_constante(app, ana, monkeypatch):
+    monkeypatch.setattr(notificaciones, "TOPE_PANEL", 3)
+    for i in range(4):
         notificar(app, ANA, f"aviso {i}")
-    assert "Se muestran tus 20" not in ana.get("/paciente").text
+    html = ana.get("/paciente").text
+    assert len(mensajes_listados(html)) == 3 and "Se muestran tus 3 notificaciones más recientes." in html
 
 
 def test_marcar_leidas_devuelve_cuantas_cambio_y_solo_las_del_usuario(app, ana, beto):

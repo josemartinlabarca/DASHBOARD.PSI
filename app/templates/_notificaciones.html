@@ -1,0 +1,30 @@
+{# Panel de notificaciones compartido por /paciente y /profesional. Contexto: notificaciones, sin_leer, hay_mas, tope, endpoint_leidas. #}
+  <section aria-labelledby="titulo-notificaciones">
+    <h2 id="titulo-notificaciones">
+      <span aria-hidden="true">&#128276;</span> Notificaciones
+      <span class="campana" role="img"
+            aria-label="Campana de notificaciones: {{ sin_leer }} sin leer">{{ sin_leer }}</span>
+    </h2>
+    <p>{% if sin_leer == 1 %}Tienes 1 notificación sin leer.{% elif sin_leer %}Tienes {{ sin_leer }} notificaciones sin leer.{% else %}No tienes notificaciones sin leer.{% endif %}</p>
+    {% if sin_leer %}
+      <form method="post" action="{{ url_for(endpoint_leidas) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit">Marcar todas como leídas</button>
+      </form>
+    {% endif %}
+    {% if notificaciones %}
+      <ul class="notificaciones">
+        {% for n in notificaciones %}
+          <li class="{{ 'leida' if n.leida else 'no-leida' }}">
+            <strong>{{ {'confirmacion': 'Confirmación', 'recordatorio': 'Recordatorio', 'cancelacion': 'Cancelación'}[n.tipo] }}</strong>
+            ({{ 'leída' if n.leida else 'nueva' }}{% if n.creada %}, {{ n.creada }}{% endif %})<br>
+            {{ n.mensaje }}
+            {% if n.enlazable %}<a href="#reserva-{{ n.hora_id }}">Ver la reserva</a>{% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+      {% if hay_mas %}<p>Se muestran tus {{ tope }} notificaciones más recientes.</p>{% endif %}
+    {% else %}
+      <p>Aún no tienes notificaciones.</p>
+    {% endif %}
+  </section>

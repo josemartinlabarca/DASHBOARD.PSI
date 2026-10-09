@@ -227,7 +227,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Origen:** REVIEW de T-11 (R-01…R-06) y D-035.
 
 ### T-12 — Dashboard del profesional
-- **Estado:** PENDIENTE
+- **Estado:** HECHA (2026-10-09 09:45)
 - **Depende de:** T-09, T-11b
 - **Qué:** `/profesional` con agenda, horas libres y notificaciones (US-6).
 - **Nota de revisión de T-02f (`hora_id` puede ser NULL, D-016):** T-12: igual que T-11: `LEFT JOIN` y mensaje sin enlace cuando `hora_id` es NULL (D-016).

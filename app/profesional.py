@@ -17,7 +17,7 @@ from flask import (
     url_for,
 )
 
-from . import tiempo
+from . import notificaciones, paciente, tiempo
 from .auth import solo_profesional, usuario_actual, zona_chile
 from .db import get_db
 from .tiempo import FORMATO_GUARDADO, mostrar_inicio
@@ -247,22 +247,70 @@ def _describir(fila):
         return mostrar_inicio(texto)
 
 
-def listar_horas_futuras(db, profesional_id, ahora):
-    ahora_local = formatear_inicio(ahora.replace(tzinfo=None))
+def listar_agenda(db, profesional_id, ahora):
+    """`(próximas, pasadas)` de las reservas **de este profesional** (T-12, US-6).
+
+    Mismo criterio que el panel del paciente (D-034): una sesión es «próxima» mientras
+    no termine (`fin > ahora`, con `fin = inicio + duración`, instantes absolutos); la que
+    está en curso sigue como próxima y trae `en_curso`; es «pasada» con `fin <= ahora`.
+    Próximas por inicio (desempata el id); pasadas de la más reciente a la más antigua.
+    Solo `horas.profesional_id = profesional_id` y estado `reservada`; del paciente se
+    trae únicamente el nombre (nunca el correo). Las filas con fecha o duración
+    ilegibles se omiten. Fechas en hora de Chile.
+    """
     filas = db.execute(
-        "SELECT id, inicio, duracion_min, estado FROM horas"
-        " WHERE profesional_id = ? AND inicio > ? ORDER BY inicio",
-        (profesional_id, ahora_local),
+        "SELECT h.id, h.inicio, h.duracion_min, p.nombre AS paciente"
+        " FROM horas h JOIN usuarios p ON p.id = h.paciente_id"
+        " WHERE h.profesional_id = ? AND h.estado = 'reservada'",
+        (profesional_id,),
     ).fetchall()
-    return [
-        {
-            "id": f["id"],
-            "inicio": mostrar_inicio(f["inicio"]),
-            "duracion_min": f["duracion_min"],
-            "reservada": f["estado"] == "reservada",
+    ahora_s = ahora.timestamp()
+    por_venir, pasadas = [], []
+    for fila in filas:
+        intervalo = tiempo.intervalo_guardado(fila)
+        if intervalo is None:
+            continue
+        sesion = {
+            "id": fila["id"],
+            "inicio": mostrar_inicio(fila["inicio"]),
+            "duracion_min": fila["duracion_min"],
+            "paciente": fila["paciente"],
+            "en_curso": intervalo[0] <= ahora_s < intervalo[1],
         }
-        for f in filas
-    ]
+        destino = por_venir if intervalo[1] > ahora_s else pasadas
+        destino.append((intervalo[0], fila["id"], sesion))
+    por_venir.sort(key=lambda t: (t[0], t[1]))
+    pasadas.sort(key=lambda t: (t[0], t[1]), reverse=True)
+    return [t[2] for t in por_venir], [t[2] for t in pasadas]
+
+
+def listar_horas_libres(db, profesional_id, ahora):
+    """Horas libres **propias** que aún no empiezan, por inicio (desempata el id).
+
+    Cada una trae `reservable`, calculado con la MISMA función que usa la lista del
+    paciente (`paciente.es_reservable`: faltan más de 24 h, estricto, instantes
+    absolutos): las de 24 h o menos las ve el profesional pero ningún paciente podrá
+    reservarlas (R-10 de T-08e). Filas ilegibles se omiten.
+    """
+    filas = db.execute(
+        "SELECT id, inicio, duracion_min FROM horas"
+        " WHERE profesional_id = ? AND estado = 'libre'",
+        (profesional_id,),
+    ).fetchall()
+    ahora_s = ahora.timestamp()
+    horas = []
+    for fila in filas:
+        intervalo = tiempo.intervalo_guardado(fila)
+        if intervalo is None or intervalo[0] <= ahora_s:
+            continue
+        horas.append((intervalo[0], fila["id"], {
+            "id": fila["id"],
+            "inicio": mostrar_inicio(fila["inicio"]),
+            "duracion_min": fila["duracion_min"],
+            "reservable": paciente.es_reservable(intervalo[0], ahora_s),
+        }))
+    horas.sort(key=lambda t: (t[0], t[1]))
+    return [t[2] for t in horas]
 
 
 # ----------------------------------------------------------------- rutas ----
@@ -272,8 +320,29 @@ def listar_horas_futuras(db, profesional_id, ahora):
 @solo_profesional
 def dashboard():
     usuario = usuario_actual()
-    horas = listar_horas_futuras(get_db(), usuario["id"], tiempo.ahora_chile())
-    return render_template("profesional.html", usuario=usuario, horas=horas)
+    db, ahora = get_db(), tiempo.ahora_chile()
+    proximas, pasadas = listar_agenda(db, usuario["id"], ahora)
+    libres = listar_horas_libres(db, usuario["id"], ahora)
+    avisos, sin_leer, hay_mas = notificaciones.listar_de_usuario(db, usuario["id"])
+    # Solo se enlaza a una reserva que está en la agenda de ESTE profesional (la lista sale
+    # filtrada por `profesional_id`), nunca por lo que diga `hora_id` (R-07 de T-10).
+    propias = {r["id"] for r in proximas}
+    for aviso in avisos:
+        aviso["enlazable"] = aviso["hora_id"] is not None and aviso["hora_id"] in propias
+    return render_template(
+        "profesional.html", usuario=usuario, proximas=proximas, pasadas=pasadas, libres=libres,
+        notificaciones=avisos, sin_leer=sin_leer, hay_mas=hay_mas,
+        tope=notificaciones.TOPE_PANEL, endpoint_leidas="profesional.marcar_notificaciones_leidas",
+    )
+
+
+@bp.route("/profesional/notificaciones/leidas", methods=["POST"])
+@solo_profesional
+def marcar_notificaciones_leidas():
+    """D-035: marca las del profesional en sesión; no lee ningún id del formulario."""
+    cantidad = notificaciones.marcar_leidas(get_db(), usuario_actual()["id"])
+    flash(notificaciones.mensaje_marcadas(cantidad), "exito")
+    return redirect(url_for("profesional.dashboard"))
 
 
 @bp.route("/profesional/horas/nueva", methods=["GET", "POST"])

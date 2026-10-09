@@ -122,7 +122,11 @@ TOPE_PANEL = 20  # D-035: el panel muestra las últimas 20 notificaciones
 
 
 def listar_de_usuario(db, usuario_id):
-    """Las últimas `TOPE_PANEL` notificaciones del usuario y cuántas tiene sin leer en total (T-11, D-035).
+    """`(lista, sin_leer, hay_mas)`: las últimas `TOPE_PANEL` notificaciones, las no leídas en total
+    y si había más que el tope (T-11, D-035; T-12).
+
+    `hay_mas` sale de pedir `TOPE_PANEL + 1` filas y recortar: con exactamente `TOPE_PANEL`
+    no hay más y el aviso «Se muestran tus N más recientes» no debe aparecer (R-03 de T-11b).
 
     Solo las de `usuario_id`. Orden por `id` descendente (R-09 de T-09): `creada_en` es
     texto con desfase y no ordena bien en la noche de cambio de horario. Se lee `mensaje`,
@@ -134,8 +138,10 @@ def listar_de_usuario(db, usuario_id):
     filas = db.execute(
         "SELECT id, tipo, mensaje, hora_id, leida, creada_en FROM notificaciones"
         " WHERE usuario_id = ? ORDER BY id DESC LIMIT ?",
-        (usuario_id, TOPE_PANEL),
+        (usuario_id, TOPE_PANEL + 1),
     ).fetchall()
+    hay_mas = len(filas) > TOPE_PANEL  # la fila TOPE_PANEL+1 solo sirve para saber esto
+    filas = filas[:TOPE_PANEL]
     lista = [
         {
             "id": f["id"],
@@ -150,7 +156,16 @@ def listar_de_usuario(db, usuario_id):
     sin_leer = db.execute(
         "SELECT COUNT(*) FROM notificaciones WHERE usuario_id = ? AND leida = 0", (usuario_id,)
     ).fetchone()[0]
-    return lista, sin_leer
+    return lista, sin_leer, hay_mas
+
+
+def mensaje_marcadas(cantidad):
+    """Texto del flash tras «Marcar todas como leídas»; lo comparten el panel del paciente y el del profesional."""
+    if cantidad == 1:
+        return "Marcaste 1 notificación como leída."
+    if cantidad:
+        return f"Marcaste {cantidad} notificaciones como leídas."
+    return "No tenías notificaciones sin leer."
 
 
 def marcar_leidas(db, usuario_id):

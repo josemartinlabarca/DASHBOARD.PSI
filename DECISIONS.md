@@ -372,6 +372,13 @@ Autorizas a que se modifique `ARCHITECTURE.md` (que `CLAUDE.md` reserva al human
 - **Alternativas descartadas:** A (marcar al abrir el panel: un GET que escribe y compite por el bloqueo de escritura), C (quitar el contador: contradice SPEC §5), D (botón por fila: demasiado ruido), tope con índice nuevo (cambio de esquema innecesario hoy), sin tope.
 - **Pendiente del humano:** añadir la ruta `POST /notificaciones/leidas` a `ARCHITECTURE.md` (el agente no puede editarlo).
 
+## D-036 — Dashboard del profesional (T-12)
+- **Fecha:** 2026-10-09 09:45
+- **Decisión:** `/profesional` muestra «Próximas reservas» (paciente, fecha y hora de Chile, duración; la sesión en curso sigue como próxima, igual que D-034), «Horas libres» futuras propias, «Sesiones pasadas» y «Notificaciones». Las libres a 24 h o menos del inicio llevan «no reservable»; el cálculo es la función única `paciente.es_reservable` (`inicio - ahora > 24 h`, estricto, instantes absolutos), que ahora también usa `listar_horas_libres_futuras`. Del paciente solo se muestra el nombre (nunca el correo). Ruta `POST /profesional/notificaciones/leidas` (solo rol profesional, CSRF, solo sus filas) que comparte con la del paciente `notificaciones.mensaje_marcadas` (texto del flash). `listar_de_usuario` devuelve `(lista, sin_leer, hay_mas)`: pide `TOPE_PANEL + 1` filas, recorta y avisa del tope solo si llegó la fila 21 (cierra R-03 de T-11b); la plantilla lee `TOPE_PANEL`, no un 20 escrito a mano.
+- **Archivos nuevos (regla 10):** `app/templates/_notificaciones.html` (panel de notificaciones compartido por paciente y profesional, para no duplicarlo) y `tests/test_dashboard_profesional.py`. Sin dependencias, sin cambio de esquema.
+- **Pendiente del humano:** añadir a `ARCHITECTURE.md` la ruta `POST /profesional/notificaciones/leidas` (profesional) y la plantilla `_notificaciones.html`.
+- **Alternativas descartadas:** duplicar el bloque de notificaciones en cada plantilla; un segundo cálculo de las 24 h para el rótulo.
+
 ## Plantilla para nuevas decisiones
 
 ```
