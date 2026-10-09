@@ -216,6 +216,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Qué:** `/paciente` con próxima sesión, historial y campana de notificaciones (US-10).
 - **Nota de revisión de T-02f (`hora_id` puede ser NULL, D-016):** T-11: listar notificaciones con `LEFT JOIN` a `horas` y mostrar el mensaje sin enlace cuando `hora_id` es NULL (D-016).
 - **Nota (revisión de T-09, R-09):** ordenar las notificaciones por `id` (creciente en el orden de inserción), no por `creada_en` (texto con offset: no ordena bien en la noche de cambio de horario).
+- **Nota (revisión de T-10, R-07):** el recordatorio es solo del paciente; las notificaciones se muestran por su `mensaje` (autosuficiente), nunca derivando datos de `hora_id`, que puede apuntar luego a una hora de otro paciente o quedar NULL. Mostrar también las de tipo `recordatorio`.
 - **Término:** Prueba de contenido por rol; revisión visual en navegador.
 
 ### T-12 — Dashboard del profesional
@@ -239,6 +240,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Estado:** PENDIENTE
 - **Depende de:** T-13
 - **Qué:** Verificador ejecuta el recorrido completo de `SPEC.md` §9; Revisor contrasta código contra SPEC.
+- **Notas de la revisión de T-10 (R-05, R-06):** (a) README: periodicidad del cron **menor que 24 h** (p. ej. cada 15 min), ejemplo de crontab, `DATABASE` y `OUTBOX_PATH` iguales a los del servidor web, y que el comando sale con código 1 si falla; (b) con D-029 el recorrido de SPEC §9 «recordatorio → cancelación» solo coincide a las 24 h exactas: el Verificador adelanta el `inicio` por SQL y cancela otra reserva, o el humano ajusta la redacción de §9.
 - **Término:** Todas las casillas de "Definición de terminado" marcadas; hallazgos en `REVIEW.md` resueltos.
 
 ---
@@ -302,6 +304,9 @@ en qué tarea conviene absorberlo.
 | T-09 R-04 | `OUTBOX_PATH` sigue enlaces simbólicos y una ruta relativa depende del directorio de trabajo; documentar en el README | T-14 |
 | T-09 R-06 | En la hora repetida de abril el límite de cancelación del texto es ambiguo (conservador) | T-14 |
 | T-09 R-07 | Pruebas débiles: la de contraseña es casi tautológica, la de «no escriben en el proyecto» solo mira la configuración, los permisos 0o644 no tienen prueba (la mutación a 0o666 sobrevive) y el único test multiproceso usa horas distintas por proceso | cuando se toque `tests/test_notificaciones.py` |
+| T-10 R-01 | `send-reminders` con `DATABASE` inexistente, en un directorio inexistente o sin tablas muestra una traza y sale con 1; con un archivo inexistente crea un `.db` vacío (`get_db` hace `sqlite3.connect`) | T-14 |
+| T-10 R-02/R-04 | Con la base bloqueada más de 5 s el comando muere con `database is locked` (el cron reintenta); un `INSERT` que falle bloquea los recordatorios de todos en cada ejecución (consecuencia del todo-o-nada, aceptado en v1) | T-14 |
+| T-10 R-03/R-09 | Mutantes equivalentes que sobreviven: quitar el filtro `recordatorio_enviado = 0` del `SELECT` o del `UPDATE` por separado (se respaldan; juntas fallan 4 pruebas), quitar el `rowcount`, `desde = ahora`; faltan pruebas de `fold=1`, del comando con base inexistente y de la ventana inferior | cuando se toque `tests/test_recordatorios.py` |
 | T-02c #9 | En `tests/test_esquema.py` la cobertura de NOT NULL y FK es triplemente redundante y la rama `usuarios` de `test_not_null_rechaza_null` es poco legible | cuando se toque ese archivo |
 
 ---

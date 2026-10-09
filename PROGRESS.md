@@ -4,9 +4,9 @@ Los agentes agregan aquí una entrada al final de cada vuelta. Lo más reciente 
 
 ## Estado actual
 
-- Fase: 3 (Horas) en curso
-- Última tarea hecha: T-08d (D-022 y D-023 aplicadas)
-- Próxima tarea: revisión de T-08d; luego T-08e y T-09
+- Fase: 4 (Notificaciones) en curso
+- Última tarea hecha: T-10 (recordatorios), revisada y aprobada
+- Próxima tarea: T-11 (dashboard del paciente); luego T-12
 
 ## Bloqueos y dudas abiertas
 
