@@ -227,6 +227,15 @@ Aquí el ciclo ya es rutina: implementador → mi verificación → revisor → 
 - **Revisor: APROBADA** (4 bajos, 9 informativos). Probó el servidor real con `curl` (anónimo, paciente, tokens falsos o de otro usuario) y comprobó que la suite lenta no la causó T-12 (el commit anterior ya tardaba lo mismo). Hallazgo curioso: si Ana reserva, cancela y Beto reserva la misma hora, los avisos viejos de Ana enlazan a la fila de Beto. Queda para T-13.
 - **Lección:** una regla escrita no basta para evitar un error repetido; hay que comprobarlo mecánicamente. La próxima vez que se pueda, conviene que la verificación compare las horas de PROGRESS contra `git log` automáticamente.
 
+### Vueltas 29 a 31 — T-13, T-13b y T-13c: la cara de la aplicación (y una prueba que fallaba "de vez en cuando")
+- **T-13:** hoja de estilos con tonos calmados y tema oscuro, páginas de error en español para 400/403/404/413/500, favicon, enlace «Saltar al contenido», contrastes verificados con la fórmula WCAG (peor par de texto 5,07:1). Capturas a 360, 390 y 1280 px mirando los PNG de verdad. 1705 pruebas.
+- **Lo que encontré yo, repitiendo la suite:** la suite falló 1 vez de 7 en el primer entorno. Repetí hasta capturar el fallo: el token CSRF (64 caracteres hexadecimales al azar) a veces contiene «abc» y una prueba de T-12 afirmaba que «abc» no aparecía en la página. Frecuencia real ~2 %. **El revisor de T-12 no lo vio porque corrió la suite una sola vez.** Lo convertí en **T-13b**: la prueba usa ahora un marcador imposible por azar, se auditaron 185 líneas de pruebas y se creó una guarda que reejecuta las pruebas de ausencia de texto con un token hostil.
+- **Revisor de T-13: APROBADA.** Lo mejor: 58 capturas y un hallazgo real, a 360 px la columna «Cancelar» quedaba cortada y las fechas se partían a mitad. También que el flash decía «Listo: Listo, reservaste…», y que la guarda de T-13b dependía de nombres de variable.
+- **Tu decisión (D-039):** el logo del encabezado lleva al panel del usuario cuando hay sesión.
+- **T-13c:** a 640 px o menos cada fila de las tablas pasa a ser una tarjeta (con CSS y `data-label`, sin cambiar el HTML de las tablas), flash corregido, logo por rol, guarda más robusta, y pruebas para las 5 mutaciones de accesibilidad que sobrevivían. 1726 pruebas.
+- **Mi verificación de T-13c:** diff, 47 líneas eliminadas de pruebas (la guarda se reescribió), suite 6 veces (3 seguidas + 3 variantes de entorno), y **mis propias capturas a 320 px** con un profesional y un paciente reales: tarjetas legibles, sin scroll horizontal. Aquí no lancé un revisor aparte (como en T-08c): el riesgo es acotado, hay verificación visual propia, y el revisor ya había comprobado todo salvo lo que cambió.
+- **Lección:** *repite la suite varias veces antes de dar por buena una tarea;* las pruebas intermitentes no aparecen en la primera pasada y erosionan la confianza en todas las demás. Y una prueba que busca una cadena corta en una página completa es frágil si la página contiene datos aleatorios.
+
 ### Historial git resultante
 
 ```
@@ -257,12 +266,12 @@ docs: documentación base del proyecto Agenda Psi
 
 ## 4. Estado actual y qué sigue
 
-- Hecho: **T-01 a T-12** (incluidas T-02b–g, T-03b/c, T-04b, T-05b, T-08b–e y T-11b; 1677 pruebas pasando).
+- Hecho: **T-01 a T-13** (incluidas las tareas «b/c/d/e/f/g» de endurecimiento; 1726 pruebas pasando).
 - **Decisiones tuyas ya tomadas (D-035 incluida):** D-007 (esquema), D-015 (correo), D-016 (borrar horas), D-017 (formato de fecha), D-018 (carácter nulo). Pendientes: **D-020** (caracteres invisibles en el correo), **D-022** (revocar la cookie al cerrar sesión), **D-023** (un solo profesional) y **D-029** (reservar con menos de 24 h; conviene antes de T-09).
-- Siguiente: **T-13** (estilo) → T-14 (recorrido final).
+- Siguiente: **T-14** (recorrido de punta a punta y revisión final), que dividiré en partes porque acumula mucho backlog de seguridad.
 - Pendiente solo tuyo: autorizar (o no) que `app/correo.py` figure en `ARCHITECTURE.md`; es una línea de documentación.
 
-**Tu primer ejercicio:** lanza tú mismo la vuelta de T-13 con el prompt del Paso B y revisa el resultado con la lista del Paso C. Antes de dar por buena cualquier tarea, haz cinco preguntas extra: *¿rompió algo documentado?*, *¿las pruebas fallarían si quitara la protección?*, *¿el reporte afirma algo que no ejecutó?*, *¿cómo interactúa esto con las tareas futuras?* y *¿el arreglo propuesto realmente funciona?*
+**Tu primer ejercicio:** lanza tú mismo la vuelta de T-14 con el prompt del Paso B y revisa el resultado con la lista del Paso C. Antes de dar por buena cualquier tarea, haz cinco preguntas extra: *¿rompió algo documentado?*, *¿las pruebas fallarían si quitara la protección?*, *¿el reporte afirma algo que no ejecutó?*, *¿cómo interactúa esto con las tareas futuras?* y *¿el arreglo propuesto realmente funciona?*
 
 ## 5. Consejos profesionales (lo que hace la diferencia)
 
@@ -306,6 +315,8 @@ docs: documentación base del proyecto Agenda Psi
 38. **Si falta una regla de producto, el agente se detiene y propone; no inventa.** Dos opciones, costo y riesgo bastan para que el humano decida en un mensaje.
 39. **El reporte de un agente también se revisa.** Una frase inexacta sobre qué prueba mataba una mutación se corrigió con una nota visible, no en silencio.
 40. **Automatiza lo que se repite.** Tres horas inventadas pese a una regla escrita: la regla no basta, hay que verificarlo con un comando.
+41. **Repite la suite varias veces antes de aceptar.** Una prueba que falla el 2 % de las veces no aparece en una sola pasada; un revisor que corre la suite una vez no la ve.
+42. **Una cadena corta buscada en una página completa es frágil** si la página lleva datos aleatorios (tokens, ids). Busca en la zona exacta o usa un marcador imposible por azar.
 
 ## 6. Trampas de principiante que ya viste en acción
 
