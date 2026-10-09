@@ -325,6 +325,23 @@ def usuario_actual():
     return g.usuario_actual
 
 
+def destino_marca():
+    """Destino del logo del encabezado (D-039): el panel de quien tiene sesión, o el inicio.
+
+    Las páginas de error no lo llaman (D-008: no leen la sesión). Si la base no se puede leer,
+    el logo lleva al inicio en vez de romper la página.
+    """
+    try:
+        usuario = usuario_actual()
+    except sqlite3.Error:
+        usuario = None
+    if usuario is not None and usuario["rol"] == "profesional":
+        return url_for("profesional.dashboard")
+    if usuario is not None and usuario["rol"] == "paciente":
+        return url_for("paciente.dashboard")
+    return url_for("inicio")
+
+
 def _exigir(rol=None):
     """Decorador: sin sesión redirige a /login; con otro rol responde 403."""
 

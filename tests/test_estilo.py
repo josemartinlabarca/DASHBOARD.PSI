@@ -292,6 +292,164 @@ def test_los_campos_con_error_se_marcan_aria_invalid(client):
     assert "aria-invalid" not in client.get("/registro").text
 
 
+# ------------------------------- T-13c: logo, flash y accesibilidad ----
+
+MARCA = re.compile(r'<a class="marca" href="([^"]*)">')
+
+
+def destino_del_logo(cliente, ruta):
+    r = cliente.get(ruta)
+    return MARCA.search(r.text).group(1)
+
+
+def test_el_logo_lleva_al_inicio_sin_sesion(app, client):
+    for ruta in ("/", "/login", "/registro", "/no-existe"):
+        assert destino_del_logo(client, ruta) == "/", ruta
+
+
+def test_el_logo_lleva_al_panel_del_paciente_con_sesion(app):
+    nuevo_profesional(app)
+    ana = nuevo_paciente(app)
+    for ruta in ("/", "/paciente", "/paciente/horas", "/login", "/registro"):
+        assert destino_del_logo(ana, ruta) == "/paciente", ruta
+
+
+def test_el_logo_lleva_al_panel_del_profesional_con_sesion(app):
+    nuevo_profesional(app)
+    pro = app.test_client()
+    iniciar(pro, "pro@example.cl")
+    for ruta in ("/", "/profesional", "/profesional/horas/nueva", "/login"):
+        assert destino_del_logo(pro, ruta) == "/profesional", ruta
+
+
+def test_el_logo_vuelve_al_inicio_tras_cerrar_sesion(app):
+    from tests.test_login import extraer_token
+    nuevo_profesional(app)
+    ana = nuevo_paciente(app)
+    assert destino_del_logo(ana, "/paciente") == "/paciente"
+    ana.post("/logout", data={"csrf_token": extraer_token(ana.get("/paciente").text)})
+    assert destino_del_logo(ana, "/login") == "/"
+
+
+def test_las_paginas_de_error_no_leen_la_sesion_y_su_logo_va_al_inicio(app):
+    nuevo_profesional(app)
+    ana = nuevo_paciente(app)
+    assert destino_del_logo(ana, "/no-existe") == "/"  # D-008: el error no consulta la sesión
+    assert destino_del_logo(ana, "/profesional") == "/paciente"  # 403 del rol: esa página sí lee la sesión
+
+
+def test_el_flash_de_reserva_no_repite_la_palabra_listo(app):
+    from tests.test_reservar import reservar_y_aviso
+    pro_id = nuevo_profesional(app)
+    ana = nuevo_paciente(app)
+    hora = insertar(app, pro_id, "2026-10-20T10:00:00")
+    categoria, texto = reservar_y_aviso(ana, hora)
+    assert categoria == "exito" and texto.startswith("Reservaste tu hora: ")
+    html = ana.get("/paciente").text
+    assert "Listo" not in html  # el prefijo «Listo: » lo pone la hoja, una sola vez
+
+
+def test_ningun_mensaje_de_exito_empieza_con_listo():
+    # La hoja antepone «Listo: » a todo flash de éxito (R-02 de T-13): el texto no debe repetirlo.
+    for ruta in sorted(RAIZ.glob("*.py")):
+        for literal in re.findall(r"""flash\(\s*["']([^"']*)["']""", ruta.read_text(encoding="utf-8")):
+            assert not literal.lower().startswith("listo"), (ruta.name, literal)
+    from app import paciente
+    assert not paciente.MENSAJE_CONFIRMACION.lower().startswith("listo")
+
+
+PLANTILLAS_CON_BASE = ["inicio", "login", "registro", "horas_libres", "paciente", "profesional", "nueva_hora", "error"]
+
+
+def test_todas_las_paginas_tienen_el_enlace_saltar_y_el_destino(app, client):
+    pro_id = nuevo_profesional(app)
+    ana = nuevo_paciente(app)
+    pro = app.test_client()
+    iniciar(pro, "pro@example.cl")
+    paginas = [(client, "/"), (client, "/login"), (client, "/registro"), (client, "/no-existe"),
+               (ana, "/paciente"), (ana, "/paciente/horas"), (pro, "/profesional"),
+               (pro, "/profesional/horas/nueva")]
+    for cliente, ruta in paginas:
+        html = cliente.get(ruta).text
+        assert '<a class="saltar" href="#contenido">Saltar al contenido</a>' in html, ruta
+        assert html.count('id="contenido"') == 1 and '<main id="contenido">' in html, ruta
+    assert pro_id
+    # el enlace va antes que la cabecera y que cualquier otro enlace (primer Tab)
+    base = (RAIZ / "templates" / "base.html").read_text(encoding="utf-8")
+    assert base.index('class="saltar"') < base.index('class="cabecera"') < base.index('id="contenido"')
+
+
+def test_las_tablas_con_scroll_se_pueden_recorrer_con_teclado(app):
+    pro_id = nuevo_profesional(app)
+    ana = nuevo_paciente(app)
+    reservada(app, pro_id, "2026-10-12T10:00:00")
+    reservada(app, pro_id, "2026-10-01T10:00:00")
+    insertar(app, pro_id, "2026-10-14T09:00:00")
+    pro = app.test_client()
+    iniciar(pro, "pro@example.cl")
+    paginas = [(ana, "/paciente"), (ana, "/paciente/horas"), (pro, "/profesional")]
+    for cliente, ruta in paginas:
+        html = cliente.get(ruta).text
+        regiones = re.findall(r'<div class="tabla-scroll"([^>]*)>', html)
+        assert regiones and len(regiones) == html.count("<table"), ruta
+        for atributos in regiones:
+            assert 'tabindex="0"' in atributos and 'role="region"' in atributos, (ruta, atributos)
+            assert re.search(r'aria-label="[^"]+"', atributos), (ruta, atributos)
+    # y en el código: ninguna plantilla abre un contenedor de tabla sin tabindex
+    for ruta in RAIZ.glob("templates/*.html"):
+        for atributos in re.findall(r'<div class="tabla-scroll"([^>]*)>', ruta.read_text(encoding="utf-8")):
+            assert 'tabindex="0"' in atributos, ruta.name
+
+
+def test_las_notificaciones_nuevas_se_distinguen_sin_depender_del_color(app):
+    nuevo_profesional(app)
+    ana = nuevo_paciente(app)
+    notificar(app, ANA, "Aviso sin leer.", tipo="confirmacion")
+    html = ana.get("/paciente").text
+    assert '<li class="no-leida">' in html and "(nueva" in html
+    # el subrayado del título de las nuevas y el borde grueso salen de la hoja
+    assert re.search(r"\.notificaciones li\.no-leida strong\s*\{[^}]*text-decoration:\s*underline", CSS)
+    assert re.search(r"\.notificaciones li\s*\{[^}]*border-left-width:\s*8px", CSS)
+    assert not re.search(r"\.notificaciones li\.leida strong\s*\{[^}]*underline", CSS)
+
+
+def test_los_campos_de_agregar_hora_con_error_se_marcan_aria_invalid(app):
+    from tests.test_login import extraer_token
+    nuevo_profesional(app)
+    pro = app.test_client()
+    iniciar(pro, "pro@example.cl")
+    assert "aria-invalid" not in pro.get("/profesional/horas/nueva").text
+    token = extraer_token(pro.get("/profesional/horas/nueva").text)
+    r = pro.post("/profesional/horas/nueva",
+                 data={"csrf_token": token, "fecha": "no-es-fecha", "hora": "", "duracion": "0"})
+    assert r.status_code == 200
+    campos = re.findall(r'<input[^>]*aria-invalid="true"[^>]*>', r.text)
+    assert sorted(re.search(r'name="(\w+)"', c).group(1) for c in campos) == ["duracion", "fecha", "hora"]
+
+
+def test_la_hoja_apila_las_filas_de_las_tablas_en_pantallas_angostas():
+    movil = re.search(r"@media \(max-width: 40em\)\s*\{(.*?)\n\}\n", CSS, re.S).group(1)
+    assert re.search(r"table, tbody, tr, th, td\s*\{\s*display: block", movil)
+    assert 'content: attr(data-label)' in movil
+    assert "clip-path" in movil  # los encabezados se ocultan a la vista, no con display:none
+
+
+def test_las_celdas_de_datos_de_los_paneles_llevan_su_rotulo(app):
+    pro_id = nuevo_profesional(app)
+    ana = nuevo_paciente(app)
+    reservada(app, pro_id, "2026-10-12T10:00:00")
+    insertar(app, pro_id, "2026-10-14T09:00:00")
+    pro = app.test_client()
+    iniciar(pro, "pro@example.cl")
+    for cliente, ruta in ((ana, "/paciente"), (pro, "/profesional")):
+        html = cliente.get(ruta).text
+        filas = re.findall(r"<tbody>(.*?)</tbody>", html, re.S)
+        assert filas, ruta
+        for cuerpo in filas:
+            for celda in re.findall(r"<td([^>]*)>", cuerpo):
+                assert "data-label=" in celda or 'class="accion"' in celda, (ruta, celda)
+
+
 # --------------------------------------------- contraste (WCAG 2.x AA) ----
 
 

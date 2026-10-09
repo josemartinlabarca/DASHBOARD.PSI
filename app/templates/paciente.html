@@ -30,9 +30,9 @@
         {% for reserva in reservas %}
           <tr id="reserva-{{ reserva.id }}">
             <th scope="row">{{ reserva.inicio }}</th>
-            <td>{{ reserva.duracion_min }} min</td>
-            <td>{{ reserva.profesional }}</td>
-            <td>
+            <td data-label="Duración">{{ reserva.duracion_min }} min</td>
+            <td data-label="Profesional">{{ reserva.profesional }}</td>
+            <td class="accion">
               {% if reserva.cancelable %}
                 <form method="post" action="{{ url_for('paciente.cancelar', hora_id=reserva.id) }}">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -65,8 +65,8 @@
         {% for sesion in pasadas %}
           <tr>
             <th scope="row">{{ sesion.inicio }}</th>
-            <td>{{ sesion.duracion_min }} min</td>
-            <td>{{ sesion.profesional }}</td>
+            <td data-label="Duración">{{ sesion.duracion_min }} min</td>
+            <td data-label="Profesional">{{ sesion.profesional }}</td>
           </tr>
         {% endfor %}
       </tbody>

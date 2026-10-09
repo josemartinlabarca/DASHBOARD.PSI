@@ -44,6 +44,7 @@ def create_app(test_config=None):
     # Después de _preparar_secret_key: su before_request (D-008) corre primero.
     seguridad.init_app(app)
     errores.init_app(app)
+    app.context_processor(lambda: {"destino_marca": auth.destino_marca})
     app.register_blueprint(auth.bp)
     app.register_blueprint(paciente.bp)
     app.register_blueprint(profesional.bp)

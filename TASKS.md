@@ -251,7 +251,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Origen:** corrida repetida de la suite del orquestador durante la verificación de T-13.
 
 ### T-13c — Cerrar los hallazgos de la revisión de T-13 (D-039 aprobada)
-- **Estado:** PENDIENTE
+- **Estado:** HECHA (2026-10-09 12:17)
 - **Depende de:** T-13, T-13b
 - **Qué:** (1) **R-01 (media):** a 360 px la columna «Cancelar»/«Eliminar» queda cortada (339 px de contenido en 311 visibles, también con el foco) y las fechas se parten a mitad («12-10-» / «2026 11:00»): que las tablas de reservas y de agenda sean usables a 320, 360 y 390 px (por ejemplo, formato de tarjeta en pantallas angostas conservando `th scope`, `caption` y el HTML del que dependen las pruebas, o columnas que no se partan y acciones siempre alcanzables); medir con Playwright a 320, 360, 390 y 1280 px, claro y oscuro. (2) **R-02:** el flash dice «Listo: Listo, reservaste…»: la hoja antepone «Listo: » y el mensaje ya empieza con «Listo,»; arreglar sin duplicar y con prueba. (3) **R-03 / D-039 (aprobada):** con sesión iniciada, el logo del encabezado lleva a `/paciente` o `/profesional` según el rol; sin sesión, al inicio; con pruebas por rol y anónimo. (4) **R-04 (media):** la guarda de T-13b detecta pruebas por nombre de variable y no ve `get_data(as_text=True)` ni variables intermedias: hacerla robusta (p. ej. interceptar la respuesta/ejecutar todas las pruebas de páginas con el token hostil forzado en una pasada en lugar de depender de nombres) sin sumar más de unos segundos. (5) **R-05:** pruebas para las 5 mutaciones de accesibilidad que sobreviven: enlace «Saltar», `id="contenido"`, `tabindex` de las tablas con scroll, subrayado de «nueva» y `aria-invalid` en «Agregar hora». (6) Corregir las 4 filas del backlog marcadas «T-13» que ya no aplican o quedaron sin hacer (R-06): hacerlas o reasignarlas a T-14 con motivo.
 - **Término:** a 320, 360 y 390 px no hay contenido cortado ni scroll horizontal de página y todas las acciones son alcanzables con teclado; las mutaciones de R-01…R-05 hacen fallar al menos una prueba; `python3 -m pytest` pasa 3 veces seguidas.
@@ -292,7 +292,7 @@ en qué tarea conviene absorberlo.
 | T-02e R-05 | Quedan 4 pruebas de rechazo con `IntegrityError` desnudo (2 en `test_esquema.py`, 2 en `test_db.py`), duplicadas por otras que sí exigen el CHECK | cuando se toque ese archivo |
 | T-03c R-11 | La suite no quedó más rápida (≈11 s): `test_esquema.py` gasta ~4 s en crear la base de cada prueba y la prueba exhaustiva de idempotencia 2,4 s. Fixture de módulo/sesión para la base de solo lectura | cuando la suite pase de ~15 s |
 | T-03c R-12 | Los puntos no asignados (Cn) dependen de la versión de Unicode de Python: un Python más antiguo podría rechazar en el login un correo ya registrado | T-14 (fijar versión mínima de Python o revisar) |
-| T-04 R-09 | Mensajes de Click (contraseñas que no coinciden) y la página 400 en inglés; accesibilidad del login sin pruebas | T-13 |
+| T-04 R-09 | Mensajes de Click (contraseñas que no coinciden) y la página 400 en inglés; accesibilidad del login sin pruebas | T-14 (reasignada en T-13c: los mensajes de Click son del comando CLI, no de la hoja; la página 400 ya está en español desde T-13) |
 | T-04 R-08 | Con la clave de desarrollo pública (`FLASK_DEBUG=1`) cualquiera puede forjar una cookie y entrar al panel del profesional (ya anotado en T-02d #1) | T-14 |
 | T-04 | Sin límite de intentos de login ni bloqueo | T-14 |
 | T-04b R-01 | Sobreviven 3 mutaciones del CSRF: aceptar un prefijo del token, eximir `/login` si el cuerpo es JSON y con cuerpo vacío | cuando se toque `tests/test_seguridad.py` |
@@ -307,8 +307,8 @@ en qué tarea conviene absorberlo.
 | T-05 R-07 | El panel oculta las horas ya iniciadas pero aún no terminadas; decidir si se muestran | T-06/T-08 |
 | T-05 R-12 | La suite supera 35 s; el umbral de acción es 60 s | cuando supere 60 s |
 | T-05b R-02 | `buscar_solape` lee todas las horas del profesional (también las pasadas) dentro del bloqueo de escritura; con 50 000 filas y 12 procesos aparece «database is locked». Limitar a una ventana de fechas alrededor del candidato (0,16 ms medido) | T-14 |
-| T-06 R-01 | `/paciente/horas` sin tope ni paginación: con 50 000 horas libres tarda 1,28 s y pesa 6,55 MB; ventana de fechas o tope de N filas | T-13/T-14 |
-| T-06 R-04 | Tabla sin `caption`/`scope`, sin hora de término ni día de la semana, página sin cierre de sesión | T-13 |
+| T-06 R-01 | `/paciente/horas` sin tope ni paginación: con 50 000 horas libres tarda 1,28 s y pesa 6,55 MB; ventana de fechas o tope de N filas | T-14 (reasignada en T-13c: elegir el tope cambia lo que ve el paciente y no estaba entre los 6 puntos) |
+| T-06 R-04 | Tabla sin `caption`/`scope` (hecho en T-13), sin hora de término ni día de la semana, página sin cierre de sesión | T-14 (reasignada en T-13c: hora de término y día de la semana cambian el formato de fecha que fijan muchas pruebas; el cierre de sesión queda a un clic con el logo, que ahora lleva al panel, D-039) |
 | T-06 R-07 | Hora inventada en PROGRESS por el implementador (segunda vez, regla 8): si se repite, endurecer con una comprobación automática (script que compare con el commit) | si reincide |
 | T-08 R-06 | ~~Una sesión en curso desaparece de «Mis reservas»~~ — resuelto por T-11 (D-034): aparece como «Próxima sesión» en curso | — |
 | T-08 R-07 | El `SELECT` de cancelar no trae `profesional_id` ni el nombre del paciente (T-09 los necesitará); `outbox.log` se escribe después del commit; T-10 debe leer el estado dentro de `BEGIN IMMEDIATE` | T-09/T-10 |
@@ -321,7 +321,7 @@ en qué tarea conviene absorberlo.
 | T-08e R-02 | La suite tarda ~34 s (el criterio firme de D-031 es 31,5 s): dos recorridos de 1,1 M de puntos de código (≈3,7 s), la prueba de dos procesos (1,5 s) y cientos de pruebas que montan app y base; revisar cuando pase de 45 s | cuando pase de 45 s |
 | T-08e R-03 | Un POST forzado a una hora oculta distingue «libre» de «ocupada» (el estado se comprueba antes que la anticipación); ya pasaba con las horas pasadas | T-14 |
 | T-08e R-04/R-05 | Letras en blanco U+13441/U+13442 aceptadas; una cuenta guardada con un carácter hoy rechazado ya no puede iniciar sesión (sin migración); rechazados nuevos: punto medio catalán (`col·legi`) y fracciones | T-14 |
-| T-08e R-11 | Mensaje a las 24 h exactas dice «menos» (decir «no más de»); el mensaje de solape sugiere cancelar algo que a veces no se puede; README sin la regla 7 | T-13 |
+| T-08e R-11 | Mensaje a las 24 h exactas dice «menos» (decir «no más de»); el mensaje de solape sugiere cancelar algo que a veces no se puede; README sin la regla 7 | T-14 (reasignada en T-13c: son textos de reglas de negocio y del README, fuera de los 6 puntos) |
 | T-09 R-02 | `outbox.log` queda con los permisos del umask (0644) y contiene nombres y correos | T-14 |
 | T-09 R-03 | `outbox.log` y `notificaciones` crecen sin límite; un paciente puede repetir reservar y cancelar sin freno | T-14 (junto al límite de frecuencia) |
 | T-09 R-04 | `OUTBOX_PATH` sigue enlaces simbólicos y una ruta relativa depende del directorio de trabajo; documentar en el README | T-14 |

@@ -300,15 +300,66 @@ thead th { background: var(--nueva-fondo); font-size: 0.9rem; }
 tbody th { font-weight: 600; min-width: 7rem; }
 td .nota-fila { color: var(--suave); }
 
+/* En pantallas angostas (hasta 640 px) cada fila pasa a ser una tarjeta: la fecha arriba, cada dato
+   con su rótulo (tomado de `data-label`) y la acción al final. Así no hay columnas cortadas ni
+   fechas partidas a 320, 360 ni 390 px. El HTML sigue siendo una tabla (caption, th scope); el
+   contenedor conserva su desplazamiento como último recurso. Los encabezados de columna se
+   ocultan visualmente porque cada dato ya lleva su rótulo. */
 @media (max-width: 40em) {
   main { padding-inline: 0.75rem; }
   section { padding: 0.65rem; }
-  th, td { padding: 0.5rem 0.45rem; }
-  tbody th { min-width: 5.7rem; }
-  td:nth-child(2) { white-space: nowrap; }
-  table { font-size: 0.9rem; }
-  thead th { font-size: 0.8rem; }
-  td button { padding-inline: 0.45rem; font-size: 0.85rem; }
+
+  .tabla-scroll { border: 0; border-radius: 0; }
+  table, tbody, tr, th, td { display: block; }
+  table { font-size: 1rem; }
+  thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  caption { display: block; padding-inline: 0; }
+  tbody tr {
+    margin: 0 0 0.75rem;
+    padding: 0.6rem 0.75rem;
+    border: 1px solid var(--borde);
+    border-radius: 8px;
+  }
+  tbody th, tbody td { border-top: 0; padding: 0.15rem 0; }
+  tbody th { min-width: 0; padding-bottom: 0.3rem; font-size: 1.05rem; }
+  td[data-label] { position: relative; padding-left: 6.25rem; }
+  td[data-label]::before {
+    content: attr(data-label);
+    position: absolute;
+    left: 0;
+    top: 0.15rem;
+    width: 5.75rem;
+    font-weight: 600;
+    color: var(--suave);
+  }
+  td.accion { padding-top: 0.45rem; }
+
+  /* «Horas disponibles» usa celdas simples (el HTML lo fijan pruebas): mismas tarjetas por posición. */
+  [aria-label="Tabla de horas disponibles"] tbody td { position: relative; padding-left: 6.25rem; }
+  [aria-label="Tabla de horas disponibles"] tbody td:first-child {
+    padding: 0 0 0.3rem;
+    font-weight: 600;
+    font-size: 1.05rem;
+  }
+  [aria-label="Tabla de horas disponibles"] tbody td:nth-child(2)::before,
+  [aria-label="Tabla de horas disponibles"] tbody td:nth-child(3)::before {
+    position: absolute;
+    left: 0;
+    top: 0.15rem;
+    width: 5.75rem;
+    font-weight: 600;
+    color: var(--suave);
+  }
+  [aria-label="Tabla de horas disponibles"] tbody td:nth-child(2)::before { content: "Duración"; }
+  [aria-label="Tabla de horas disponibles"] tbody td:nth-child(3)::before { content: "Profesional"; }
+  [aria-label="Tabla de horas disponibles"] tbody td:nth-child(4) { padding: 0.45rem 0 0; }
 }
 
 /* --- Notificaciones ------------------------------------------------------- */

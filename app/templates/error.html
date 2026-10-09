@@ -2,6 +2,7 @@
 {% block titulo %}{{ titulo }} · Agenda Psi{% endblock %}
 {# Las páginas de error no leen los mensajes flash ni la sesión: así también salen cuando la causa es la sesión o la clave. #}
 {% block mensajes %}{% endblock %}
+{% block destino_marca %}{{ url_for('inicio') }}{% endblock %}
 {% block contenido %}
   <section>
     <h1>{{ titulo }}</h1>

@@ -35,7 +35,7 @@ MENSAJE_SOLAPE = (
     "No pudimos reservarla: se cruza con otra hora que ya reservaste ({otra}). "
     "Cancela esa reserva o elige otro horario."
 )
-MENSAJE_CONFIRMACION = "Listo, reservaste tu hora: {cuando} con {profesional}."
+MENSAJE_CONFIRMACION = "Reservaste tu hora: {cuando} con {profesional}."
 
 # US-9: se puede cancelar con «al menos 24 horas» de anticipación, es decir, con
 # exactamente 24 h también (inicio - ahora >= 24 h, en instantes absolutos).

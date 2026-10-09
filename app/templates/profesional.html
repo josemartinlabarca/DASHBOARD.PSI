@@ -16,9 +16,9 @@
           {% for sesion in proximas %}
             <tr id="reserva-{{ sesion.id }}">
               <th scope="row">{{ sesion.inicio }}</th>
-              <td>{{ sesion.duracion_min }} min</td>
-              <td>{{ sesion.paciente }}</td>
-              <td>Reservada{% if sesion.en_curso %} (<strong>en curso</strong>){% endif %}</td>
+              <td data-label="Duración">{{ sesion.duracion_min }} min</td>
+              <td data-label="Paciente">{{ sesion.paciente }}</td>
+              <td data-label="Estado">Reservada{% if sesion.en_curso %} (<strong>en curso</strong>){% endif %}</td>
             </tr>
           {% endfor %}
         </tbody>
@@ -43,9 +43,9 @@
           {% for hora in libres %}
             <tr id="hora-{{ hora.id }}">
               <th scope="row">{{ hora.inicio }}</th>
-              <td>{{ hora.duracion_min }} min</td>
-              <td>Libre{% if not hora.reservable %} &middot; <strong>no reservable</strong> (faltan 24 horas o menos: ningún paciente podrá reservarla){% endif %}</td>
-              <td>
+              <td data-label="Duración">{{ hora.duracion_min }} min</td>
+              <td data-label="Estado">Libre{% if not hora.reservable %} &middot; <strong>no reservable</strong> (faltan 24 horas o menos: ningún paciente podrá reservarla){% endif %}</td>
+              <td class="accion">
                 <form method="post" action="{{ url_for('profesional.eliminar_hora', hora_id=hora.id) }}">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   <button type="submit">Eliminar</button>
@@ -77,8 +77,8 @@
           {% for sesion in pasadas %}
             <tr>
               <th scope="row">{{ sesion.inicio }}</th>
-              <td>{{ sesion.duracion_min }} min</td>
-              <td>{{ sesion.paciente }}</td>
+              <td data-label="Duración">{{ sesion.duracion_min }} min</td>
+              <td data-label="Paciente">{{ sesion.paciente }}</td>
             </tr>
           {% endfor %}
         </tbody>

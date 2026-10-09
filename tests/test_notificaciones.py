@@ -452,7 +452,7 @@ def test_un_fallo_del_log_no_cambia_el_mensaje_de_exito(app, pro_id, ana, log_ro
     from tests.test_reservar import aviso
 
     categoria, texto = aviso(ana, reservar(ana, insertar(app, pro_id, HORA)))
-    assert categoria == "exito" and "Listo, reservaste tu hora" in texto
+    assert categoria == "exito" and "Reservaste tu hora" in texto
 
 
 # ---------------------------------------------------------- inyección ----
