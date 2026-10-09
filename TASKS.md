@@ -200,7 +200,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Término:** Pruebas: se crean notificaciones para ambas partes y aparece la línea en el log.
 
 ### T-10 — Recordatorios 24 h antes
-- **Estado:** PENDIENTE
+- **Estado:** HECHA
 - **Depende de:** T-09
 - **Qué:** Comando `send-reminders` (US-12); no repite recordatorios (`recordatorio_enviado`).
 - **Nota de revisión de T-02f (`hora_id` puede ser NULL, D-016):** T-10: el recordatorio depende de `horas.recordatorio_enviado`, no de las notificaciones; añadir una prueba con una hora eliminada que tuvo notificaciones.

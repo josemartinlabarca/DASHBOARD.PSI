@@ -39,7 +39,7 @@ def create_app(test_config=None):
 
     db.init_app(app)
 
-    from . import auth, paciente, profesional, seguridad
+    from . import auth, notificaciones, paciente, profesional, seguridad
 
     # Después de _preparar_secret_key: su before_request (D-008) corre primero.
     seguridad.init_app(app)
@@ -47,6 +47,7 @@ def create_app(test_config=None):
     app.register_blueprint(paciente.bp)
     app.register_blueprint(profesional.bp)
     app.cli.add_command(auth.create_professional_command)
+    app.cli.add_command(notificaciones.send_reminders_command)
     auth.preparar_hash_falso(app, calcular_ahora=_se_va_a_servir())
 
     @app.route("/")

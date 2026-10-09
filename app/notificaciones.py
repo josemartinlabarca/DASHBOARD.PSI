@@ -1,6 +1,6 @@
-"""Notificaciones de confirmación y cancelación (T-09; US-11, US-13; SPEC §5).
+"""Notificaciones: confirmación, cancelación (T-09; US-11, US-13) y recordatorio (T-10; US-12; SPEC §5).
 
-Dos pasos, pensados para llamarse desde `reservar_hora` y `cancelar_reserva`:
+Dos pasos, pensados para llamarse desde `reservar_hora`, `cancelar_reserva` y `enviar_recordatorios`:
 
 1. `registrar(...)`: inserta las filas de `notificaciones` (paciente y profesional de la
    hora). Se llama **dentro** de la transacción `BEGIN IMMEDIATE`, antes del `commit`:
@@ -15,19 +15,24 @@ si la hora se elimina (D-016).
 """
 import os
 import unicodedata
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import NamedTuple
 
+import click
 from flask import current_app
+from flask.cli import with_appcontext
 
 from . import tiempo
 from .auth import zona_chile
+from .db import get_db
 
 NOMBRE_OUTBOX = "outbox.log"
 ANTICIPACION_CANCELAR_S = 24 * 3600  # igual que paciente.ANTICIPACION_CANCELAR_S (US-9)
 
 CONFIRMACION = "confirmacion"
 CANCELACION = "cancelacion"
+RECORDATORIO = "recordatorio"
+TIPOS = (CONFIRMACION, RECORDATORIO, CANCELACION)  # los mismos del CHECK de `notificaciones.tipo`
 
 MSG_CONFIRMACION_PACIENTE = (
     "Confirmamos tu hora con {profesional} el {cuando} (hora de Chile), de {duracion} minutos. "
@@ -42,6 +47,15 @@ MSG_CANCELACION_PACIENTE = (
 MSG_CANCELACION_PROFESIONAL = (
     "{paciente} canceló su hora contigo del {cuando} (hora de Chile). La hora quedó libre."
 )
+# US-12: el recordatorio es solo para el paciente (SPEC no pide avisar al profesional).
+MSG_RECORDATORIO_PACIENTE = (
+    "Recordatorio: tienes una hora con {profesional} el {cuando} (hora de Chile), "
+    "de {duracion} minutos."
+)
+
+# T-10: se recuerda una reserva que empieza dentro de las próximas 24 h (inclusive) y aún no empezó.
+ANTICIPACION_RECORDATORIO_S = 24 * 3600
+MARGEN_SQL_DIAS = 1  # el SQL trae de más (hora de pared); Python decide con el instante exacto
 
 
 class Aviso(NamedTuple):
@@ -80,7 +94,11 @@ def _limite_para_cancelar(inicio):
 
 
 def _mensajes(tipo, hora):
-    """`(mensaje para el paciente, mensaje para el profesional)` del aviso `tipo`."""
+    """`(mensaje para el paciente, mensaje para el profesional o None)` del aviso `tipo`.
+
+    Un tipo sin mensaje propio es un error (`ValueError`): antes cualquier tipo distinto de
+    `confirmacion` caía en el texto de cancelación (R-01 de la revisión de T-09).
+    """
     datos = {
         "profesional": hora["profesional"],
         "paciente": hora["paciente"],
@@ -93,11 +111,15 @@ def _mensajes(tipo, hora):
             MSG_CONFIRMACION_PACIENTE.format(**datos),
             MSG_CONFIRMACION_PROFESIONAL.format(**datos),
         )
-    return MSG_CANCELACION_PACIENTE.format(**datos), MSG_CANCELACION_PROFESIONAL.format(**datos)
+    if tipo == RECORDATORIO:
+        return MSG_RECORDATORIO_PACIENTE.format(**datos), None
+    if tipo == CANCELACION:
+        return MSG_CANCELACION_PACIENTE.format(**datos), MSG_CANCELACION_PROFESIONAL.format(**datos)
+    raise ValueError(f"Tipo de notificación sin mensaje: {tipo!r}")
 
 
 def registrar(db, tipo, hora_id, hora, paciente_id, creada_en):
-    """Inserta la notificación del paciente y la del profesional de la hora; devuelve los `Aviso`.
+    """Inserta la notificación del paciente y, si el tipo la tiene, la del profesional; devuelve los `Aviso`.
 
     `hora` es la fila leída dentro del bloqueo con `profesional_id`, `inicio`, `duracion_min`,
     `profesional`, `profesional_email`, `paciente` y `paciente_email`. No hace `commit`: lo hace
@@ -110,6 +132,8 @@ def registrar(db, tipo, hora_id, hora, paciente_id, creada_en):
     ]
     avisos = []
     for usuario_id, correo, mensaje in destinos:
+        if mensaje is None:  # este tipo no avisa a esa parte (recordatorio: solo el paciente)
+            continue
         db.execute(
             "INSERT INTO notificaciones (usuario_id, tipo, mensaje, hora_id, creada_en)"
             " VALUES (?, ?, ?, ?, ?)",
@@ -117,6 +141,82 @@ def registrar(db, tipo, hora_id, hora, paciente_id, creada_en):
         )
         avisos.append(Aviso(creada_en, correo, tipo, mensaje))
     return avisos
+
+
+# ---------------------------------------------------------- recordatorios ----
+
+SELECT_RECORDATORIOS = (
+    "SELECT h.id, h.inicio, h.duracion_min, h.paciente_id, h.profesional_id,"
+    " u.nombre AS profesional, u.email AS profesional_email,"
+    " p.nombre AS paciente, p.email AS paciente_email"
+    " FROM horas h JOIN usuarios u ON u.id = h.profesional_id"
+    " JOIN usuarios p ON p.id = h.paciente_id"
+    " WHERE h.estado = 'reservada' AND h.recordatorio_enviado = 0"
+    " AND h.inicio > ? AND h.inicio < ?"
+)
+
+
+def enviar_recordatorios(db, reloj=None):
+    """Envía el recordatorio de cada reserva pendiente que ya está a 24 h o menos. Devuelve cuántos.
+
+    Recordatorio = estado `reservada`, `recordatorio_enviado = 0` y `0 < inicio - ahora <= 24 h`
+    en instantes absolutos (a las 24 h exactas todavía se puede cancelar y SÍ se recuerda; a la
+    hora de inicio exacta ya empezó y no). Una reserva hecha entre 24 h y 24 h + el período del
+    cron queda pendiente y se envía en la siguiente ejecución.
+
+    Igual que reservar y cancelar: `BEGIN IMMEDIATE` primero y se lee **todo** dentro (reloj y
+    filas), así que una cancelación concurrente o una segunda ejecución ven el estado ya
+    decidido. Por hora, el `UPDATE ... recordatorio_enviado = 1` es condicional y se revisa
+    `rowcount`, y el aviso se inserta en la MISMA transacción; el log se escribe tras el `commit`.
+    El resultado es verdad en `horas.recordatorio_enviado` y `notificaciones`, no en el log.
+    """
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        ahora = (reloj or tiempo.ahora_chile)()
+        ahora_s = ahora.timestamp()
+        desde = ahora.replace(tzinfo=None) - timedelta(days=MARGEN_SQL_DIAS)
+        hasta = ahora.replace(tzinfo=None) + timedelta(days=MARGEN_SQL_DIAS + 1)
+        filas = db.execute(
+            SELECT_RECORDATORIOS,
+            (desde.strftime(tiempo.FORMATO_GUARDADO), hasta.strftime(tiempo.FORMATO_GUARDADO)),
+        ).fetchall()
+        pendientes = []
+        for fila in filas:
+            intervalo = tiempo.intervalo_guardado(fila)
+            if intervalo is None:
+                continue
+            faltan_s = intervalo[0] - ahora_s
+            if 0 < faltan_s <= ANTICIPACION_RECORDATORIO_S:
+                pendientes.append((intervalo[0], fila["id"], fila))
+        pendientes.sort(key=lambda t: (t[0], t[1]))
+        avisos = []
+        for _, hora_id, fila in pendientes:
+            marcadas = db.execute(
+                "UPDATE horas SET recordatorio_enviado = 1"
+                " WHERE id = ? AND estado = 'reservada' AND recordatorio_enviado = 0"
+                " AND paciente_id = ?",
+                (hora_id, fila["paciente_id"]),
+            ).rowcount
+            if marcadas != 1:
+                continue
+            avisos += registrar(
+                db, RECORDATORIO, hora_id, fila, fila["paciente_id"], ahora.isoformat(timespec="seconds")
+            )
+        db.commit()
+    except BaseException:
+        db.rollback()
+        raise
+    if avisos:  # sin recordatorios no se crea el log vacío
+        escribir_outbox(avisos)  # después del commit
+    return len(avisos)  # un aviso (el del paciente) por recordatorio
+
+
+@click.command("send-reminders")
+@with_appcontext
+def send_reminders_command():
+    """Envía el recordatorio a los pacientes cuya hora empieza en 24 horas o menos (sin repetir)."""
+    cantidad = enviar_recordatorios(get_db())
+    click.echo(f"Recordatorios enviados: {cantidad}.")
 
 
 # ------------------------------------------------------------ outbox.log ----
