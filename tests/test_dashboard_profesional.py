@@ -225,11 +225,11 @@ def test_filas_ilegibles_se_omiten_sin_romper(app, pro_id, pro, ana):
     with app.app_context():
         get_db().execute("UPDATE horas SET inicio='2026-13-45T99:99:99' WHERE id = ?", (mala_fecha,))
         get_db().execute("UPDATE horas SET inicio='2026-13-46T99:99:99' WHERE id = ?", (libre_mala,))
-        get_db().execute("UPDATE horas SET duracion_min='abc' WHERE id=?", (mala_duracion,))
+        get_db().execute("UPDATE horas SET duracion_min='no-numero-xyz!' WHERE id=?", (mala_duracion,))
         get_db().commit()
     html = panel(pro)
     assert agenda(html) == [] and pasadas(html) == [] and libres(html) == []
-    assert "2026-13-45" not in html and "abc" not in html
+    assert "2026-13-45" not in html and "no-numero-xyz!" not in html
     reservada(app, pro_id, "2026-10-14T10:00:00")
     reservada(app, pro_id, "2026-10-01T10:00:00")
     html = panel(pro)

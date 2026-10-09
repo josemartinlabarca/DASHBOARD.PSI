@@ -18,6 +18,7 @@ def test_generar_token_es_estable_dentro_de_la_sesion(app):
         assert len(generar_token()) == 64
 
 
+@pytest.mark.token_aleatorio
 def test_tokens_distintos_entre_sesiones(app):
     t1 = extraer_token(app.test_client().get("/registro").text)
     t2 = extraer_token(app.test_client().get("/registro").text)
@@ -61,6 +62,7 @@ def test_get_no_exige_token(client):
     assert client.get("/").status_code == 200
 
 
+@pytest.mark.token_aleatorio
 def test_token_vacio_o_de_otra_sesion_rechazado(app):
     otro = extraer_token(app.test_client().get("/registro").text)
     client = app.test_client()

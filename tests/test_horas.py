@@ -571,6 +571,7 @@ def test_agregar_sin_token_csrf_da_400(app, pro):
     assert horas(app) == []
 
 
+@pytest.mark.token_aleatorio
 def test_agregar_con_token_de_otra_sesion_da_400(app, pro, pro2):
     ajeno = extraer_token(pro2.get("/profesional/horas/nueva").text)
     r = pro.post(

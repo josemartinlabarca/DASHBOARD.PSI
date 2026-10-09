@@ -152,6 +152,7 @@ def test_la_sesion_guarda_solo_el_id_la_version_y_el_token_csrf(app, client):
     assert datos["sesion_version"] == 0 and type(datos["sesion_version"]) is int
 
 
+@pytest.mark.token_aleatorio
 def test_el_token_csrf_cambia_tras_iniciar_sesion(app, client):
     crear(app)
     antes = extraer_token(client.get("/login").text)
@@ -197,6 +198,7 @@ def test_cookie_de_sesion_httponly_samesite_lax(app, client):
 # ---------------------------------------------------------------- logout
 
 
+@pytest.mark.token_aleatorio
 def test_logout_limpia_la_sesion_y_cambia_el_token(app, client):
     crear(app)
     iniciar(client)
@@ -477,6 +479,7 @@ def test_login_con_token_incorrecto_da_400(app, client, token):
     assert r.status_code == 400
 
 
+@pytest.mark.token_aleatorio
 def test_login_con_token_de_otra_sesion_da_400(app):
     """Login CSRF: el atacante no puede usar su propio token en el navegador de la víctima."""
     crear(app)
@@ -488,6 +491,7 @@ def test_login_con_token_de_otra_sesion_da_400(app):
     assert "usuario_id" not in sesion(victima)
 
 
+@pytest.mark.token_aleatorio
 def test_el_token_anterior_al_login_ya_no_sirve_para_volver_a_iniciar_sesion(app, client):
     crear(app)
     token_viejo = extraer_token(client.get("/login").text)

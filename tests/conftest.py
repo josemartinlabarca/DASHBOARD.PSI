@@ -168,6 +168,36 @@ def hash_rapido(request, monkeypatch):
     yield
 
 
+# --- Token CSRF forzado (T-13b, D-038) ------------------------------------------
+# El token de sesión es hexadecimal aleatorio (64 caracteres): una prueba que afirme
+# `"abc" not in html` sobre una página completa falla por azar. Para comprobarlo de
+# forma determinista, `AGENDA_PSI_CSRF_TOKEN=<64 hex>` hace que toda la suite use
+# ese token: se reemplaza `secrets` dentro de `app.seguridad` (la app no se toca).
+VARIABLE_TOKEN = "AGENDA_PSI_CSRF_TOKEN"
+
+
+class _SecretsConTokenFijo:
+    def __init__(self, token):
+        self._token = token
+
+    def token_hex(self, nbytes=32):
+        assert nbytes * 2 == len(self._token), "el token forzado debe tener el mismo largo"
+        return self._token
+
+
+@pytest.fixture(autouse=True)
+def token_csrf_forzado(request, monkeypatch):
+    token = os.environ.get(VARIABLE_TOKEN)
+    if token and not request.node.get_closest_marker("token_aleatorio"):
+        assert len(token) == 64 and all(c in "0123456789abcdef" for c in token), (
+            f"{VARIABLE_TOKEN} debe tener 64 caracteres hexadecimales en minúscula"
+        )
+        from app import seguridad
+
+        monkeypatch.setattr(seguridad, "secrets", _SecretsConTokenFijo(token))
+    yield
+
+
 # --- Base de datos de plantilla (T-08b, D-031) -----------------------------------
 # Crear el esquema con `executescript` en cada prueba costaba ~7 ms (más el commit
 # con fsync). El esquema se crea UNA vez por sesión con el `init_db` de verdad y

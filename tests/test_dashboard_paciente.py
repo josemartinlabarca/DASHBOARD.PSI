@@ -201,20 +201,20 @@ def test_filas_ilegibles_se_omiten_sin_romper(app, pro_id, ana):
     mala_duracion = reservada(app, pro_id, "2026-10-13T10:00:00")
     with app.app_context():
         get_db().execute("UPDATE horas SET inicio='2026-13-45T99:99:99' WHERE id=?", (mala_fecha,))
-        get_db().execute("UPDATE horas SET duracion_min='abc' WHERE id=?", (mala_duracion,))
+        get_db().execute("UPDATE horas SET duracion_min='no-numero-xyz!' WHERE id=?", (mala_duracion,))
         get_db().commit()
     r = ana.get("/paciente")
     assert r.status_code == 200
     assert historial(r.text) == []
     assert "No tienes una sesión próxima." in r.text
     assert "No tienes reservas próximas." in r.text
-    assert "2026-13-45" not in r.text and "abc" not in r.text
+    assert "2026-13-45" not in r.text and "no-numero-xyz!" not in r.text
     sana = reservada(app, pro_id, "2026-10-14T10:00:00")  # una fila sana sí aparece
     reservada(app, pro_id, "2026-10-01T10:00:00")
     html = ana.get("/paciente").text
     assert "14-10-2026 10:00" in proxima(html) and f'id="reserva-{sana}"' in html
     assert historial(html) == ["01-10-2026 10:00"]
-    assert "2026-13-45" not in html and "abc" not in html
+    assert "2026-13-45" not in html and "no-numero-xyz!" not in html
 
 
 def test_mis_reservas_y_horas_libres_siguen_en_el_panel(app, pro_id, ana):

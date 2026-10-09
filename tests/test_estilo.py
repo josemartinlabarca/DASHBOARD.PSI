@@ -177,11 +177,11 @@ def test_500_en_espanol_sin_filtrar_la_excepcion(app):
 
     @app.route("/rota")
     def rota():
-        raise RuntimeError("SECRETO: clave=abc123 en /home/claude/agenda.db")
+        raise RuntimeError("SECRETO: clave=zz-9-qq en /home/claude/agenda.db")
 
     r = app.test_client().get("/rota")
     html = verificar_pagina_de_error(r, 500, "Algo salió mal")
-    assert "abc123" not in html and "RuntimeError" not in html
+    assert "zz-9-qq" not in html and "RuntimeError" not in html
 
 
 def test_500_sin_secret_key_sale_en_espanol(tmp_path, monkeypatch):

@@ -386,6 +386,12 @@ Autorizas a que se modifique `ARCHITECTURE.md` (que `CLAUDE.md` reserva al human
 - **Pendiente del humano:** `ARCHITECTURE.md` no lista `errores.py`, `error.html` ni `_notificaciones.html`; `static/` sí figura. Los enlaces «Volver al inicio» de las páginas de error van siempre al inicio (no se consulta la sesión desde un manejador de error).
 - **Alternativas descartadas:** tarjetas en móvil con `display:block` en `table` (pierde la semántica de tabla en algunos lectores); `data:,` como favicon; un tema oscuro con interruptor (requiere JavaScript); cabecera con imagen del logo (una prueba prohíbe `<img` en el panel).
 
+## D-038 — Guarda contra pruebas de ausencia de texto frágiles por el token CSRF (T-13b)
+- **Fecha:** 2026-10-09 11:35
+- **Decisión:** (1) `conftest.py` entiende la variable `AGENDA_PSI_CSRF_TOKEN` (64 caracteres hexadecimales en minúscula): la fixture autouse `token_csrf_forzado` reemplaza `secrets` dentro de `app.seguridad` por un objeto cuyo `token_hex` devuelve ese valor, de modo que cada sesión usa ese token. No se toca `app/seguridad.py` ni ninguna lógica de la app (no hizo falta una costura). Sin la variable no cambia nada. (2) Marcador `token_aleatorio` (registrado en `pytest.ini`) para las 7 pruebas que necesitan tokens distintos entre sesiones (`test_seguridad`, `test_login`, `test_horas`): la fixture no les fuerza el token. (3) Archivo nuevo `tests/test_token_csrf_hostil.py`: detecta con `ast` toda prueba cuyo código afirme `not in html` / `not in r.text` / `not in texto`... (o llame a un ayudante que lo haga) y la reejecuta en un subproceso con dos tokens hostiles (`abc`, `abc123`, `dead`, `beef`, `cafe`, `00`, `0000`, `1e2`, `99999`, `12345`, `2026`). Cuesta ~9 s, no otra suite entera. Una prueba nueva queda cubierta sin tocar la lista. (4) Regla para escribir pruebas de ausencia: un texto hexadecimal corto (solo `0-9a-f`) no sirve como marcador sobre una página con formulario; usa un marcador con un carácter fuera de `a-f`/`0-9` (p. ej. `no-numero-xyz!`) o acota la búsqueda a las filas.
+- **Porqué:** `"abc" not in html` falló de forma intermitente (el token contiene «abc» en ~1 de cada 15 páginas). La guarda lo hace determinista y falla siempre si alguien lo reintroduce.
+- **Alternativas descartadas:** fijar el token en producción o añadir una opción de configuración en la app (toca lógica por una necesidad de las pruebas); reejecutar la suite completa con el token forzado (duplica ~50 s); lista fija de archivos (se desactualiza).
+
 ## Plantilla para nuevas decisiones
 
 ```
