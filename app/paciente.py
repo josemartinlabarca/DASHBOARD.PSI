@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 from flask import Blueprint, flash, redirect, render_template, url_for
 
-from . import tiempo
+from . import notificaciones, tiempo
 from .auth import solo_paciente, usuario_actual
 from .db import get_db
 from .tiempo import FORMATO_GUARDADO, mostrar_inicio
@@ -49,6 +49,18 @@ MENSAJE_POCA_ANTICIPACION = (
 )
 MENSAJE_CANCELADA = (
     "Cancelaste tu reserva del {cuando} con {profesional}. La hora quedó libre."
+)
+
+
+# T-09: la hora con lo necesario para avisar a ambas partes (el profesional es el DUEÑO de la
+# hora, `horas.profesional_id`, no «el de rol profesional»). El paciente se une por el id de
+# quien actúa, que es el que quedará en `horas.paciente_id`.
+SELECT_HORA_Y_PARTES = (
+    "SELECT h.inicio, h.duracion_min, h.estado, h.paciente_id, h.profesional_id,"
+    " u.nombre AS profesional, u.email AS profesional_email,"
+    " p.nombre AS paciente, p.email AS paciente_email"
+    " FROM horas h JOIN usuarios u ON u.id = h.profesional_id"
+    " LEFT JOIN usuarios p ON p.id = ? WHERE h.id = ?"
 )
 
 
@@ -172,9 +184,7 @@ def reservar_hora(db, hora_id, paciente_id, reloj=None):
     try:
         ahora = (reloj or tiempo.ahora_chile)()
         hora = db.execute(
-            "SELECT h.inicio, h.duracion_min, h.estado, h.paciente_id, u.nombre AS profesional"
-            " FROM horas h JOIN usuarios u ON u.id = h.profesional_id WHERE h.id = ?",
-            (hora_id,),
+            SELECT_HORA_Y_PARTES, (paciente_id, hora_id)
         ).fetchone()
         if hora is None:
             db.rollback()
@@ -213,10 +223,16 @@ def reservar_hora(db, hora_id, paciente_id, reloj=None):
         if reservadas != 1:
             db.rollback()
             return False, MENSAJE_NO_DISPONIBLE
+        # T-09: los avisos van dentro de la transacción, antes del commit (atómicos con la reserva)
+        avisos = notificaciones.registrar(
+            db, notificaciones.CONFIRMACION, hora_id, hora, paciente_id,
+            ahora.isoformat(timespec="seconds"),
+        )
         db.commit()
     except BaseException:
         db.rollback()
         raise
+    notificaciones.escribir_outbox(avisos)  # después del commit: un fallo de disco no deshace nada
     cuando = mostrar_inicio(hora["inicio"])
     return True, MENSAJE_CONFIRMACION.format(cuando=cuando, profesional=hora["profesional"])
 
@@ -248,9 +264,7 @@ def cancelar_reserva(db, hora_id, paciente_id, reloj=None):
     try:
         ahora = (reloj or tiempo.ahora_chile)()
         hora = db.execute(
-            "SELECT h.inicio, h.duracion_min, h.estado, h.paciente_id, u.nombre AS profesional"
-            " FROM horas h JOIN usuarios u ON u.id = h.profesional_id WHERE h.id = ?",
-            (hora_id,),
+            SELECT_HORA_Y_PARTES, (paciente_id, hora_id)
         ).fetchone()
         if hora is None or hora["estado"] != "reservada" or hora["paciente_id"] != paciente_id:
             db.rollback()
@@ -271,10 +285,15 @@ def cancelar_reserva(db, hora_id, paciente_id, reloj=None):
         if canceladas != 1:
             db.rollback()
             return False, MENSAJE_RESERVA_NO_ENCONTRADA
+        avisos = notificaciones.registrar(
+            db, notificaciones.CANCELACION, hora_id, hora, paciente_id,
+            ahora.isoformat(timespec="seconds"),
+        )
         db.commit()
     except BaseException:
         db.rollback()
         raise
+    notificaciones.escribir_outbox(avisos)
     cuando = mostrar_inicio(hora["inicio"])
     return True, MENSAJE_CANCELADA.format(cuando=cuando, profesional=hora["profesional"])
 

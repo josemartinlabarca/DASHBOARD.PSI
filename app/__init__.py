@@ -24,6 +24,8 @@ def create_app(test_config=None):
         # activará con el despliegue (T-14): SESSION_COOKIE_SECURE=True.
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
+        # T-09: simulación del correo. Vacío = `outbox.log` junto a la base de datos.
+        OUTBOX_PATH=os.environ.get("OUTBOX_PATH") or None,
         DATABASE=os.environ.get(
             "DATABASE", os.path.join(app.root_path, os.pardir, "agenda.db")
         ),

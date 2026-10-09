@@ -301,6 +301,13 @@ def cache_de_constructores_de_url():
         yield
 
 
+@pytest.fixture(autouse=True)
+def sin_outbox_del_entorno(monkeypatch):
+    # T-09: si el equipo tiene OUTBOX_PATH definida, ninguna prueba debe escribir allí;
+    # sin ella, `outbox.log` queda junto a la base de la prueba (en su carpeta temporal).
+    monkeypatch.delenv("OUTBOX_PATH", raising=False)
+
+
 @pytest.fixture
 def app(tmp_path):
     app = create_app({"TESTING": True, "DATABASE": str(tmp_path / "test.db")})

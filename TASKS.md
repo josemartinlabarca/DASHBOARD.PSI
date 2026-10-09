@@ -191,7 +191,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 ## Fase 4 — Notificaciones
 
 ### T-09 — Notificaciones de confirmación y cancelación
-- **Estado:** PENDIENTE
+- **Estado:** HECHA
 - **Depende de:** T-08, T-08b, T-08c, T-08d, T-08e
 - **Qué:** `notificaciones.py`; crear registros y escribir `outbox.log` al reservar y cancelar (US-11, US-13).
 - **Nota de revisión de T-02f (`hora_id` puede ser NULL, D-016):** T-09: el mensaje de la notificación debe bastarse solo (fecha, hora y contraparte), porque `hora_id` queda NULL si la hora se elimina (D-016); prueba con la hora eliminada.
