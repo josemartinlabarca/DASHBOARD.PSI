@@ -200,6 +200,13 @@ Aquí el ciclo ya es rutina: implementador → mi verificación → revisor → 
 - **Lección:** las pruebas son código y también necesitan revisión. Acelerarlas es peligroso porque *un atajo mal hecho hace que todas pasen por la razón equivocada*; por eso cada atajo trae una prueba de aislamiento y se re-ejecutan mutaciones de tareas anteriores.
 - **Nota de proceso:** T-08c lo verifiqué yo (diff, 3 entornos, orden aleatorio con otra semilla) pero **no** lancé un revisor aparte, porque solo toca la infraestructura de pruebas y el riesgo ya estaba acotado. Es una excepción consciente, no la norma.
 
+### Vueltas 22 a 24 — T-08d, T-08e y T-09: tus decisiones aplicadas y las primeras notificaciones
+- **T-08d y T-08e:** aplicaron lo que aprobaste (D-022 revocar la sesión al cerrar sesión, D-023 un solo profesional, D-020 correos sin caracteres invisibles, D-029 reservar solo con más de 24 h). Cada una se revisó y quedó aprobada; la suite pasó de 1157 a 1505 pruebas.
+- **T-09 (notificaciones):** al reservar y al cancelar se crean avisos para paciente y profesional **dentro de la misma transacción** (si el aviso falla no queda reserva) y la línea de `outbox.log` se escribe **después** del commit (un disco lleno no deshace la reserva). El nombre y el correo se sanean antes de llegar al log para que nadie pueda inyectar líneas falsas.
+- **Una vuelta interrumpida:** cuando retomé, encontré trabajo de T-09 sin commit y un proceso de pytest colgado desde hacía casi 2 horas. No lo di por bueno: lo cerré por su PID, devolví el trabajo a un implementador para que lo leyera y lo ejecutara crítico, y lo verifiqué yo (1507 pruebas en 4 entornos y 5 mutaciones propias). El implementador además corrigió un texto: decía «sin costo», que no existe en esta versión.
+- **Revisor: APROBADA.** Probó 6 procesos reales compitiendo por 10 horas (10 reservas, 20 avisos, sin cruces). Su hallazgo más útil mira al futuro: las funciones de T-09 no sirven tal cual para los recordatorios de T-10 (cualquier tipo distinto de confirmación saldría con el texto de «Cancelaste tu hora»). Quedó escrito en T-10.
+- **Lección:** el estado de un proyecto con agentes vive en git, no en la memoria de nadie. Tras una interrupción, lo primero es leer `git status`, `git log` y `TASKS.md`, y desconfiar del trabajo sin commit hasta ejecutarlo.
+
 ### Historial git resultante
 
 ```
@@ -230,12 +237,12 @@ docs: documentación base del proyecto Agenda Psi
 
 ## 4. Estado actual y qué sigue
 
-- Hecho: **T-01, T-02, T-02b, T-02d, T-03, T-03b, T-02c, T-02f, T-02g, T-02e, T-03c, T-04, T-04b, T-05, T-05b, T-06, T-07, T-08, T-08b, T-08c** (1157 pruebas pasando).
+- Hecho: **T-01 a T-09** (incluidas T-02b–g, T-03b/c, T-04b, T-05b y T-08b–e; 1507 pruebas pasando).
 - **Decisiones tuyas ya tomadas:** D-007 (esquema), D-015 (correo), D-016 (borrar horas), D-017 (formato de fecha), D-018 (carácter nulo). Pendientes: **D-020** (caracteres invisibles en el correo), **D-022** (revocar la cookie al cerrar sesión), **D-023** (un solo profesional) y **D-029** (reservar con menos de 24 h; conviene antes de T-09).
-- Siguiente: **T-09** (notificaciones) → T-10 …
+- Siguiente: **T-10** (recordatorios) → T-11 … T-14.
 - Pendiente solo tuyo: autorizar (o no) que `app/correo.py` figure en `ARCHITECTURE.md`; es una línea de documentación.
 
-**Tu primer ejercicio:** lanza tú mismo la vuelta de T-02e con el prompt del Paso B y revisa el resultado con la lista del Paso C. Antes de dar por buena cualquier tarea, haz cinco preguntas extra: *¿rompió algo documentado?*, *¿las pruebas fallarían si quitara la protección?*, *¿el reporte afirma algo que no ejecutó?*, *¿cómo interactúa esto con las tareas futuras?* y *¿el arreglo propuesto realmente funciona?*
+**Tu primer ejercicio:** lanza tú mismo la vuelta de T-10 con el prompt del Paso B y revisa el resultado con la lista del Paso C. Antes de dar por buena cualquier tarea, haz cinco preguntas extra: *¿rompió algo documentado?*, *¿las pruebas fallarían si quitara la protección?*, *¿el reporte afirma algo que no ejecutó?*, *¿cómo interactúa esto con las tareas futuras?* y *¿el arreglo propuesto realmente funciona?*
 
 ## 5. Consejos profesionales (lo que hace la diferencia)
 
@@ -273,6 +280,8 @@ docs: documentación base del proyecto Agenda Psi
 32. **Conoce los límites de tu herramienta.** `length()` y `GLOB` de SQLite se detienen en un NUL; en otras bases de datos o lenguajes el mismo problema tiene otro nombre.
 33. **Muta de forma sistemática, no solo con lo que se te ocurre.** Las 8 mutaciones del implementador dejaron vivos 14 mutantes; un script que probó todas las posiciones y variantes los encontró. Automatiza la mutación cuando el espacio es pequeño y regular.
 34. **Cuando un agente corrige, vuelve a ejecutar tu propia verificación, no la suya.** Su "56/56" se confirmó porque yo lo corrí aparte, en una copia limpia.
+35. **Tras una interrupción, lee el estado antes de actuar.** `git status`, `git log` y `TASKS.md` dicen dónde quedó todo; el trabajo sin commit es una hipótesis hasta que lo ejecutas.
+36. **Pregunta a una pieza reutilizable si sirve para el siguiente caso.** Una función hecha para confirmaciones parecía genérica y no lo era; el revisor lo vio al cruzarla con T-10.
 
 ## 6. Trampas de principiante que ya viste en acción
 

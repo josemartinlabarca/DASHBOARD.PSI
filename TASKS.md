@@ -205,6 +205,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Qué:** Comando `send-reminders` (US-12); no repite recordatorios (`recordatorio_enviado`).
 - **Nota de revisión de T-02f (`hora_id` puede ser NULL, D-016):** T-10: el recordatorio depende de `horas.recordatorio_enviado`, no de las notificaciones; añadir una prueba con una hora eliminada que tuvo notificaciones.
 - **Notas de la revisión de T-08e (R-09):** el recordatorio se define como «falta ≤ 24 h y la hora no empezó», con instantes absolutos, y se prueba el instante exacto de las 24 h (donde aún se puede cancelar y debe recordarse); una reserva hecha entre 24 h y 24 h + el período del cron queda con el recordatorio vencido al confirmarse (aceptado: se envía en la siguiente ejecución); las pruebas de «hora a <24 h» insertan la reserva por SQL porque la aplicación ya no la permite; definir quién gana si cancelación y recordatorio coinciden.
+- **Notas de la revisión de T-09 (R-01, R-05, R-08):** (a) `notificaciones.registrar`/`_mensajes` NO sirven para `recordatorio`: cualquier tipo distinto de `confirmacion` produce el texto de «Cancelaste tu hora» e inserta siempre dos filas; T-10 debe añadir su propio texto (y decidir a quién avisa) y una prueba que impida usar un tipo sin mensaje; (b) el log puede quedar con una línea parcial si el disco falla a mitad de escritura, y el orden de las líneas no es el orden de commit entre procesos: no usar el log como fuente de verdad, solo `horas.recordatorio_enviado` y `notificaciones`; (c) marcar `recordatorio_enviado` y registrar el aviso en la misma transacción.
 - **Término:** Pruebas con hora a <24 h: envía una sola vez aunque se ejecute dos veces.
 
 ## Fase 5 — Interfaz
@@ -214,6 +215,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Depende de:** T-09
 - **Qué:** `/paciente` con próxima sesión, historial y campana de notificaciones (US-10).
 - **Nota de revisión de T-02f (`hora_id` puede ser NULL, D-016):** T-11: listar notificaciones con `LEFT JOIN` a `horas` y mostrar el mensaje sin enlace cuando `hora_id` es NULL (D-016).
+- **Nota (revisión de T-09, R-09):** ordenar las notificaciones por `id` (creciente en el orden de inserción), no por `creada_en` (texto con offset: no ordena bien en la noche de cambio de horario).
 - **Término:** Prueba de contenido por rol; revisión visual en navegador.
 
 ### T-12 — Dashboard del profesional
@@ -222,6 +224,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Qué:** `/profesional` con agenda, horas libres y notificaciones (US-6).
 - **Nota de revisión de T-02f (`hora_id` puede ser NULL, D-016):** T-12: igual que T-11: `LEFT JOIN` y mensaje sin enlace cuando `hora_id` es NULL (D-016).
 - **Nota (revisión de T-08e, R-10):** el profesional puede crear horas a menos de 24 h que ningún paciente podrá reservar: marcarlas en su agenda («no reservable») o avisarlo al crearlas.
+- **Nota (revisión de T-09, R-09):** ordenar las notificaciones por `id` (creciente en el orden de inserción), no por `creada_en` (texto con offset: no ordena bien en la noche de cambio de horario).
 - **Término:** Prueba de contenido por rol; revisión visual en navegador.
 
 ### T-13 — Estilo y plantilla base amigable
@@ -294,6 +297,11 @@ en qué tarea conviene absorberlo.
 | T-08e R-03 | Un POST forzado a una hora oculta distingue «libre» de «ocupada» (el estado se comprueba antes que la anticipación); ya pasaba con las horas pasadas | T-14 |
 | T-08e R-04/R-05 | Letras en blanco U+13441/U+13442 aceptadas; una cuenta guardada con un carácter hoy rechazado ya no puede iniciar sesión (sin migración); rechazados nuevos: punto medio catalán (`col·legi`) y fracciones | T-14 |
 | T-08e R-11 | Mensaje a las 24 h exactas dice «menos» (decir «no más de»); el mensaje de solape sugiere cancelar algo que a veces no se puede; README sin la regla 7 | T-13 |
+| T-09 R-02 | `outbox.log` queda con los permisos del umask (0644) y contiene nombres y correos | T-14 |
+| T-09 R-03 | `outbox.log` y `notificaciones` crecen sin límite; un paciente puede repetir reservar y cancelar sin freno | T-14 (junto al límite de frecuencia) |
+| T-09 R-04 | `OUTBOX_PATH` sigue enlaces simbólicos y una ruta relativa depende del directorio de trabajo; documentar en el README | T-14 |
+| T-09 R-06 | En la hora repetida de abril el límite de cancelación del texto es ambiguo (conservador) | T-14 |
+| T-09 R-07 | Pruebas débiles: la de contraseña es casi tautológica, la de «no escriben en el proyecto» solo mira la configuración, los permisos 0o644 no tienen prueba (la mutación a 0o666 sobrevive) y el único test multiproceso usa horas distintas por proceso | cuando se toque `tests/test_notificaciones.py` |
 | T-02c #9 | En `tests/test_esquema.py` la cobertura de NOT NULL y FK es triplemente redundante y la rama `usuarios` de `test_not_null_rechaza_null` es poco legible | cuando se toque ese archivo |
 
 ---
