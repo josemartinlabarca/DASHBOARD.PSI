@@ -118,19 +118,23 @@ def _mensajes(tipo, hora):
     raise ValueError(f"Tipo de notificación sin mensaje: {tipo!r}")
 
 
+TOPE_PANEL = 20  # D-035: el panel muestra las últimas 20 notificaciones
+
+
 def listar_de_usuario(db, usuario_id):
-    """Notificaciones del usuario, de la más nueva a la más antigua, y cuántas no están leídas (T-11).
+    """Las últimas `TOPE_PANEL` notificaciones del usuario y cuántas tiene sin leer en total (T-11, D-035).
 
     Solo las de `usuario_id`. Orden por `id` descendente (R-09 de T-09): `creada_en` es
     texto con desfase y no ordena bien en la noche de cambio de horario. Se lee `mensaje`,
     que se basta solo; no se hace JOIN con `horas` porque `hora_id` puede ser NULL (D-016)
     o apuntar luego a la hora de otra persona (R-07 de T-10). `hora_id` se devuelve solo
     para que quien muestra decida si puede enlazar. Cada fila trae `creada` ya en hora de Chile.
+    El contador sale de un `COUNT(*)` aparte: cuenta todas las no leídas, no solo las visibles.
     """
     filas = db.execute(
         "SELECT id, tipo, mensaje, hora_id, leida, creada_en FROM notificaciones"
-        " WHERE usuario_id = ? ORDER BY id DESC",
-        (usuario_id,),
+        " WHERE usuario_id = ? ORDER BY id DESC LIMIT ?",
+        (usuario_id, TOPE_PANEL),
     ).fetchall()
     lista = [
         {
@@ -143,7 +147,23 @@ def listar_de_usuario(db, usuario_id):
         }
         for f in filas
     ]
-    return lista, sum(1 for n in lista if not n["leida"])
+    sin_leer = db.execute(
+        "SELECT COUNT(*) FROM notificaciones WHERE usuario_id = ? AND leida = 0", (usuario_id,)
+    ).fetchone()[0]
+    return lista, sin_leer
+
+
+def marcar_leidas(db, usuario_id):
+    """Marca como leídas todas las notificaciones sin leer de `usuario_id` y devuelve cuántas (D-035).
+
+    Genérica: la usan el panel del paciente (T-11b) y el del profesional (T-12). Una sola
+    sentencia, solo filas de ese usuario con `leida = 0`; repetirla no cambia nada (devuelve 0).
+    """
+    cantidad = db.execute(
+        "UPDATE notificaciones SET leida = 1 WHERE usuario_id = ? AND leida = 0", (usuario_id,)
+    ).rowcount
+    db.commit()
+    return cantidad
 
 
 def registrar(db, tipo, hora_id, hora, paciente_id, creada_en):

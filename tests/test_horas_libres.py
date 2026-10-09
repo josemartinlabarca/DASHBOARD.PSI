@@ -110,7 +110,7 @@ def test_el_paciente_recibe_200_con_no_store(paciente_cli):
 
 def test_el_panel_del_paciente_enlaza_a_la_lista(paciente_cli):
     r = paciente_cli.get("/paciente")
-    assert re.search(r'<a href="/paciente/horas">Ver horas disponibles</a>', r.text)
+    assert re.search(r'<a href="/paciente/horas">Reservar hora</a>', r.text)
 
 
 def test_cada_hora_trae_su_formulario_de_reservar_con_token(app, pro_id, paciente_cli):

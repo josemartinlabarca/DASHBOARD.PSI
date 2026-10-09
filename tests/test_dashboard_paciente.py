@@ -71,11 +71,14 @@ def texto(html):
 
 def mensajes_listados(html):
     """Textos `<li>` de la sección de notificaciones, en el orden mostrado."""
-    return [texto(li) for li in re.findall(r"<li[^>]*>(.*?)</li>", seccion(html, "(?:<span[^>]*>.*?</span>)?\\s*Notificaciones", 1), re.S)]
+    return [texto(li) for li in re.findall(r"<li[^>]*>(.*?)</li>", seccion(html, "(?:<span[^>]*>.*?</span>)?\\s*Notificaciones", None), re.S)]
 
 
 def historial(html):
-    cuerpo = re.search(r"<h2>Historial</h2>.*?<tbody>(.*?)</tbody>", html, re.S)
+    """Filas del historial. Falla si la sección no existe; `[]` solo si existe sin tabla (R-04)."""
+    bloque = re.search(r"<h2>Historial</h2>(.*?)(?=<h2|</main>)", html, re.S)
+    assert bloque, "no existe la sección «Historial»"
+    cuerpo = re.search(r"<tbody>(.*?)</tbody>", bloque.group(1), re.S)
     return [texto(f)[:16] for f in re.findall(r"<tr>(.*?)</tr>", cuerpo.group(1), re.S)] if cuerpo else []
 
 
@@ -193,11 +196,25 @@ def test_en_la_noche_del_cambio_de_horario_se_decide_con_instantes(app, pro_id, 
 
 
 def test_filas_ilegibles_se_omiten_sin_romper(app, pro_id, ana):
-    mala = reservada(app, pro_id, "2026-10-12T10:00:00")
+    """R-03: fecha o duración ilegibles no entran a la próxima, al historial ni a Mis reservas."""
+    mala_fecha = reservada(app, pro_id, "2026-10-12T10:00:00")
+    mala_duracion = reservada(app, pro_id, "2026-10-13T10:00:00")
     with app.app_context():
-        get_db().execute("UPDATE horas SET inicio='2026-13-45T99:99:99' WHERE id=?", (mala,))
+        get_db().execute("UPDATE horas SET inicio='2026-13-45T99:99:99' WHERE id=?", (mala_fecha,))
+        get_db().execute("UPDATE horas SET duracion_min='abc' WHERE id=?", (mala_duracion,))
         get_db().commit()
-    assert ana.get("/paciente").status_code == 200
+    r = ana.get("/paciente")
+    assert r.status_code == 200
+    assert historial(r.text) == []
+    assert "No tienes una sesión próxima." in r.text
+    assert "No tienes reservas próximas." in r.text
+    assert "2026-13-45" not in r.text and "abc" not in r.text
+    sana = reservada(app, pro_id, "2026-10-14T10:00:00")  # una fila sana sí aparece
+    reservada(app, pro_id, "2026-10-01T10:00:00")
+    html = ana.get("/paciente").text
+    assert "14-10-2026 10:00" in proxima(html) and f'id="reserva-{sana}"' in html
+    assert historial(html) == ["01-10-2026 10:00"]
+    assert "2026-13-45" not in html and "abc" not in html
 
 
 def test_mis_reservas_y_horas_libres_siguen_en_el_panel(app, pro_id, ana):
@@ -255,13 +272,6 @@ def test_el_contador_cuenta_solo_no_leidas_propias_y_marca_el_estado(app, pro_id
     assert [m.split(" (")[1].split(",")[0] for m in lista] == ["leída", "nueva", "nueva"]
     assert html.count('class="no-leida"') == 2 and html.count('class="leida"') == 1
     assert "Tienes 1 notificación sin leer." in beto.get("/paciente").text
-
-
-def test_no_hay_ninguna_accion_para_marcar_como_leida(app, ana):
-    notificar(app, ANA, "hola")
-    html = ana.get("/paciente").text
-    assert "marcar" not in html.lower()
-    assert 'action="/notificaciones' not in html and html.count("<form") == 1  # solo «Cerrar sesión»
 
 
 def test_hora_eliminada_deja_la_notificacion_con_su_mensaje_y_sin_enlace(app, pro_id, ana):
@@ -331,3 +341,193 @@ def test_mostrar_instante_convierte_a_chile():
     assert tiempo.mostrar_instante("2026-10-08T12:00:00-03:00") == "08-10-2026 12:00"
     assert tiempo.mostrar_instante("2026-10-08T12:00:00") is None
     assert tiempo.mostrar_instante("x") is None and tiempo.mostrar_instante(None) is None
+
+
+# ------------------------------------------- marcar como leídas (D-035) ----
+
+RUTA_LEIDAS = "/notificaciones/leidas"
+
+
+def token_de(client, panel="/paciente"):
+    client.get(panel)
+    with client.session_transaction() as s:
+        return s["csrf_token"]
+
+
+def marcar(client, panel="/paciente", **extra):
+    return client.post(RUTA_LEIDAS, data={"csrf_token": token_de(client, panel), **extra})
+
+
+def estados(app, email):
+    with app.app_context():
+        return [bool(f[0]) for f in get_db().execute(
+            "SELECT leida FROM notificaciones WHERE usuario_id=? ORDER BY id", (uid(app, email),))]
+
+
+def formularios_de_leidas(html):
+    return re.findall(r'<form[^>]*action="/notificaciones/leidas"[^>]*>.*?</form>', html, re.S)
+
+
+def test_el_boton_solo_aparece_si_hay_no_leidas(app, ana):
+    assert formularios_de_leidas(ana.get("/paciente").text) == []
+    notificar(app, ANA, "vieja", leida=1)
+    html = ana.get("/paciente").text
+    assert formularios_de_leidas(html) == [] and "Marcar todas" not in html
+    notificar(app, ANA, "nueva")
+    html = ana.get("/paciente").text
+    formularios = formularios_de_leidas(html)
+    assert len(formularios) == 1 and 'method="post"' in formularios[0]
+    assert re.search(r'name="csrf_token" value="[0-9a-f]+"', formularios[0])
+    assert html.count("Marcar todas como leídas") == 1
+    assert "<script" not in html and "<input" in formularios[0]
+    assert re.findall(r'<(?:input|select|textarea)[^>]*name="(\w+)"', formularios[0]) == ["csrf_token"]
+
+
+def test_marcar_todas_baja_el_contador_a_cero_y_no_toca_a_los_demas(app, pro_id, ana, beto):
+    notificar(app, ANA, "uno")
+    notificar(app, ANA, "dos")
+    notificar(app, ANA, "vieja", leida=1)
+    notificar(app, BETO, "de Beto")
+    notificar(app, "pro@example.cl", "del profesional")
+    r = marcar(ana)
+    assert r.status_code == 302 and r.headers["Location"] == "/paciente"
+    html = ana.get(r.headers["Location"]).text
+    assert "Marcaste 2 notificaciones como leídas." in html
+    assert 'aria-label="Campana de notificaciones: 0 sin leer"' in html
+    assert "No tienes notificaciones sin leer." in html and formularios_de_leidas(html) == []
+    assert html.count('class="leida"') == 3 and 'class="no-leida"' not in html
+    assert estados(app, ANA) == [True, True, True]
+    assert estados(app, BETO) == [False] and estados(app, "pro@example.cl") == [False]
+    assert 'aria-label="Campana de notificaciones: 1 sin leer"' in beto.get("/paciente").text
+
+
+def test_marcar_es_idempotente(app, ana, beto):
+    notificar(app, ANA, "uno")
+    notificar(app, BETO, "de Beto")
+    marcar(ana)
+    r = marcar(ana)
+    assert r.status_code == 302 and r.headers["Location"] == "/paciente"
+    assert "No tenías notificaciones sin leer." in ana.get("/paciente").text
+    assert estados(app, ANA) == [True] and estados(app, BETO) == [False]
+    notificar(app, ANA, "otra nueva")  # lo nuevo sí queda sin leer
+    assert estados(app, ANA) == [True, False]
+
+
+def test_marcar_una_sola_pasa_el_mensaje_en_singular(app, ana):
+    notificar(app, ANA, "uno")
+    marcar(ana)
+    assert "Marcaste 1 notificación como leída." in ana.get("/paciente").text
+
+
+def test_sin_token_csrf_no_marca_nada(app, ana):
+    notificar(app, ANA, "uno")
+    ana.get("/paciente")
+    assert ana.post(RUTA_LEIDAS).status_code == 400
+    assert ana.post(RUTA_LEIDAS, data={"csrf_token": "0" * 64}).status_code == 400
+    assert ana.post(RUTA_LEIDAS, data={"csrf_token": ""}).status_code == 400
+    assert estados(app, ANA) == [False]
+
+
+def test_ignora_los_ids_que_llegan_en_el_formulario(app, ana, beto):
+    notificar(app, ANA, "mía")
+    ajena = notificar(app, BETO, "de Beto")
+    marcar(ana, id=ajena, ids=ajena, notificacion_id=ajena, usuario_id=uid(app, BETO),
+           usuario=uid(app, BETO), leida=0)
+    assert estados(app, ANA) == [True] and estados(app, BETO) == [False]
+    r = ana.post(RUTA_LEIDAS + f"?id={ajena}&usuario_id={uid(app, BETO)}",
+                 data={"csrf_token": token_de(ana)})
+    assert r.status_code == 302 and estados(app, BETO) == [False]
+
+
+def test_la_ruta_no_acepta_get(app, ana):
+    notificar(app, ANA, "uno")
+    assert ana.get(RUTA_LEIDAS).status_code == 405
+    assert estados(app, ANA) == [False]
+
+
+def test_el_profesional_no_puede_usar_la_ruta(app, pro_id, ana):
+    notificar(app, "pro@example.cl", "para el profesional")
+    notificar(app, ANA, "para Ana")
+    c = app.test_client()
+    iniciar(c, "pro@example.cl")
+    r = marcar(c, panel="/profesional")
+    assert r.status_code == 403
+    assert estados(app, "pro@example.cl") == [False] and estados(app, ANA) == [False]
+
+
+def test_el_anonimo_no_puede_usar_la_ruta(app, ana):
+    notificar(app, ANA, "para Ana")
+    c = app.test_client()
+    # con token válido de su propia sesión anónima: lo que frena es el rol, no el CSRF
+    r = c.post(RUTA_LEIDAS, data={"csrf_token": token_de(c, "/login")})
+    assert r.status_code == 302 and r.headers["Location"].startswith("/login")
+    assert c.post(RUTA_LEIDAS).status_code == 400  # y sin token ni llega
+    assert estados(app, ANA) == [False]
+
+
+def test_con_25_se_ven_20_pero_el_contador_cuenta_todas(app, ana, beto):
+    for i in range(1, 26):
+        notificar(app, ANA, f"aviso {i:02d}")
+    notificar(app, BETO, "de Beto")
+    html = ana.get("/paciente").text
+    lista = mensajes_listados(html)
+    assert len(lista) == 20
+    assert lista[0].endswith("aviso 25") and lista[-1].endswith("aviso 06")  # las 20 más nuevas, id DESC
+    assert "aviso 05" not in html and "de Beto" not in html
+    assert 'aria-label="Campana de notificaciones: 25 sin leer"' in html
+    assert "Tienes 25 notificaciones sin leer." in html
+    assert "Se muestran tus 20 notificaciones más recientes." in html
+    marcar(ana)
+    html = ana.get("/paciente").text
+    assert 'aria-label="Campana de notificaciones: 0 sin leer"' in html
+    assert estados(app, ANA) == [True] * 25  # también las 5 que no se veían
+    assert estados(app, BETO) == [False]
+
+
+def test_el_contador_incluye_no_leidas_fuera_de_las_20_visibles(app, ana):
+    notificar(app, ANA, "vieja sin leer")  # queda fuera del tope
+    for i in range(20):
+        notificar(app, ANA, f"leída {i}", leida=1)
+    html = ana.get("/paciente").text
+    assert len(mensajes_listados(html)) == 20 and "vieja sin leer" not in html
+    assert 'aria-label="Campana de notificaciones: 1 sin leer"' in html
+    assert len(formularios_de_leidas(html)) == 1  # el botón sigue, aunque ninguna visible sea nueva
+
+
+def test_con_pocas_notificaciones_no_hay_aviso_de_tope(app, ana):
+    for i in range(19):
+        notificar(app, ANA, f"aviso {i}")
+    assert "Se muestran tus 20" not in ana.get("/paciente").text
+
+
+def test_marcar_leidas_devuelve_cuantas_cambio_y_solo_las_del_usuario(app, ana, beto):
+    notificar(app, ANA, "uno")
+    notificar(app, ANA, "dos", leida=1)
+    notificar(app, BETO, "de Beto")
+    with app.app_context():
+        db = get_db()
+        assert notificaciones.marcar_leidas(db, uid(app, ANA)) == 1
+        assert notificaciones.marcar_leidas(db, uid(app, ANA)) == 0
+        assert notificaciones.marcar_leidas(db, 987654) == 0
+    assert estados(app, BETO) == [False]
+
+
+# ------------------------------------------------ orden de secciones (R-06) ----
+
+
+def test_orden_de_las_secciones_y_enlace_para_reservar(app, pro_id, ana):
+    reservada(app, pro_id, "2026-10-14T10:00:00")  # ya hay próxima sesión: el enlace sigue visible
+    reservada(app, pro_id, "2026-10-01T10:00:00")
+    notificar(app, ANA, "hola")
+    html = ana.get("/paciente").text
+    posiciones = [html.index(t) for t in (
+        "Próxima sesión</h2>", "Reservar hora</a>", "<h2>Mis reservas</h2>",
+        "<h2>Historial</h2>", "Notificaciones\n", "Marcar todas como leídas")]
+    assert posiciones == sorted(posiciones)
+    assert html.count('href="/paciente/horas"') == 1
+    assert html.count("<th scope=") >= 7 and html.count("<caption>") == 2
+
+
+def test_el_enlace_para_reservar_se_ve_sin_sesion_proxima(ana):
+    html = ana.get("/paciente").text
+    assert '<a href="/paciente/horas">Reservar hora</a>' in html

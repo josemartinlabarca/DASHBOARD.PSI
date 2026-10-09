@@ -202,6 +202,20 @@ def dashboard():
     )
 
 
+@bp.route("/notificaciones/leidas", methods=["POST"])
+@solo_paciente
+def marcar_notificaciones_leidas():
+    """D-035: marca como leídas las del usuario en sesión; no lee ningún id del formulario."""
+    cantidad = notificaciones.marcar_leidas(get_db(), usuario_actual()["id"])
+    if cantidad == 1:
+        flash("Marcaste 1 notificación como leída.", "exito")
+    elif cantidad:
+        flash(f"Marcaste {cantidad} notificaciones como leídas.", "exito")
+    else:
+        flash("No tenías notificaciones sin leer.", "exito")
+    return redirect(url_for("paciente.dashboard"))
+
+
 @bp.route("/paciente/horas")
 @solo_paciente
 def horas_libres():

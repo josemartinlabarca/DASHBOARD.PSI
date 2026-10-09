@@ -220,7 +220,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Término:** Prueba de contenido por rol; revisión visual en navegador.
 
 ### T-11b — Aplicar D-035 y cerrar los hallazgos de la revisión de T-11
-- **Estado:** PENDIENTE
+- **Estado:** HECHA
 - **Depende de:** T-11
 - **Qué:** (1) **D-035 (aprobada):** función compartida `notificaciones.marcar_leidas(db, usuario_id)` y ruta `POST` para «Marcar todas como leídas» (solo si hay no leídas; CSRF; solo las del usuario en sesión; ignora ids recibidos; idempotente; solo rol paciente por ahora, T-12 la reutiliza para el profesional); (2) tope de 20 notificaciones en el panel con el contador de no leídas por una consulta `COUNT` aparte (D-035); (3) R-03: prueba de que las filas con fecha o duración ilegibles se omiten (hoy una mutación que las mete al historial pasa la suite); (4) R-04: el ayudante `filas_de_reservas` de `tests/test_cancelar.py` debe fallar (no devolver `[]`) si la sección «Mis reservas» no existe; (5) R-05: reescribir `test_no_hay_ninguna_accion_para_marcar_como_leida` según D-035; (6) R-06: orden de secciones: «Próxima sesión» y «Mis reservas» antes que las notificaciones, y un enlace/botón «Reservar hora» visible (SPEC §6.3); (7) R-09 (favicon 404) queda para T-13.
 - **Término:** pruebas: marcar leídas baja el contador a 0 y solo para ese usuario (otro paciente y el profesional no cambian), CSRF obligatorio, profesional y anónimo no pueden usar la ruta, con 25 notificaciones se ven 20 pero el contador cuenta todas las no leídas; las mutaciones «marcar sin filtro de usuario», «aceptar sin CSRF», «quitar el LIMIT» y «contar solo las 20 visibles» hacen fallar al menos una prueba; `python3 -m pytest` pasa.

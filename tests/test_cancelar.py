@@ -435,7 +435,8 @@ def filas_de_reservas(html):
     # T-11: el panel ahora tiene más tablas (historial) y las filas llevan id para el enlace
     # de las notificaciones: se acota a la sección «Mis reservas».
     seccion = re.search(r"<h2>Mis reservas</h2>(.*?)<h2>Historial</h2>", html, re.S)
-    cuerpo = re.search(r"<tbody>(.*?)</tbody>", seccion.group(1), re.S) if seccion else None
+    assert seccion, "no existe la sección «Mis reservas» (R-04)"
+    cuerpo = re.search(r"<tbody>(.*?)</tbody>", seccion.group(1), re.S)
     if not cuerpo:
         return []
     return [re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", f)).strip() for f in re.findall(r"<tr[^>]*>(.*?)</tr>", cuerpo.group(1), re.S)]
