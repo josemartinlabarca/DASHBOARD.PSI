@@ -3,16 +3,52 @@
 {% block contenido %}
   <h1>Hola, {{ usuario.nombre }}</h1>
 
+  <section aria-labelledby="titulo-notificaciones">
+    <h2 id="titulo-notificaciones">
+      <span aria-hidden="true">&#128276;</span> Notificaciones
+      <span class="campana" role="img"
+            aria-label="Campana de notificaciones: {{ sin_leer }} sin leer">{{ sin_leer }}</span>
+    </h2>
+    <p>{% if sin_leer == 1 %}Tienes 1 notificación sin leer.{% elif sin_leer %}Tienes {{ sin_leer }} notificaciones sin leer.{% else %}No tienes notificaciones sin leer.{% endif %}</p>
+    {% if notificaciones %}
+      <ul class="notificaciones">
+        {% for n in notificaciones %}
+          <li class="{{ 'leida' if n.leida else 'no-leida' }}">
+            <strong>{{ {'confirmacion': 'Confirmación', 'recordatorio': 'Recordatorio', 'cancelacion': 'Cancelación'}[n.tipo] }}</strong>
+            ({{ 'leída' if n.leida else 'nueva' }}{% if n.creada %}, {{ n.creada }}{% endif %})<br>
+            {{ n.mensaje }}
+            {% if n.enlazable %}<a href="#reserva-{{ n.hora_id }}">Ver la reserva</a>{% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p>Aún no tienes notificaciones.</p>
+    {% endif %}
+  </section>
+
+  <section aria-labelledby="titulo-proxima">
+    <h2 id="titulo-proxima">Próxima sesión</h2>
+    {% if proxima %}
+      <p>
+        {{ proxima.inicio }} (hora de Chile), {{ proxima.duracion_min }} min, con {{ proxima.profesional }}.
+        {% if proxima.en_curso %}<strong>Tu sesión está en curso.</strong>{% endif %}
+      </p>
+    {% else %}
+      <p>No tienes una sesión próxima. <a href="{{ url_for('paciente.horas_libres') }}">Reserva una hora</a>.</p>
+    {% endif %}
+  </section>
+
   <h2>Mis reservas</h2>
   {% if reservas %}
     <table>
+      <caption>Reservas que aún no empiezan (hora de Chile)</caption>
       <thead>
-        <tr><th>Fecha y hora</th><th>Duración</th><th>Profesional</th><th>Cancelar</th></tr>
+        <tr><th scope="col">Fecha y hora</th><th scope="col">Duración</th><th scope="col">Profesional</th><th scope="col">Cancelar</th></tr>
       </thead>
       <tbody>
         {% for reserva in reservas %}
-          <tr>
-            <td>{{ reserva.inicio }}</td>
+          <tr id="reserva-{{ reserva.id }}">
+            <th scope="row">{{ reserva.inicio }}</th>
             <td>{{ reserva.duracion_min }} min</td>
             <td>{{ reserva.profesional }}</td>
             <td>
@@ -31,6 +67,27 @@
     </table>
   {% else %}
     <p>No tienes reservas próximas.</p>
+  {% endif %}
+
+  <h2>Historial</h2>
+  {% if pasadas %}
+    <table>
+      <caption>Sesiones ya terminadas (hora de Chile)</caption>
+      <thead>
+        <tr><th scope="col">Fecha y hora</th><th scope="col">Duración</th><th scope="col">Profesional</th></tr>
+      </thead>
+      <tbody>
+        {% for sesion in pasadas %}
+          <tr>
+            <th scope="row">{{ sesion.inicio }}</th>
+            <td>{{ sesion.duracion_min }} min</td>
+            <td>{{ sesion.profesional }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p>Todavía no tienes sesiones pasadas.</p>
   {% endif %}
 
   <p><a href="{{ url_for('paciente.horas_libres') }}">Ver horas disponibles</a></p>

@@ -118,6 +118,34 @@ def _mensajes(tipo, hora):
     raise ValueError(f"Tipo de notificación sin mensaje: {tipo!r}")
 
 
+def listar_de_usuario(db, usuario_id):
+    """Notificaciones del usuario, de la más nueva a la más antigua, y cuántas no están leídas (T-11).
+
+    Solo las de `usuario_id`. Orden por `id` descendente (R-09 de T-09): `creada_en` es
+    texto con desfase y no ordena bien en la noche de cambio de horario. Se lee `mensaje`,
+    que se basta solo; no se hace JOIN con `horas` porque `hora_id` puede ser NULL (D-016)
+    o apuntar luego a la hora de otra persona (R-07 de T-10). `hora_id` se devuelve solo
+    para que quien muestra decida si puede enlazar. Cada fila trae `creada` ya en hora de Chile.
+    """
+    filas = db.execute(
+        "SELECT id, tipo, mensaje, hora_id, leida, creada_en FROM notificaciones"
+        " WHERE usuario_id = ? ORDER BY id DESC",
+        (usuario_id,),
+    ).fetchall()
+    lista = [
+        {
+            "id": f["id"],
+            "tipo": f["tipo"],
+            "mensaje": f["mensaje"],
+            "hora_id": f["hora_id"],
+            "leida": bool(f["leida"]),
+            "creada": tiempo.mostrar_instante(f["creada_en"]),
+        }
+        for f in filas
+    ]
+    return lista, sum(1 for n in lista if not n["leida"])
+
+
 def registrar(db, tipo, hora_id, hora, paciente_id, creada_en):
     """Inserta la notificación del paciente y, si el tipo la tiene, la del profesional; devuelve los `Aviso`.
 

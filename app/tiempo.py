@@ -37,6 +37,21 @@ def mostrar_inicio(texto):
     return f"{texto[8:10]}-{texto[5:7]}-{texto[0:4]} {texto[11:16]}"
 
 
+def mostrar_instante(texto):
+    """ISO 8601 con desfase (`2026-10-08T12:00:00-03:00`) -> `08-10-2026 12:00` en hora de Chile.
+
+    Se convierte el instante a la zona de Chile (no se recorta el texto: otro desfase
+    daría otra hora de pared). `None` si no se puede interpretar (texto raro, sin zona).
+    """
+    try:
+        instante = datetime.fromisoformat(texto)
+        if instante.tzinfo is None:
+            return None
+        return instante.astimezone(zona_chile()).strftime("%d-%m-%Y %H:%M")
+    except (ValueError, TypeError, OverflowError, OSError):
+        return None
+
+
 def _minutos_guardados(valor):
     """Minutos de una fila si son un entero positivo, o `None` (texto, decimal, cero...)."""
     if type(valor) is not int or valor <= 0:

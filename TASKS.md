@@ -211,7 +211,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 ## Fase 5 — Interfaz
 
 ### T-11 — Dashboard del paciente
-- **Estado:** PENDIENTE
+- **Estado:** HECHA (2026-10-09 00:14)
 - **Depende de:** T-09
 - **Qué:** `/paciente` con próxima sesión, historial y campana de notificaciones (US-10).
 - **Nota de revisión de T-02f (`hora_id` puede ser NULL, D-016):** T-11: listar notificaciones con `LEFT JOIN` a `horas` y mostrar el mensaje sin enlace cuando `hora_id` es NULL (D-016).
@@ -287,7 +287,7 @@ en qué tarea conviene absorberlo.
 | T-06 R-01 | `/paciente/horas` sin tope ni paginación: con 50 000 horas libres tarda 1,28 s y pesa 6,55 MB; ventana de fechas o tope de N filas | T-13/T-14 |
 | T-06 R-04 | Tabla sin `caption`/`scope`, sin hora de término ni día de la semana, página sin cierre de sesión | T-13 |
 | T-06 R-07 | Hora inventada en PROGRESS por el implementador (segunda vez, regla 8): si se repite, endurecer con una comprobación automática (script que compare con el commit) | si reincide |
-| T-08 R-06 | Una sesión en curso desaparece de «Mis reservas» (solo se listan futuras) | T-11 |
+| T-08 R-06 | ~~Una sesión en curso desaparece de «Mis reservas»~~ — resuelto por T-11 (D-034): aparece como «Próxima sesión» en curso | — |
 | T-08 R-07 | El `SELECT` de cancelar no trae `profesional_id` ni el nombre del paciente (T-09 los necesitará); `outbox.log` se escribe después del commit; T-10 debe leer el estado dentro de `BEGIN IMMEDIATE` | T-09/T-10 |
 | T-08 R-08 | En Windows las pruebas con `zona_sistema` se saltan (sin `tzset`): los bordes por zona solo corren en Linux/macOS | T-14 |
 | T-08b R-05 | La caché de URL de las pruebas usa API privada de Werkzeug y la plantilla no es segura entre hilos | si se actualiza Werkzeug |

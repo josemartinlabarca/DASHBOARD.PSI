@@ -432,10 +432,13 @@ def test_entre_comprobar_y_actualizar_nadie_mas_puede_escribir(app, pro_id, ana,
 
 def filas_de_reservas(html):
     """Textos de las filas de la tabla «Mis reservas» (sin la cabecera)."""
-    cuerpo = re.search(r"<tbody>(.*?)</tbody>", html, re.S)
+    # T-11: el panel ahora tiene más tablas (historial) y las filas llevan id para el enlace
+    # de las notificaciones: se acota a la sección «Mis reservas».
+    seccion = re.search(r"<h2>Mis reservas</h2>(.*?)<h2>Historial</h2>", html, re.S)
+    cuerpo = re.search(r"<tbody>(.*?)</tbody>", seccion.group(1), re.S) if seccion else None
     if not cuerpo:
         return []
-    return [re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", f)).strip() for f in re.findall(r"<tr>(.*?)</tr>", cuerpo.group(1), re.S)]
+    return [re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", f)).strip() for f in re.findall(r"<tr[^>]*>(.*?)</tr>", cuerpo.group(1), re.S)]
 
 
 def test_panel_sin_reservas(app, ana):

@@ -143,12 +143,63 @@ def listar_reservas_futuras(db, paciente_id, ahora):
     ]
 
 
+def listar_sesiones(db, paciente_id, ahora):
+    """`(próxima, pasadas)` de las reservas del paciente, con instantes absolutos (T-11, US-10).
+
+    Criterio (D-034): una sesión es «próxima» mientras no haya terminado, es decir,
+    `fin > ahora` con `fin = inicio + duración`; así la que está en curso (ya empezó,
+    aún no termina) sigue visible como próxima, marcada `en_curso`. Es «pasada» cuando
+    `fin <= ahora` (la que termina justo ahora ya es pasada). La próxima es la de menor
+    inicio entre las no terminadas (desempata el id); las pasadas van de la más reciente
+    a la más antigua. Solo reservas propias en estado `reservada` (las canceladas vuelven
+    a ser horas libres y no dejan rastro en `horas`). Filas con fecha o duración ilegibles
+    se omiten. Las fechas se muestran en hora de Chile.
+    """
+    filas = db.execute(
+        "SELECT h.id, h.inicio, h.duracion_min, u.nombre AS profesional"
+        " FROM horas h JOIN usuarios u ON u.id = h.profesional_id"
+        " WHERE h.paciente_id = ? AND h.estado = 'reservada'",
+        (paciente_id,),
+    ).fetchall()
+    ahora_s = ahora.timestamp()
+    por_venir, pasadas = [], []
+    for fila in filas:
+        intervalo = tiempo.intervalo_guardado(fila)
+        if intervalo is None:
+            continue
+        sesion = {
+            "id": fila["id"],
+            "inicio": mostrar_inicio(fila["inicio"]),
+            "duracion_min": fila["duracion_min"],
+            "profesional": fila["profesional"],
+            "en_curso": intervalo[0] <= ahora_s < intervalo[1],
+        }
+        if intervalo[1] > ahora_s:
+            por_venir.append((intervalo[0], fila["id"], sesion))
+        else:
+            pasadas.append((intervalo[0], fila["id"], sesion))
+    por_venir.sort(key=lambda t: (t[0], t[1]))
+    pasadas.sort(key=lambda t: (t[0], t[1]), reverse=True)
+    return (por_venir[0][2] if por_venir else None), [t[2] for t in pasadas]
+
+
 @bp.route("/paciente")
 @solo_paciente
 def dashboard():
     usuario = usuario_actual()
-    reservas = listar_reservas_futuras(get_db(), usuario["id"], tiempo.ahora_chile())
-    return render_template("paciente.html", usuario=usuario, reservas=reservas)
+    db, ahora = get_db(), tiempo.ahora_chile()
+    reservas = listar_reservas_futuras(db, usuario["id"], ahora)
+    proxima, pasadas = listar_sesiones(db, usuario["id"], ahora)
+    avisos, sin_leer = notificaciones.listar_de_usuario(db, usuario["id"])
+    # Solo se enlaza a una reserva que sigue siendo de este paciente (está en su propia lista),
+    # nunca por lo que diga `hora_id` (R-07 de T-10).
+    propias = {r["id"] for r in reservas}
+    for aviso in avisos:
+        aviso["enlazable"] = aviso["hora_id"] is not None and aviso["hora_id"] in propias
+    return render_template(
+        "paciente.html", usuario=usuario, reservas=reservas, proxima=proxima,
+        pasadas=pasadas, notificaciones=avisos, sin_leer=sin_leer,
+    )
 
 
 @bp.route("/paciente/horas")
