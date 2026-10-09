@@ -219,9 +219,16 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Nota (revisión de T-10, R-07):** el recordatorio es solo del paciente; las notificaciones se muestran por su `mensaje` (autosuficiente), nunca derivando datos de `hora_id`, que puede apuntar luego a una hora de otro paciente o quedar NULL. Mostrar también las de tipo `recordatorio`.
 - **Término:** Prueba de contenido por rol; revisión visual en navegador.
 
+### T-11b — Aplicar D-035 y cerrar los hallazgos de la revisión de T-11
+- **Estado:** PENDIENTE
+- **Depende de:** T-11
+- **Qué:** (1) **D-035 (aprobada):** función compartida `notificaciones.marcar_leidas(db, usuario_id)` y ruta `POST` para «Marcar todas como leídas» (solo si hay no leídas; CSRF; solo las del usuario en sesión; ignora ids recibidos; idempotente; solo rol paciente por ahora, T-12 la reutiliza para el profesional); (2) tope de 20 notificaciones en el panel con el contador de no leídas por una consulta `COUNT` aparte (D-035); (3) R-03: prueba de que las filas con fecha o duración ilegibles se omiten (hoy una mutación que las mete al historial pasa la suite); (4) R-04: el ayudante `filas_de_reservas` de `tests/test_cancelar.py` debe fallar (no devolver `[]`) si la sección «Mis reservas» no existe; (5) R-05: reescribir `test_no_hay_ninguna_accion_para_marcar_como_leida` según D-035; (6) R-06: orden de secciones: «Próxima sesión» y «Mis reservas» antes que las notificaciones, y un enlace/botón «Reservar hora» visible (SPEC §6.3); (7) R-09 (favicon 404) queda para T-13.
+- **Término:** pruebas: marcar leídas baja el contador a 0 y solo para ese usuario (otro paciente y el profesional no cambian), CSRF obligatorio, profesional y anónimo no pueden usar la ruta, con 25 notificaciones se ven 20 pero el contador cuenta todas las no leídas; las mutaciones «marcar sin filtro de usuario», «aceptar sin CSRF», «quitar el LIMIT» y «contar solo las 20 visibles» hacen fallar al menos una prueba; `python3 -m pytest` pasa.
+- **Origen:** REVIEW de T-11 (R-01…R-06) y D-035.
+
 ### T-12 — Dashboard del profesional
 - **Estado:** PENDIENTE
-- **Depende de:** T-09
+- **Depende de:** T-09, T-11b
 - **Qué:** `/profesional` con agenda, horas libres y notificaciones (US-6).
 - **Nota de revisión de T-02f (`hora_id` puede ser NULL, D-016):** T-12: igual que T-11: `LEFT JOIN` y mensaje sin enlace cuando `hora_id` es NULL (D-016).
 - **Nota (revisión de T-08e, R-10):** el profesional puede crear horas a menos de 24 h que ningún paciente podrá reservar: marcarlas en su agenda («no reservable») o avisarlo al crearlas.

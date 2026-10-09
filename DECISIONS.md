@@ -365,6 +365,13 @@ Autorizas a que se modifique `ARCHITECTURE.md` (que `CLAUDE.md` reserva al human
 - **Archivo nuevo no pedido (regla 10):** `tests/test_dashboard_paciente.py` (26 pruebas de T-11). Sin dependencias nuevas; sin cambios en `schema.sql`, SPEC ni ARCHITECTURE. `tests/test_cancelar.py`: el ayudante `filas_de_reservas` se acota a la sección «Mis reservas» (ahora hay una tabla de historial y las filas llevan `id`); ninguna aserción se debilitó.
 - **Alternativas descartadas:** decidir «próxima» por inicio (la sesión en curso desaparecería del panel); enlazar por `hora_id` sin comprobar pertenencia (R-07); `LEFT JOIN` con `horas` (innecesario: el mensaje se basta solo); marcar como leídas al abrir el panel (no lo pide SPEC y haría inútil el contador).
 
+## D-035 — Notificaciones «leídas» y tope del panel (decisión humana, revisión de T-11)
+- **Fecha:** 2026-10-09 01:14 — **APROBADA** por el humano.
+- **Decisión:** (1) **Leída = opción B:** un único botón «Marcar todas como leídas» (formulario `POST` con CSRF, sin JavaScript), visible solo si hay no leídas. La ruta marca solo las notificaciones del usuario en sesión (`WHERE usuario_id = <sesión>`), ignora cualquier id recibido y es idempotente. Una única función compartida por el panel del paciente y el del profesional (T-12). (2) **Tope:** el panel muestra las **últimas 20** notificaciones (`LIMIT 20`, orden por `id` descendente) y el contador de no leídas se calcula con una consulta aparte (`COUNT(*) ... WHERE usuario_id = ? AND leida = 0`) para que el tope no lo falsee. Sin cambio de esquema ni índice nuevo.
+- **Porqué:** respeta SPEC §5 (campana con contador con sentido), no escribe en un `GET`, no añade JavaScript ni dependencias, y evita que las notificaciones entierren «Mis reservas» y los botones Cancelar.
+- **Alternativas descartadas:** A (marcar al abrir el panel: un GET que escribe y compite por el bloqueo de escritura), C (quitar el contador: contradice SPEC §5), D (botón por fila: demasiado ruido), tope con índice nuevo (cambio de esquema innecesario hoy), sin tope.
+- **Pendiente del humano:** añadir la ruta `POST /notificaciones/leidas` a `ARCHITECTURE.md` (el agente no puede editarlo).
+
 ## Plantilla para nuevas decisiones
 
 ```
