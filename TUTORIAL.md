@@ -213,6 +213,13 @@ Aquí el ciclo ya es rutina: implementador → mi verificación → revisor → 
 - **Revisor: APROBADA.** Confirmó que son equivalentes por separado (dos guardas que se respaldan entre sí; juntas, 4 pruebas fallan). Probó los dos cambios de horario de Chile con 4 zonas del sistema, 4 procesos reales a la vez y un disco que falla: sin duplicados ni reenvíos. Hallazgos solo bajos (el comando muestra una traza si la base no existe; el README aún no explica el cron).
 - **Lección:** *un mutante que sobrevive no siempre es una prueba que falta.* Si dos protecciones se cubren mutuamente, cada una por separado es redundante: hay que comprobarlo (¿juntas se detectan?) y dejarlo anotado, en lugar de añadir una prueba artificial.
 
+### Vueltas 26 y 27 — T-11 y T-11b: el panel del paciente y tu primera decisión de experiencia de usuario
+- **T-11:** `/paciente` con próxima sesión (la que está en curso cuenta como próxima), historial y notificaciones. Las notificaciones se muestran por su `mensaje` (que se basta solo) y el enlace «Ver la reserva» solo aparece si esa hora sigue siendo del propio paciente. 26 pruebas nuevas, 16 mutaciones detectadas y un recorrido real en Chromium a 390 y 1280 px.
+- **Revisor: APROBADA, pero encontró algo que no era un error de código sino un hueco de diseño:** SPEC dice «campana con contador», pero no dice cuándo una notificación pasa a leída; el contador nunca bajaba. El implementador no inventó una regla: lo dejó anotado como duda. El revisor redactó una propuesta con 4 opciones, costo y riesgo.
+- **Tu decisión (D-035):** botón «Marcar todas como leídas» (POST con CSRF) y tope de 20 notificaciones con el contador por una consulta aparte. La dejé como tarea nueva **T-11b**, antes de T-12, para que el panel del profesional use el mismo criterio.
+- **T-11b:** 14 pruebas netas más (1621), 14 mutaciones; y el revisor confirmó que las 12 líneas de prueba eliminadas se reescribieron con aserciones iguales o más fuertes. Encontró además que una frase del reporte del implementador no era exacta (qué prueba mataba una mutación); la corregí en `PROGRESS.md` con una nota visible.
+- **Lección:** cuando falta una regla de producto, *el agente correcto es el que se detiene y pregunta*. Aquí dos agentes lo hicieron bien (el implementador no inventó, el revisor propuso opciones) y por eso tu respuesta cabía en un mensaje.
+
 ### Historial git resultante
 
 ```
@@ -243,12 +250,12 @@ docs: documentación base del proyecto Agenda Psi
 
 ## 4. Estado actual y qué sigue
 
-- Hecho: **T-01 a T-10** (incluidas T-02b–g, T-03b/c, T-04b, T-05b y T-08b–e; 1581 pruebas pasando).
-- **Decisiones tuyas ya tomadas:** D-007 (esquema), D-015 (correo), D-016 (borrar horas), D-017 (formato de fecha), D-018 (carácter nulo). Pendientes: **D-020** (caracteres invisibles en el correo), **D-022** (revocar la cookie al cerrar sesión), **D-023** (un solo profesional) y **D-029** (reservar con menos de 24 h; conviene antes de T-09).
-- Siguiente: **T-11** (dashboard del paciente) → T-12 … T-14.
+- Hecho: **T-01 a T-11b** (incluidas T-02b–g, T-03b/c, T-04b, T-05b y T-08b–e; 1621 pruebas pasando).
+- **Decisiones tuyas ya tomadas (D-035 incluida):** D-007 (esquema), D-015 (correo), D-016 (borrar horas), D-017 (formato de fecha), D-018 (carácter nulo). Pendientes: **D-020** (caracteres invisibles en el correo), **D-022** (revocar la cookie al cerrar sesión), **D-023** (un solo profesional) y **D-029** (reservar con menos de 24 h; conviene antes de T-09).
+- Siguiente: **T-12** (dashboard del profesional) → T-13 → T-14.
 - Pendiente solo tuyo: autorizar (o no) que `app/correo.py` figure en `ARCHITECTURE.md`; es una línea de documentación.
 
-**Tu primer ejercicio:** lanza tú mismo la vuelta de T-11 con el prompt del Paso B y revisa el resultado con la lista del Paso C. Antes de dar por buena cualquier tarea, haz cinco preguntas extra: *¿rompió algo documentado?*, *¿las pruebas fallarían si quitara la protección?*, *¿el reporte afirma algo que no ejecutó?*, *¿cómo interactúa esto con las tareas futuras?* y *¿el arreglo propuesto realmente funciona?*
+**Tu primer ejercicio:** lanza tú mismo la vuelta de T-12 con el prompt del Paso B y revisa el resultado con la lista del Paso C. Antes de dar por buena cualquier tarea, haz cinco preguntas extra: *¿rompió algo documentado?*, *¿las pruebas fallarían si quitara la protección?*, *¿el reporte afirma algo que no ejecutó?*, *¿cómo interactúa esto con las tareas futuras?* y *¿el arreglo propuesto realmente funciona?*
 
 ## 5. Consejos profesionales (lo que hace la diferencia)
 
@@ -289,6 +296,8 @@ docs: documentación base del proyecto Agenda Psi
 35. **Tras una interrupción, lee el estado antes de actuar.** `git status`, `git log` y `TASKS.md` dicen dónde quedó todo; el trabajo sin commit es una hipótesis hasta que lo ejecutas.
 36. **Pregunta a una pieza reutilizable si sirve para el siguiente caso.** Una función hecha para confirmaciones parecía genérica y no lo era; el revisor lo vio al cruzarla con T-10.
 37. **Un mutante vivo no siempre es una prueba que falta.** Comprueba si es equivalente (¿otra protección hace lo mismo?) y si juntas se detectan; si lo son, anótalo como defensa redundante.
+38. **Si falta una regla de producto, el agente se detiene y propone; no inventa.** Dos opciones, costo y riesgo bastan para que el humano decida en un mensaje.
+39. **El reporte de un agente también se revisa.** Una frase inexacta sobre qué prueba mataba una mutación se corrigió con una nota visible, no en silencio.
 
 ## 6. Trampas de principiante que ya viste en acción
 

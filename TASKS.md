@@ -233,6 +233,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Nota de revisión de T-02f (`hora_id` puede ser NULL, D-016):** T-12: igual que T-11: `LEFT JOIN` y mensaje sin enlace cuando `hora_id` es NULL (D-016).
 - **Nota (revisión de T-08e, R-10):** el profesional puede crear horas a menos de 24 h que ningún paciente podrá reservar: marcarlas en su agenda («no reservable») o avisarlo al crearlas.
 - **Nota (revisión de T-09, R-09):** ordenar las notificaciones por `id` (creciente en el orden de inserción), no por `creada_en` (texto con offset: no ordena bien en la noche de cambio de horario).
+- **Notas de la revisión de T-11b (R-03, R-07):** (a) `@solo_paciente` da 403 al profesional: necesita su propia ruta POST delgada que llame a `notificaciones.marcar_leidas` y **comparta** con la del paciente la función que redacta el mensaje flash (no duplicarla); (b) con exactamente 20 notificaciones el aviso «Se muestran tus 20 más recientes» sugiere que hay más: usar `LIMIT 21`, recortar a 20 y mostrar el aviso solo si llegó la fila 21, y leer el 20 desde `TOPE_PANEL` (hoy está escrito a mano en la plantilla) tanto en el panel del paciente como en el del profesional; (c) las pruebas dependen de `<h2>Mis reservas</h2>` e `<h2>Historial</h2>` sin atributos: si cambian, actualizar a la vez los ayudantes.
 - **Término:** Prueba de contenido por rol; revisión visual en navegador.
 
 ### T-13 — Estilo y plantilla base amigable
@@ -314,6 +315,9 @@ en qué tarea conviene absorberlo.
 | T-10 R-01 | `send-reminders` con `DATABASE` inexistente, en un directorio inexistente o sin tablas muestra una traza y sale con 1; con un archivo inexistente crea un `.db` vacío (`get_db` hace `sqlite3.connect`) | T-14 |
 | T-10 R-02/R-04 | Con la base bloqueada más de 5 s el comando muere con `database is locked` (el cron reintenta); un `INSERT` que falle bloquea los recordatorios de todos en cada ejecución (consecuencia del todo-o-nada, aceptado en v1) | T-14 |
 | T-10 R-03/R-09 | Mutantes equivalentes que sobreviven: quitar el filtro `recordatorio_enviado = 0` del `SELECT` o del `UPDATE` por separado (se respaldan; juntas fallan 4 pruebas), quitar el `rowcount`, `desde = ahora`; faltan pruebas de `fold=1`, del comando con base inexistente y de la ventana inferior | cuando se toque `tests/test_recordatorios.py` |
+| T-11b R-01 | «Marcar todas» marca también una notificación que llegó después de cargar el panel y que el usuario no vio (efecto: pierde el estado «nueva»); arreglarlo exige un `hasta_id`, que choca con «ignora ids» de D-035 | decisión humana si se quiere; sin urgencia |
+| T-11b R-02 | Con la base bloqueada más de 5 s, cualquier POST lanza `database is locked` (500); es de toda la app, no solo de esta ruta | T-14 |
+| T-11b R-04 | Sin `X-Frame-Options` ni CSP en ninguna respuesta; el CSRF también se acepta por la cabecera `X-CSRFToken` | T-14 |
 | T-02c #9 | En `tests/test_esquema.py` la cobertura de NOT NULL y FK es triplemente redundante y la rama `usuarios` de `test_not_null_rechaza_null` es poco legible | cuando se toque ese archivo |
 
 ---

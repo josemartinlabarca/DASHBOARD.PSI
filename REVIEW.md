@@ -1,70 +1,104 @@
-# REVIEW — T-11 Dashboard del paciente (commit `b93623d`)
+# REVIEW — T-11b Marcar notificaciones como leídas, tope de 20 y orden del panel (commit `aa8719d`)
 
-Revisor: lee el diff, contrasta con SPEC US-10 / US-6..9 / §4 / §5 / §6, D-016, D-024, D-029, D-030 y D-034.
+Revisor: lee el diff, contrasta con SPEC §5/§6.3, D-034 y D-035 y con el texto de T-11b en TASKS.md.
 No se modificó código, pruebas, TASKS, PROGRESS, DECISIONS ni ARCHITECTURE. Todo lo ejecutado se hizo en
-copias bajo el scratchpad (`rev/r`, `rev/m_*`, `rev/mx`, `rev/nav`), nunca en el repo.
+copias bajo el scratchpad (`rev/`, `m1`, `m2`, `m3`, `mut_*`, `nav2/`), nunca en el repo. El repo quedó
+sin archivos nuevos (`git status` limpio, sin `agenda.db` ni `outbox.log`).
 
-**Veredicto: APROBADA.** No hay hallazgos de severidad alta. R-01 (decisión humana sobre «leída») y R-02
-(notificaciones sin tope) son medios y no bloquean T-11; conviene resolver R-01 **antes** de T-12.
-El resto es bajo o informativo.
+**Veredicto: APROBADA.** Sin hallazgos de severidad alta ni media. D-035 se cumple al pie de la letra.
+Los hallazgos son bajos o informativos; ninguno bloquea T-12.
 
 ## Qué SÍ se ejecutó
 
-- Suite completa en copia de `HEAD`: 1607 pruebas OK. `tests/test_dashboard_paciente.py` solo: 26 OK, también en orden inverso (ids en orden contrario), sin dependencia de orden; no quedan `outbox.log` ni `agenda.db` en la copia ni en el repo (`git status` limpio). El «26» de PROGRESS es veraz (22 funciones, una parametrizada en 5).
-- 17 mutaciones propias sobre `tests/test_dashboard_paciente.py` + `tests/test_cancelar.py` (en copia). **Mueren (13):** `|safe` en mensaje, en profesional (historial, próxima y Mis reservas); enlace sin guarda `enlazable` y por `hora_id` no nulo; enlace a cualquier hora; pasadas sin `reverse`; sin filtro por usuario en notificaciones; `mostrar_instante` sin convertir zona; quitar `<caption>`; reloj sin zona; `|safe` en el nombre del `<h1>` (lo mata `tests/test_roles.py`, no la suite nueva). **Sobreviven (4):** `en_curso` con `<=` en el fin y quitar el desempate por id (equivalentes: `en_curso` solo se evalúa si `fin > ahora`; dos reservas del mismo paciente no pueden empezar a la vez por la regla 5), quitar `h.estado='reservada'` (equivalente: el CHECK del esquema lo implica) y **una real: R-03**.
-- Consultas con 5 000 notificaciones (ver R-02), con nombres hostiles (`"><script>alert(9)</script>'` como nombre del paciente: sale escapado en `<h1>`), con `duracion_min` de 1e18 y 9e18 (200, sin 500) y con una sesión de 2020 de 1e9 minutos.
-- Navegador real (Chromium `/opt/pw-browsers`, Playwright 1.56, servidor Flask propio en el puerto 5078 con base y `OUTBOX_PATH` en el scratchpad, cerrado por PID): registro (nombre `Ana <b>Pérez</b> "q"`, profesional `<i>Dra. Pro</i>`) → login → 2 reservas por la interfaz → sesiones sembradas por SQL (una en curso, una pasada) → `/paciente` → clic en «Ver la reserva» (ancla correcta `#reserva-N`) → cancelar, a 390 y a 1280 px. Sin scroll horizontal (`scrollWidth == clientWidth`), nombres escapados como texto, tabulación en orden (enlaces, Cancelar, «Ver horas disponibles», Cerrar sesión) con el contorno por defecto visible (no se suprime el foco), la confirmación de la hora cancelada pierde su enlace y aparece la cancelación arriba. Capturas revisadas a 390 px: legible (estilo por defecto del navegador; no hay CSS hasta T-13).
+- `python3 -m pytest -q` en copia de `HEAD`: 1621 OK.
+- Pruebas de apoyo propias (en la copia, ya descartadas) con el cliente de Flask: métodos HEAD/PUT/DELETE/PATCH/OPTIONS,
+  token de otro paciente, token por cabecera, cabeceras de respuesta, mensaje con `<script>`, profesional sin token,
+  bloqueo de SQLite real con una segunda conexión `BEGIN IMMEDIATE` (1 s y 6 s) y notificación insertada después de renderizar.
+- Mutaciones (copia por mutación, un archivo de pruebas): `<h2>` de «Mis reservas» con atributo (suite de `test_cancelar`
+  y suite del panel por separado), `<h2>` de Historial, UPDATE sin filtro de usuario (y COUNT sin filtro), quitar
+  `LIMIT`, `>= 20` por `> 20`, verificación CSRF desactivada, botón siempre visible, ruta que acepta GET,
+  `@solo_paciente` por `@login_requerido`, filas ilegibles metidas al historial. Todas matan al menos una prueba (ver R-06).
+- Navegador (Chromium de `/opt/pw-browsers`, Playwright Python, servidor Flask propio por PID, base/outbox en el scratchpad):
+  Ana con 23 notificaciones y Beto con 3, a 390 y 1280 px; clic (1280) y Tab+Enter (390); captura de foco.
+  Resultado: 20 filas, campana 23, aviso de tope presente, sin scroll horizontal, sin errores de consola, orden de `h2`
+  = Próxima sesión, Mis reservas, Historial, Notificaciones; tras la acción: redirección a `/paciente`, flash
+  «Marcaste 23 notificaciones como leídas.», campana 0, botón ausente; Beto sigue en 3; `<b>x</b>` del mensaje se ve como texto.
+  Con teclado el botón se alcanza con 2 Tab (enlace «Reservar hora», luego botón) y tiene el anillo de foco por defecto (`outline: auto 1px`).
 
-## Qué NO se ejecutó
+## Qué NO se verificó
 
-Cambio de horario en navegador ni con filas de hora repetida de abril (solo las pruebas de septiembre de la suite, que sí corrí); lectores de pantalla; contraste real (no hay CSS: solo se comprobó que no hay colores forzados); más de un navegador; concurrencia del panel con reservas simultáneas; profesional o anónimo contra `/paciente` en navegador (solo por las pruebas existentes: 302 al login y 403).
+Lector de pantalla real; el navegador contra profesional y anónimo (solo cliente de pruebas); dos procesos `flask` reales
+compitiendo (el bloqueo se simuló con otra conexión SQLite); captura de 1280 px revisada solo por métricas del DOM.
+
+## Cumplimiento de D-035 (punto 1)
+
+- Solo filas del usuario en sesión: `UPDATE ... WHERE usuario_id = ? AND leida = 0`, id tomado de `usuario_actual()`. La mutación sin filtro la matan 6 pruebas.
+- Ignora ids del formulario y de la query string: la vista no lee `request.form` ni `request.args` (más allá del CSRF global). Probado con `id`, `ids`, `usuario_id`, `?id=`.
+- Idempotente: la segunda llamada devuelve 0 y flash «No tenías notificaciones sin leer.».
+- Botón solo con no leídas (`{% if sin_leer %}`), formulario con `csrf_token` como único campo, sin `<script>`.
+- Contador total (`COUNT(*)` aparte) frente a 20 visibles: probado con 25, y con 1 no leída fuera de las 20 visibles (botón sigue).
+- Flash: solo interpola un entero (`cantidad`), nada del usuario; Jinja escapa el resto. Redirección a `url_for` fija: sin redirección abierta.
 
 ## Hallazgos
 
-### R-01 — «Leída» no se define: el contador de la campana nunca baja (media) — DECISIÓN HUMANA
-Evidencia: en el recorrido real el contador pasó de 2 a 3 al cancelar y no puede bajar nunca (`listar_de_usuario` cuenta `leida=0` y nada escribe `leida=1`). `test_no_hay_ninguna_accion_para_marcar_como_leida` fija esa ausencia. SPEC §5 exige «campana con contador», lo que presupone alguna noción de no leída. D-034 (4) y el Bloqueo de PROGRESS lo reconocen bien. Recomendación: decisión humana (propuesta abajo); cuando se decida, T-11 se ajusta en una tarea chica y T-12 usa lo mismo.
+### R-01 (baja) «Marcar todas» marca también lo que el usuario nunca vio
+**Evidencia:** con una notificación visible y otra insertada después de renderizar el panel, el POST deja ambas en `leida=1` (`[True, True]`).
+No hace falta concurrencia fina: pasa siempre que llegue algo entre la carga de la página y el clic (confirmaciones, recordatorios del cron de T-10, o la
+cancelación hecha desde otra pestaña). Además las no leídas fuera de las 20 visibles se marcan sin verse (D-035 lo acepta: «todas»).
+La `UPDATE` es una sola sentencia, así que no hay lectura sucia ni estado a medias; el efecto es solo perder el estado «nueva» de un aviso. El contador del flash («Marcaste N») sí delata la diferencia si el usuario lo mira.
+**Impacto:** bajo (avisos informativos; el mensaje sigue en la lista). Mitigarlo exigiría enviar un `hasta_id` (el mayor id visto) en el formulario, lo que choca con «ignora cualquier id recibido» de D-035.
+**Recomendación:** decisión humana, no urgente; si se acepta, backlog con un campo oculto `hasta_id` validado como entero y acotado al propio usuario. Si no, ignorar.
 
-### R-02 — Notificaciones sin tope: página gigante y contenido útil enterrado (media) — backlog con prioridad / T-14 o tarea pequeña antes de T-13
-Evidencia (copia, 5 000 notificaciones de un paciente): `GET /paciente` = 200, **1 165 210 bytes** (~233 B por fila), 0,08–0,10 s en servidor (la consulta es un `SCAN notificaciones` porque no hay índice por `usuario_id`; con 200 000 filas ajenas el barrido cuesta ~19 ms, no es el cuello). El costo real es de interfaz: las notificaciones van **primero** (D-034 (1)) y el contador no baja (R-01), así que con el uso «Próxima sesión», «Mis reservas» y los botones Cancelar quedan cada vez más abajo (cada reserva+cancelación suma 2–3 filas). Recomendación: `LIMIT` (p. ej. 20) con el contador por una consulta aparte (`SELECT COUNT(*) ... WHERE usuario_id=? AND leida=0`; hoy se calcula en Python sobre la lista completa y un `LIMIT` lo rompería), y «ver todas» paginado solo si el humano lo quiere; añadir `CREATE INDEX ... ON notificaciones (usuario_id, id)` si se toca el esquema (cambio de esquema: decisión humana, D-007). Alternativa sin tocar datos: mover el bloque de notificaciones debajo de «Mis reservas» (SPEC §6 lo lista al final) o dejarlo en un `<details>`. Absorber con la decisión de R-01 (mismo código). T-12 tiene el mismo problema.
+### R-02 (baja) Bloqueo de SQLite sin `busy_timeout` propio: 500 tras 5 s
+**Evidencia:** con otra conexión reteniendo `BEGIN IMMEDIATE`, el POST espera y responde bien si se libera en 1 s (302, `[True]*5`); si se retiene 6 s lanza
+`OperationalError('database is locked')` a los 5,02 s (en producción, un 500). `sqlite3.connect` usa su espera por defecto (5 s) y `get_db` no configura nada.
+No es específico de T-11b (reservar, cancelar y el cron comparten el patrón); aquí el riesgo es bajo porque la transacción es de una sentencia.
+**Recomendación:** backlog para T-14 (decidir `timeout`/`busy_timeout` y una página 500 en español junto con el 413). No requiere acción en T-11b.
 
-### R-03 — «Filas ilegibles se omiten» no está probado (baja) — tarea nueva pequeña / T-14
-Evidencia: mutación en copia: en `listar_sesiones`, reemplazar `if intervalo is None: continue` por `intervalo = (0, 0)` (la fila corrupta pasaría al historial con su texto crudo) → **1607 pruebas OK, ninguna falla**. `test_filas_ilegibles_se_omiten_sin_romper` solo afirma `status_code == 200`. Recomendación: afirmar que `historial(html) == []` y «No tienes una sesión próxima.» con una fila `2026-13-45T99:99:99` y otra con `duracion_min='abc'`, y que una fila sana sigue apareciendo.
+### R-03 (baja) Aviso de tope con exactamente 20 y el «20» duplicado en la plantilla
+**Evidencia:** con 20 notificaciones en total aparece «Se muestran tus 20 notificaciones más recientes.», que da a entender que hay más. El implementador lo
+declara (el texto no es falso, pero induce a buscar algo que no existe). Además la plantilla escribe `>= 20` a mano y `TOPE_PANEL` vive en Python: si se cambia uno,
+el aviso se desincroniza (la mutación «tope 30» solo se detecta porque las pruebas también escriben 20).
+**Recomendación:** tarea pequeña (puede ir en T-12 porque tocará la misma función): pedir `LIMIT TOPE_PANEL + 1`, recortar a 20 y mostrar el aviso solo si llegó la fila 21; pasar `tope` a la plantilla. Sin COUNT extra. Añadir una prueba con exactamente 20 (hoy solo hay 19 y 25).
 
-### R-04 — El ayudante `filas_de_reservas` puede devolver `[]` por la razón equivocada (baja) — backlog
-Evidencia: mutación en copia: `<h2>Mis reservas</h2>` → `<h2 class="x">Mis reservas</h2>`: fallan solo 5 pruebas (las que esperan filas); los dos `== []` (`tests/test_cancelar.py:144` y `:447`) pasan en vacío, porque `seccion` es `None` y el ayudante devuelve `[]` sin avisar. Hoy ambas están protegidas por una aserción positiva previa (`len(...) == 1` en la línea 142; el texto «No tienes reservas próximas.» en la 446), y quitar la tabla entera sí rompe 17 pruebas, así que no hay agujero actual. Pero el ayudante es frágil frente a T-13 (cualquier `id`/clase en esos `<h2>` lo vuelve ciego). Recomendación: que el ayudante haga `assert seccion` y solo devuelva `[]` si la sección existe sin `<tbody>`. Las aserciones no se debilitaron (confirmado en el diff: solo cambia el ayudante). Mismo patrón en `historial()` de la suite nueva: devuelve `[]` si falta el encabezado (menos grave: casi todos los usos esperan filas o van acompañados de otro texto).
+### R-04 (informativa) Cabeceras globales: sin `X-Frame-Options`/CSP y CSRF aceptado por cabecera
+**Evidencia:** ninguna respuesta lleva `X-Frame-Options` ni `frame-ancestors`; `verificar_csrf` acepta también `X-CSRFToken` (probado: 302 y marca). El panel podría
+enmarcarse en otro sitio; el único efecto posible sobre esta ruta es marcar avisos como leídos (sin datos ni acciones destructivas), y la cookie es `SameSite=Lax`, que no viaja en un POST entre sitios. `no-store` y `Pragma` sí están en la redirección y en el panel.
+**Recomendación:** backlog T-14 (cabeceras de seguridad globales); sin relevancia para esta tarea.
 
-### R-05 — Una prueba fija una conducta que el humano aún no decidió (baja) — ajustar con R-01
-`test_no_hay_ninguna_accion_para_marcar_como_leida` afirma `"marcar" not in html` y `html.count("<form") == 1`. Cualquier decisión de R-01 (o un segundo formulario en T-13) la rompe por razones legítimas. Recomendación: reescribirla en la tarea que implemente R-01; entretanto no «arreglarla» sin la decisión.
+### R-05 (informativa) Anónimo y profesional: comportamiento coherente con T-04, orden CSRF antes del rol
+**Evidencia:** profesional con token válido: 403 (plantilla `acceso_denegado`); anónimo con token de su sesión anónima: 302 a `/login`; sin token (profesional o anónimo): 400 antes de mirar el rol.
+GET/HEAD/PUT/DELETE/PATCH: 405 (OPTIONS 200 con `Allow: POST, OPTIONS`, estándar). Ninguna escribió nada. Las pruebas cubren profesional 403, anónimo 302, y anónimo sin token 400.
+**Recomendación:** ignorar.
 
-### R-06 — Orden y rótulos frente a SPEC §6 (baja) — decisión de diseño en T-13
-SPEC §6.3 lista: próxima sesión, **botón «Reservar hora»**, historial, notificaciones. El panel pone las notificaciones primero y ofrece un enlace «Ver horas disponibles» (y «Reserva una hora» solo si no hay próxima); no hay un «Reservar hora» visible cuando ya hay una sesión. No contradice US-10, pero el criterio de término de T-13 («sin texto ilegible») no lo cubre. Recomendación: en T-13 destacar un solo botón/enlace «Reservar hora» y decidir el orden junto con R-02.
+### R-06 (informativa) Pruebas: reescrituras y mutaciones comprobadas
+- **Las 12 líneas eliminadas** (`git show --numstat`: dashboard 212+/12−, cancelar 2+/1−, horas_libres 1+/1−): 
+  - `filas_de_reservas`: se quitó el condicional `if seccion else None` y se añadió `assert seccion`. Más fuerte. Con la mutación del `<h2>`, **el ayudante falla por sí solo**: `pytest tests/test_cancelar.py` da 6 fallos y los 6 son `AssertionError: no existe la sección «Mis reservas» (R-04)`. R-04 cerrado, y la afirmación del implementador («la mató otra prueba») queda corregida: en la suite del panel la mata `test_orden_de_las_secciones...`, en la de cancelar la mata el ayudante.
+  - `historial`: ahora falla si falta `<h2>Historial</h2>`; con el `<h2>` mutado fallan 11 pruebas. Más fuerte.
+  - `mensajes_listados`: cambia `1` por `None` en `seccion(...)` porque «Notificaciones» ya es la última sección (hasta `</main>`). Equivalente adaptado; con el tope de 20 y 25 filas lo prueba `test_con_25...` (20 `<li>`).
+  - `test_filas_ilegibles_se_omiten_sin_romper`: la prueba usaba `inicio='2026-13-45T99:99:99'` y solo exigía 200. La nueva conserva esa fila, agrega una de duración `'abc'`, y exige historial vacío, «No tienes una sesión próxima», «No tienes reservas próximas», que `2026-13-45` y `abc` no aparezcan, y que una fila sana siga apareciendo en próxima/reservas/historial. Estrictamente más fuerte. R-03 de T-11 cerrado: meter las filas ilegibles al historial (mutación propia, `m3`) falla solo esta prueba.
+  - `test_no_hay_ninguna_accion_para_marcar_como_leida` (contradecía D-035): reemplazada por 13 pruebas; el contenido útil de su aserción de formularios («solo Cerrar sesión» sin no leídas) está cubierto por `formularios_de_leidas(...) == []` en `test_el_boton_solo_aparece_si_hay_no_leidas`. R-05 de T-11 cerrado.
+  - `test_horas_libres`: solo cambia el rótulo a «Reservar hora»; igual de estricta.
+- **Mutaciones (≥6) y razón del fallo:** sin filtro de usuario → 6 fallos (`test_ignora_los_ids…`, `test_con_25…`, `test_marcar_leidas_devuelve…`, entre otras); quitar `LIMIT` → 2 (`test_con_25…`, `test_el_contador_incluye…`); CSRF desactivado → 2 (`test_sin_token_csrf…`, `test_el_anonimo…`); botón siempre → 2 (`test_el_boton_solo_aparece…`, `test_marcar_todas…`); GET permitido → `test_la_ruta_no_acepta_get`; `@login_requerido` → `test_el_profesional_no_puede_usar_la_ruta`; `> 20` → `test_con_25…`; `<h2>` Historial → 11. Todas fallan por la razón declarada.
+- **Debilidad menor:** las pruebas de orden e índices usan `html.index("Notificaciones\n")` y `<h2>Mis reservas</h2>` con coincidencia literal. Si T-13 añade `class`/`id` a esos `<h2>` (o cambia los saltos de línea), fallan 6 pruebas de `test_cancelar` más la de orden, con mensaje claro pero ruidoso. Anotado para T-13 (ver R-07).
+- Sin archivos residuales; sin redundancia relevante (las 13 pruebas nuevas no se solapan salvo el flujo básico en `marcar_todas` y `con_25`, que cubren cosas distintas).
 
-### R-07 — Doble aparición y «en curso» (informativa) — ignorar; anotar
-Revisado y consistente con T-06/T-08/D-034: la próxima sesión futura aparece dos veces (resumen en «Próxima sesión» y primera fila de «Mis reservas»); es una duplicación de presentación, no una contradicción de datos (ambas salen de las mismas filas y criterios: `listar_reservas_futuras` usa `inicio > ahora` y `listar_sesiones` usa `fin > ahora`; nunca una sesión sale a la vez en «Mis reservas» e «Historial»; la «en curso» solo en «Próxima», sin botón Cancelar, coherente con la regla de 24 h). Efecto menor observado en el navegador: mientras hay una sesión en curso, el cuadro «Próxima sesión» muestra solo esa y la siguiente futura queda únicamente en «Mis reservas». Filas con fecha o duración ilegibles se omiten igual en ambas listas (mismo `intervalo_guardado`). `duracion_min` enorme solo es posible por SQL (la aplicación limita a 480 min, `DURACION_MAX`): una fila de 1e9 minutos sería «en curso» para siempre, sin 500. Noche de cambio de horario: cubierta por una prueba que corrí (sesión de 120 min que cruza el salto de septiembre).
+### R-07 (informativa) Documentación y notas para T-12 / T-13 / T-14
+- PROGRESS es veraz en lo medido; corregir solo esta frase: «la mutación del `<h2>` … la mató la prueba de orden, no el ayudante»: el ayudante falla por sí mismo (R-06). «Estado actual» ya está al día (T-11b hecha, T-12 siguiente). Sigue pendiente del humano añadir `POST /notificaciones/leidas` a `ARCHITECTURE.md` (declarado).
+- **Nota para T-12:** `@solo_paciente` devuelve 403 al profesional (probado). Diseño recomendado sin duplicar `marcar_leidas`: (a) una ruta delgada propia del profesional (`POST /profesional/notificaciones/leidas`, `@solo_profesional`) que llame a `notificaciones.marcar_leidas` con el id de sesión y redirija a su panel; (b) mover la redacción del flash («Marcaste N…», singular/plural, «No tenías…») a una función de `notificaciones.py` para que ambas vistas no la copien. Alternativa: una sola ruta con `@login_requerido` y redirección según rol, pero obliga a cambiar `test_el_profesional_no_puede_usar_la_ruta` y a que el humano decida (D-035 dice «solo rol paciente por ahora»). En ambos casos: reutilizar `TOPE_PANEL`/`listar_de_usuario` (tope 20 y COUNT aparte), reconstruir `enlazable` con las horas del propio profesional y `LEFT JOIN`/mensaje sin enlace si `hora_id` es NULL (D-016), y repetir las pruebas de D-035 (CSRF, ids ignorados, otro usuario no cambia, anónimo/paciente 403 o 302).
+- **Nota para T-13:** estilos para `.campana`, `li.leida`/`li.no-leida`, el botón del formulario (mantener foco visible; hoy es el anillo por defecto), tabla de reservas/historial; los tests dependen de `<h2>Mis reservas</h2>` y `<h2>Historial</h2>` sin atributos, de `th scope`, `<caption>` y `aria-label` (R-06); si se cambian, actualizar `filas_de_reservas`/`historial` a la vez. Hay dos líneas en blanco sobrantes antes del formulario de «Cerrar sesión» (cosmético). R-09 (favicon) sigue en T-13.
+- **Nota para T-14:** R-02 (bloqueo/500 en español) y R-04 (cabeceras) como backlog; añadir al recorrido: «Marcar todas como leídas» con más de 20 y comprobar el flash.
 
-### R-08 — Aislamiento y seguridad: sin hallazgos (informativa)
-`listar_de_usuario` filtra por `usuario_id` del usuario en sesión (la mutación sin filtro mata 4 pruebas); `listar_sesiones` por `paciente_id`; no hay `|safe` ni `Markup` en las plantillas (grep); el `hora_id` del enlace es un entero de la base y solo se enlaza si la hora está entre las reservas futuras del propio paciente; `aria-label` solo lleva un entero; el nombre del paciente en `<h1>`, el del profesional y el mensaje salen escapados (probado en navegador y por mutaciones); `Cache-Control: no-store` presente (prueba + D-024); no se añadió ningún formulario nuevo (los de Cancelar y Cerrar sesión siguen con `csrf_token`); profesional → 403 y anónimo → 302 (pruebas existentes). El mensaje de cancelación y la notificación son redundantes con el aviso flash (cosmético).
+## Resumen
 
-### R-09 — Inexactitudes menores en PROGRESS (informativa) — ignorar / T-13
-PROGRESS dice «sin errores de consola»: en la primera carga Chromium registra `error: Failed to load resource ... 404` por `GET /favicon.ico` (lo reproduje a 390 px). No es de T-11; T-13 puede añadir un favicon o `<link rel="icon" href="data:,">`. Lo demás de D-034/PROGRESS que pude contrastar es veraz (26 pruebas, mutaciones, archivo nuevo justificado en D-034 por la regla 10, ayudante cambiado sin debilitar aserciones). TASKS pide «LEFT JOIN» (nota de T-02f) y el código no hace JOIN: D-034 lo justifica (el mensaje se basta solo) y es más seguro; la nota de TASKS queda obsoleta para T-12.
-
-## Propuesta de decisión humana: ¿cuándo pasa una notificación a «leída»? (R-01)
-
-Contexto: SPEC §5 solo dice «campana con contador». Hoy el contador crece sin parar. Aplica por igual a T-11 (paciente) y T-12 (profesional); hay que usar un único criterio y una única función (`notificaciones.marcar_leidas(db, usuario_id)`).
-
-| Opción | Cómo funciona | Costo | Riesgos |
+| # | Severidad | Tema | Recomendación |
 |---|---|---|---|
-| **A. Marcar al ver el panel** | `GET /paciente` calcula el contador, renderiza y luego hace `UPDATE ... SET leida=1 WHERE usuario_id=? AND leida=0` | Muy bajo (una sentencia); sin ruta nueva ni formulario | Un `GET` que escribe (recarga, botón atrás, prefetch o abrir el panel «de pasada» las marca; no se distingue «vista» de «cargada»); toma el bloqueo de escritura de SQLite en cada visita (compite con `BEGIN IMMEDIATE` de reservas, T-07); un fallo del `UPDATE` no debe romper la página; el contador solo se ve «en la primera carga», lo que confunde si se recarga |
-| **B. Botón «Marcar como leídas» (POST + CSRF)** | Formulario en la campana, visible solo si hay no leídas; `POST /notificaciones/leidas` marca solo las del usuario y redirige a `/paciente` | Bajo-medio: una ruta POST, un formulario, `marcar_leidas`, pruebas (CSRF, aislamiento entre usuarios, idempotencia, rol), una línea en ARCHITECTURE (humano) | La persona puede no usarlo (el contador sigue alto; se mitiga con R-02: tope de 20); una acción extra; nada de JavaScript |
-| **C. No usar «leída» en v1** | Quitar contador y estado; la campana sería un icono sin número, o un total de notificaciones | Bajo (borrar código y la columna queda sin uso) | Contradice SPEC §5 («campana con contador»); habría que editar SPEC (solo el humano); pierde el valor de la campana |
-| **D. (variante)** Marcar por notificación (botón en cada fila) | Igual que B, pero por fila | Medio-alto (más botones, más pruebas; mucho más ruido con muchas filas) | Excesivo para v1 |
+| R-01 | baja | «Marcar todas» marca avisos llegados después de renderizar | decisión humana / backlog |
+| R-02 | baja | `database is locked` tras 5 s sin página 500 | backlog T-14 |
+| R-03 | baja | Aviso de tope con exactamente 20; `20` duplicado | tarea pequeña (T-12) |
+| R-04 | informativa | Sin cabeceras anti-frame; CSRF por cabecera | backlog T-14 |
+| R-05 | informativa | Rol/CSRF coherentes con T-04 | ignorar |
+| R-06 | informativa | Reescrituras igual o más fuertes; mutaciones matan por la razón declarada | corregir frase de PROGRESS |
+| R-07 | informativa | Notas T-12/T-13/T-14 | anotar en TASKS (orquestador) |
 
-**Recomendación: B**, con un único botón «Marcar todas como leídas» (sin botón por fila). Razones: respeta SPEC (hay contador con sentido), no escribe en un `GET`, es explícita, no añade JavaScript ni dependencias, y es el cambio más pequeño que cierra el bloqueo. Condiciones: (1) la ruta marca solo `WHERE usuario_id = <usuario en sesión>` e ignora cualquier id recibido; (2) se aplica la misma función en T-12; (3) se combina con R-02 (tope de 20 filas y contador por `COUNT`); (4) el humano añade la ruta a ARCHITECTURE; (5) la prueba `test_no_hay_ninguna_accion...` se reescribe. Si prefiere cero clics, la alternativa aceptable es A, siempre que se escriba **después** de renderizar y se anote la advertencia del `GET` que escribe. C solo si el humano prefiere recortar SPEC.
-
-Decisión que se pide al humano: elegir A, B, C o D (recomendada: B). No se implementó nada.
-
-## Notas para tareas siguientes
-
-- **T-12 (profesional):** mismo criterio de «leída» y la misma función compartida (`listar_de_usuario` ya es genérica por `usuario_id`; no copiar la lista de la plantilla). «Próximas sesiones» y «pasadas» con el criterio de D-034 (`fin > ahora`), instantes absolutos, y omitir filas ilegibles. Las horas libres a ≤ 24 h que ningún paciente puede reservar (D-029; nota R-10 de T-08e) deben rotularse «no reservable» con el mismo cálculo que `listar_horas_libres_futuras` (`inicio - ahora > 24 h`, estricto). Enlaces de notificaciones del profesional: comprobar `profesional_id` de la hora, no `hora_id` a secas (puede quedar NULL por D-016). Tope de notificaciones desde el inicio (R-02). El texto «LEFT JOIN» de su nota en TASKS está obsoleto (D-034).
-- **T-13:** clases ya presentes y sin estilo (`campana`, `no-leida`, `leida`, `notificaciones`, `mensaje`); no suprimir `:focus-visible` (hoy el contorno por defecto sí se ve); estados «nueva/leída» no solo por color; favicon (R-09); orden de secciones y botón «Reservar hora» (R-06); mantener `th scope` y `caption` (hay una prueba que los exige); revisar contraste real porque aún no hay CSS.
-- **T-14:** R-03 y R-04 si no se hacen antes; README: cron < 24 h (ya anotado); recorrido §9 verificando la campana tras decidir R-01; probar el horario de verano de abril con filas de hora repetida (ya en backlog de T-10).
+**Veredicto: APROBADA.**
