@@ -43,7 +43,7 @@ def permitir_varios_profesionales(app):
 
 def iniciar(client, email="ana@example.cl", password=CLAVE, **extra):
     """Envía el formulario con un token real leído del HTML."""
-    token = extraer_token(client.get("/login").text)
+    token = extraer_token(client.get("/login", follow_redirects=True).text)
     datos = {"email": email, "password": password, "csrf_token": token}
     return client.post("/login", data=datos, **extra)
 
@@ -156,7 +156,7 @@ def test_la_sesion_guarda_solo_el_id_la_version_y_el_token_csrf(app, client):
 @pytest.mark.token_aleatorio
 def test_el_token_csrf_cambia_tras_iniciar_sesion(app, client):
     crear(app)
-    antes = extraer_token(client.get("/login").text)
+    antes = extraer_token(client.get("/login", follow_redirects=True).text)
     r = client.post("/login", data={"email": "ana@example.cl", "password": CLAVE, "csrf_token": antes})
     assert r.status_code == 302
     despues = sesion(client)["csrf_token"]
@@ -222,7 +222,7 @@ def test_logout_exige_post_y_token(app, client):
 
 
 def test_logout_sin_sesion_redirige_al_login(client):
-    token = extraer_token(client.get("/login").text)
+    token = extraer_token(client.get("/login", follow_redirects=True).text)
     r = client.post("/logout", data={"csrf_token": token})
     assert r.status_code == 302 and r.headers["Location"] == "/login"
 
@@ -410,7 +410,7 @@ def test_los_comandos_cli_no_calculan_el_hash_falso(tmp_path):
 def test_login_ignora_el_parametro_next(app, client, next_):
     """No hay redirección controlada por el usuario (open redirect)."""
     crear(app)
-    token = extraer_token(client.get("/login").text)
+    token = extraer_token(client.get("/login", follow_redirects=True).text)
     r = client.post(
         "/login",
         query_string={"next": next_},
@@ -496,7 +496,7 @@ def test_login_con_token_de_otra_sesion_da_400(app):
 @pytest.mark.token_aleatorio
 def test_el_token_anterior_al_login_ya_no_sirve_para_volver_a_iniciar_sesion(app, client):
     crear(app)
-    token_viejo = extraer_token(client.get("/login").text)
+    token_viejo = extraer_token(client.get("/login", follow_redirects=True).text)
     datos = {"email": "ana@example.cl", "password": CLAVE, "csrf_token": token_viejo}
     assert client.post("/login", data=datos).status_code == 302  # el primero sirve
     assert sesion(client)["csrf_token"] != token_viejo
@@ -507,7 +507,7 @@ def test_el_token_anterior_al_login_ya_no_sirve_para_volver_a_iniciar_sesion(app
 def test_login_con_token_correcto_solo_por_cabecera_ya_no_se_acepta(app, client):
     """T-14a (D-046): el token se acepta únicamente como campo del formulario."""
     crear(app)
-    token = extraer_token(client.get("/login").text)
+    token = extraer_token(client.get("/login", follow_redirects=True).text)
     r = client.post(
         "/login", data={"email": "ana@example.cl", "password": CLAVE},
         headers={"X-CSRFToken": token},
@@ -853,3 +853,28 @@ def test_logout_sin_sesion_valida_no_incrementa_nada(app, client):
     r = muerto.post("/logout", data={"csrf_token": token})
     assert r.status_code == 302 and r.headers["Location"] == "/login"
     assert version_en_base(app) == 1
+
+
+# ------------------------------------------------ T-15 (a): sesión activa ----
+
+
+@pytest.mark.parametrize("ruta", ["/login", "/registro"])
+@pytest.mark.parametrize("rol, panel", [("paciente", "/paciente"), ("profesional", "/profesional")])
+def test_t15a_login_y_registro_con_sesion_activa_redirigen_al_panel(app, client, ruta, rol, panel):
+    crear(app, email="u@example.cl", rol=rol)
+    assert iniciar(client, "u@example.cl").status_code == 302
+    r = client.get(ruta)
+    assert r.status_code == 302 and r.headers["Location"] == panel
+
+
+@pytest.mark.parametrize("ruta", ["/login", "/registro"])
+def test_t15a_sin_sesion_el_formulario_sigue_saliendo(client, ruta):
+    assert client.get(ruta).status_code == 200
+
+
+def test_t15a_tras_cerrar_sesion_el_formulario_vuelve(app, client):
+    crear(app)
+    iniciar(client)
+    token = extraer_token(client.get("/paciente").text)
+    assert client.post("/logout", data={"csrf_token": token}).status_code == 302
+    assert client.get("/login").status_code == 200 and client.get("/registro").status_code == 200

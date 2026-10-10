@@ -347,7 +347,7 @@ def test_una_hora_que_empieza_en_menos_de_24_h_se_rechaza_con_mensaje_claro(app,
     for hora in cercanas:
         categoria, texto = reservar_y_aviso(ana, hora)
         assert categoria == "error"
-        assert "Solo se puede reservar con más de 24 horas de anticipación" in texto
+        assert "solo se puede reservar con más de 24 horas de anticipación" in texto  # T-15 (d)
         assert "Elige otra de la lista" in texto
         assert fila(app, hora) == ("libre", None, None)
 
@@ -714,7 +714,7 @@ def test_el_mismo_paciente_con_dos_horas_solapadas_a_la_vez_se_queda_con_una(app
 
 # ------------------------------ T-14b: orden de comprobaciones, 24 h unificadas, textos ----
 
-POCA = "Solo se puede reservar con más de 24 horas de anticipación, y esa hora empieza en no más de 24 horas. Elige otra de la lista."
+POCA = "Esa hora ya no está disponible: solo se puede reservar con más de 24 horas de anticipación, y esa hora empieza en no más de 24 horas. Elige otra de la lista."  # T-15 (d): antes empezaba con «Solo se puede…»
 YA_PASO = "Esa hora ya empezó o ya pasó. Elige otra de la lista."
 NO_DISPONIBLE = "Esa hora ya no está disponible. Elige otra de la lista."
 SOLAPE = (
@@ -896,3 +896,20 @@ def test_la_expresion_de_ids_coincide_exactamente_con_1_a_el_maximo():
         casos |= {random.randrange(0, 2**64) for _ in range(300)} if maximo == ID_MAX else set()
         for n in casos:
             assert (patron.fullmatch(str(n)) is not None) == (1 <= n <= maximo), (maximo, n)
+
+
+def test_t15d_una_hora_ocupada_con_menos_de_24_h_dice_que_ya_no_esta_disponible(app, pro_id, ana):
+    """T-15 (d): quien veía la hora libre y llega tarde no recibe un texto que solo vale para una libre."""
+    ocupada = insertar(app, pro_id, "2026-10-09T11:00:00")  # 23 h
+    ocupar_por_otra(app, ocupada)
+    categoria, texto = reservar_y_aviso(ana, ocupada)
+    assert categoria == "error" and texto.startswith("Esa hora ya no está disponible")
+    assert "24 horas" in texto  # sigue explicando la regla, igual que para una libre
+
+
+def test_t15d_el_mensaje_no_distingue_libre_de_ocupada_ni_filtra_quien_la_tiene(app, pro_id, ana):
+    libre = insertar(app, pro_id, "2026-10-09T11:00:00")
+    ocupada = insertar(app, pro_id, "2026-10-09T10:00:00")
+    ocupar_por_otra(app, ocupada, "otra@example.cl")
+    assert reservar_y_aviso(ana, libre) == reservar_y_aviso(ana, ocupada)
+    assert "example.cl" not in reservar_y_aviso(ana, ocupada)[1]

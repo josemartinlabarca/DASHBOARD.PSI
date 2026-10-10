@@ -38,9 +38,12 @@ MENSAJE_YA_PASO = "Esa hora ya empezó o ya pasó. Elige otra de la lista."
 # así que siempre podría cancelarse en ese mismo instante.
 ANTICIPACION_RESERVAR_S = 24 * 3600
 # «no más de»: vale para las 24 h exactas (que ya no se pueden reservar) y para menos (T-08e R-11).
+# T-15 (d): empieza con «Esa hora ya no está disponible», que es cierto esté la hora libre u
+# ocupada por otra persona; así el POST forzado a una hora oculta sigue sin distinguir una de
+# otra (T-08e R-03) y quien la veía ocupada no recibe un mensaje que solo vale para una libre.
 MENSAJE_POCA_ANTICIPACION_RESERVA = (
-    "Solo se puede reservar con más de 24 horas de anticipación, y esa hora empieza en "
-    "no más de 24 horas. Elige otra de la lista."
+    "Esa hora ya no está disponible: solo se puede reservar con más de 24 horas de "
+    "anticipación, y esa hora empieza en no más de 24 horas. Elige otra de la lista."
 )
 # La reserva con la que se cruza puede tener menos de 24 h y no poder cancelarse: no se promete.
 MENSAJE_SOLAPE = (

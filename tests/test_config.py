@@ -346,3 +346,24 @@ def test_el_mensaje_de_debug_publico_solo_afirma_lo_cierto(tmp_path, monkeypatch
 def test_el_mensaje_de_debug_sin_clave_nombra_la_cli_de_flask_y_no_solo_flask_run():
     assert "línea de comandos de Flask" in MENSAJE_DEBUG_SIN_CLAVE
     assert "solo se admite bajo `flask run` en un host local" not in MENSAJE_DEBUG_SIN_CLAVE
+
+
+# ------------------------------------------------ T-15 (f): README ----
+
+
+def _readme():
+    import pathlib
+
+    return (pathlib.Path(__file__).resolve().parent.parent / "README.md").read_text(encoding="utf-8")
+
+
+def test_t15f_el_readme_aclara_que_registrarse_no_inicia_sesion():
+    texto = " ".join(_readme().split())
+    assert "Registrarse no inicia sesión" in texto and "debes entrar en `/login`" in texto
+
+
+def test_t15f_el_readme_no_atribuye_a_click_el_aviso_de_eco_de_la_contrasena():
+    """El aviso «Password input may be echoed» lo emite `getpass` de Python, no Click."""
+    texto = " ".join(_readme().split())
+    assert "Click avisa" not in texto
+    assert "`getpass`, no Click" in texto and "Warning: Password input may be echoed." in texto

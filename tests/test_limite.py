@@ -51,7 +51,7 @@ def reloj(monkeypatch):
 
 def intentar(client, email="ana@example.cl", password=MALA, ip=IP, **extra):
     """POST /login con un token real, como si viniera de la dirección `ip`."""
-    token = extraer_token(client.get("/login").text)
+    token = extraer_token(client.get("/login", follow_redirects=True).text)
     return client.post(
         "/login",
         data={"email": email, "password": password, "csrf_token": token},

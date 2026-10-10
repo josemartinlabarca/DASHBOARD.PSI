@@ -279,8 +279,10 @@ def test_los_avisos_de_cancelacion_no_enlazan_a_la_reserva(app):
     pro_id = nuevo_profesional(app)
     ana = nuevo_paciente(app)
     hora = reservada(app, pro_id, "2026-10-14T10:00:00")
-    notificar(app, ANA, "Reservaste.", tipo="confirmacion", hora_id=hora)
+    # T-15 (b): una confirmación con una cancelación POSTERIOR de la misma hora ya no enlaza; el aviso
+    # de cancelación va primero (más antiguo) para que esta prueba siga mirando solo que él no enlaza.
     notificar(app, ANA, "Cancelaste otra.", tipo="cancelacion", hora_id=hora)
+    notificar(app, ANA, "Reservaste.", tipo="confirmacion", hora_id=hora)
     assert ana.get("/paciente").text.count("Ver la reserva") == 1
 
 
@@ -298,7 +300,7 @@ MARCA = re.compile(r'<a class="marca" href="([^"]*)">')
 
 
 def destino_del_logo(cliente, ruta):
-    r = cliente.get(ruta)
+    r = cliente.get(ruta, follow_redirects=True)  # T-15: /login y /registro con sesión redirigen al panel
     return MARCA.search(r.text).group(1)
 
 

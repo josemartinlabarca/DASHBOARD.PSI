@@ -241,13 +241,13 @@ MENSAJE_TABLA_ANTIGUA = (
 # falla. `init-db` no puede arreglarla sin reconstruir la tabla (D-006), así que da el
 # procedimiento. Lo ve cada vez que se ejecuta `init-db`, también con `user_version` ya anotado.
 MENSAJE_FK_SIN_SET_NULL = (
-    "La tabla notificaciones es de un esquema anterior a D-016: su clave foránea hora_id no tiene "
-    "ON DELETE SET NULL. Consecuencia: el profesional NO podrá eliminar una hora que alguna vez "
-    "tuvo avisos (por ejemplo una reserva que se canceló): la aplicación responderá con un "
-    "mensaje de error y la hora seguirá en la agenda. Reservar, cancelar y el resto funcionan, y no "
-    "se perderá ningún dato. init-db no reconstruye tablas, así que no cambió nada. Para corregirlo: "
-    "1) detén el servidor y guarda una copia: cp {ruta} {ruta}.respaldo ; 2) si es una base de "
-    "práctica y no necesitas sus datos, borra {ruta} y vuelve a ejecutar «flask --app app "
+    "La tabla notificaciones es de un esquema anterior a D-016 (base: {ruta}): su clave foránea "
+    "hora_id no tiene ON DELETE SET NULL. Consecuencia: el profesional NO podrá eliminar una hora "
+    "que alguna vez tuvo avisos (por ejemplo una reserva que se canceló): la aplicación responderá "
+    "con un mensaje de error y la hora seguirá en la agenda. Reservar, cancelar y el resto "
+    "funcionan, y no se perderá ningún dato. init-db no reconstruye tablas, así que no cambió nada. "
+    "Para corregirlo: 1) detén el servidor y copia el archivo de la base como respaldo; 2) si es "
+    "una base de práctica y no necesitas sus datos, bórrala y vuelve a ejecutar «flask --app app "
     "init-db» (se pierden usuarios, horas y avisos); 3) si necesitas los datos, déjala como está y "
     "evita eliminar horas que ya tuvieron reservas hasta que se decida cómo reconstruir la tabla "
     "(ver README, «Bases creadas por versiones antiguas», y D-052)."

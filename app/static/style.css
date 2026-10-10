@@ -405,6 +405,13 @@ td .nota-fila { color: var(--suave); }
 
 .nota { color: var(--suave); font-size: 0.95rem; }
 
+/* T-15: enlace a las notificaciones junto al título del panel; solo se ve en pantallas angostas
+   (hasta 640 px), donde la sección de notificaciones queda al final de la página. */
+.ir-notificaciones { display: none; }
+@media (max-width: 40em) {
+  .ir-notificaciones { display: block; margin: 0 0 1rem; font-weight: 600; }
+}
+
 /* --- Pantalla ancha ------------------------------------------------------- */
 
 @media (min-width: 48em) {

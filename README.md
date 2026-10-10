@@ -34,7 +34,9 @@ python3 -m pytest                # corre las pruebas (unos 45 s)
 ```
 
 `create-professional` pide la contraseña (mínimo 8 caracteres) y la repite. Luego entra en
-`/login` con ese correo; los pacientes se registran solos en `/registro`. Para servir sin
+`/login` con ese correo; los pacientes se registran solos en `/registro`. **Registrarse no inicia
+sesión:** al crear la cuenta te lleva al inicio con el aviso «Tu cuenta fue creada correctamente.»
+y luego debes entrar en `/login`. Para servir sin
 `--debug` hay que definir `SECRET_KEY` (siguiente sección).
 
 ## Variables de entorno
@@ -108,9 +110,11 @@ flask --app app create-professional --email profesional@ejemplo.cl --nombre "Nom
 
 El comando pide la contraseña en pantalla **sin mostrarla** y la repite para confirmar. No existe
 una opción `--password`: así la contraseña no queda en la lista de procesos ni en el historial del
-intérprete. Límite: solo queda oculta cuando la terminal es interactiva; si alimentas la entrada
-estándar con una tubería (`printf 'clave\nclave\n' | flask ...`), la contraseña queda escrita en
-esa línea y Click avisa «Password input may be echoed»; hazlo solo en pruebas.
+intérprete. Límite: solo queda oculta cuando la terminal es interactiva. Si alimentas la entrada
+estándar con una tubería (`printf 'clave\nclave\n' | flask ...`), Python (`getpass`, no Click) no
+puede controlar el eco y avisa «Can not control echo on the terminal» y «Warning: Password input
+may be echoed.» (el eco no se pudo ocultar); además la contraseña queda escrita en esa línea del
+intérprete. Hazlo solo en pruebas.
 
 - **Comprueba la base antes de pedir la contraseña:** si `DATABASE` apunta a un archivo que no
   existe, a una carpeta, a algo que no es SQLite, a una base sin tablas, de solo lectura o
@@ -386,7 +390,7 @@ código y las pruebas dicen:
 
 Con la base creada y la cuenta del profesional (arriba), servidor en marcha:
 
-1. Registra un paciente en `/registro`.
+1. Registra un paciente en `/registro` (no inicia sesión: luego entra en `/login` con ese correo).
 2. Entra como profesional (`/login`) y agrega una hora **a más de 24 horas** en el futuro
    («Agregar hora»); agrega otra más lejana.
 3. Entra como paciente, abre «Reservar hora», reserva la primera: aparece la confirmación y la

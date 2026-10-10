@@ -286,7 +286,8 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 
 
 ### T-15 — Pulido posterior al cierre (sin decisiones humanas)
-- **Estado:** PENDIENTE
+- **Estado:** IMPLEMENTADA, pendiente de verificación
+- **Hecho por el Implementador (2026-10-10 12:35):** los 6 defectos y el punto 2 (ver D-053 y PROGRESS). Pendiente: Verificador y Revisor.
 - **Depende de:** T-14c
 - **Qué:** (1) 6 defectos S4 del Verificador: `/login` y `/registro` con sesión activa deben redirigir al panel; el texto de la notificación de confirmación queda obsoleto tras cancelar (indicar que fue cancelada o no mostrar «Ver la reserva» engañoso, ver T-12 R-01); campana de notificaciones al final de la página en móvil (≤640 px); reservar una hora ocupada con <24 h da el mensaje de las 24 h (debe decir que ya no está disponible); avisos de `init-db` muy largos que repiten la ruta; README: aclarar que registrarse no inicia sesión y la frase «Password input may be echoed». (2) T-12 R-04: `reservar_hora` debe usar la función única `es_reservable` (D-036). (3) Ninguna regla de SPEC/ARCHITECTURE/esquema cambia; si algo lo exige, parar y proponer en DECISIONS.md.
 - **Término:** suite verde 3 veces, cada defecto con prueba que falle sin el arreglo, revisión sin S1–S3.

@@ -571,3 +571,80 @@ def test_mensaje_marcadas():
     assert notificaciones.mensaje_marcadas(0) == "No tenías notificaciones sin leer."
     assert notificaciones.mensaje_marcadas(1) == "Marcaste 1 notificación como leída."
     assert notificaciones.mensaje_marcadas(7) == "Marcaste 7 notificaciones como leídas."
+
+
+# ------------------------------------------------ T-15: avisos obsoletos y campana en móvil ----
+
+CANCELADA = "Esta reserva fue cancelada después."
+
+
+def _reservar_y_cancelar(app, ana, hora):
+    assert reservar(ana, hora).status_code == 302
+    assert cancelar(ana, hora).status_code == 302
+
+
+def test_t15b_un_aviso_de_confirmacion_ya_cancelado_lo_dice_y_no_enlaza(app, pro_id, pro, ana):
+    """T-15 (b): tras reservar y cancelar, el aviso de confirmación no deja creer que la reserva sigue."""
+    hora = insertar(app, pro_id, "2026-10-14T10:00:00")
+    _reservar_y_cancelar(app, ana, hora)
+    html = ana.get("/paciente").text
+    assert html.count(CANCELADA) == 1 and "Ver la reserva" not in html
+    # el aviso de cancelación no se marca (es la propia cancelación) ni lo hace el profesional por error
+    assert pro.get("/profesional").text.count(CANCELADA) == 1
+
+
+def test_t15b_si_otra_persona_reserva_la_misma_hora_solo_su_aviso_enlaza(app, pro_id, pro, ana, beto):
+    """T-12 R-01: los avisos viejos del profesional ya no enlazan a la fila de Beto."""
+    hora = insertar(app, pro_id, "2026-10-14T10:00:00")
+    _reservar_y_cancelar(app, ana, hora)
+    assert reservar(beto, hora).status_code == 302
+    html = pro.get("/profesional").text
+    assert html.count("Ver la reserva") == 1  # solo la confirmación de Beto, que sigue vigente
+    assert html.count(CANCELADA) == 1  # la de Ana
+    assert beto.get("/paciente").text.count(CANCELADA) == 0
+
+
+def test_t15b_si_el_mismo_paciente_reserva_de_nuevo_el_aviso_nuevo_enlaza(app, pro_id, ana):
+    hora = insertar(app, pro_id, "2026-10-14T10:00:00")
+    _reservar_y_cancelar(app, ana, hora)
+    assert reservar(ana, hora).status_code == 302
+    html = ana.get("/paciente").text
+    assert html.count(CANCELADA) == 1 and html.count("Ver la reserva") == 1
+
+
+def test_t15b_un_aviso_vigente_no_se_marca_cancelado(app, pro_id, pro, ana):
+    hora = insertar(app, pro_id, "2026-10-14T10:00:00")
+    assert reservar(ana, hora).status_code == 302
+    assert CANCELADA not in ana.get("/paciente").text and CANCELADA not in pro.get("/profesional").text
+
+
+def _reglas_css(css, selector):
+    """Declaraciones de `selector` fuera de @media y dentro de cada @media (texto del bloque)."""
+    fuera = re.sub(r"@media[^{]*\{(?:[^{}]*\{[^{}]*\})*[^{}]*\}", "", css, flags=re.S)
+    fuera_decl = re.findall(rf"{re.escape(selector)}\s*\{{([^}}]*)\}}", fuera)
+    medias = {
+        consulta.strip(): re.findall(rf"{re.escape(selector)}\s*\{{([^}}]*)\}}", cuerpo)
+        for consulta, cuerpo in re.findall(r"@media([^{]*)\{((?:[^{}]*\{[^{}]*\})*[^{}]*)\}", css, flags=re.S)
+    }
+    return fuera_decl, {k: v for k, v in medias.items() if v}
+
+
+@pytest.mark.parametrize("quien", ["pro", "ana"])
+def test_t15c_la_campana_esta_arriba_con_un_enlace_a_las_notificaciones(app, pro_id, pro, ana, quien):
+    """T-15 (c): el enlace va antes de cualquier sección y lleva a la sección de notificaciones."""
+    cliente = {"pro": pro, "ana": ana}[quien]
+    notificar(app, PRO if quien == "pro" else ANA, "Aviso nuevo.")
+    html = cliente.get("/profesional" if quien == "pro" else "/paciente").text
+    m = re.search(r'<p class="ir-notificaciones"><a href="#(titulo-notificaciones)">(.*?)</a></p>', html, re.S)
+    assert m and "1 sin leer" in " ".join(m.group(2).split())
+    assert html.index("ir-notificaciones") < html.index("<h2")
+    assert 'id="titulo-notificaciones"' in html
+
+
+def test_t15c_el_enlace_solo_se_muestra_en_pantallas_angostas():
+    from tests.test_estilo import CSS
+
+    fuera, medias = _reglas_css(CSS, ".ir-notificaciones")
+    assert fuera and all("display: none" in d for d in fuera)  # escritorio: oculto, sin tocar su diseño
+    assert list(medias) == ["(max-width: 40em)"]  # 40em = 640 px, el mismo corte de las tablas
+    assert all("display: block" in d for d in medias["(max-width: 40em)"])

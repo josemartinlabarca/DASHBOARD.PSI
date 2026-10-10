@@ -150,8 +150,14 @@ def listar_de_usuario(db, usuario_id):
     El contador sale de un `COUNT(*)` aparte: cuenta todas las no leídas, no solo las visibles.
     """
     filas = db.execute(
-        "SELECT id, tipo, mensaje, hora_id, leida, creada_en FROM notificaciones"
-        " WHERE usuario_id = ? ORDER BY id DESC LIMIT ?",
+        "SELECT n.id, n.tipo, n.mensaje, n.hora_id, n.leida, n.creada_en,"
+        # T-15 (b): un aviso de confirmación o recordatorio con una cancelación posterior de la
+        # misma hora (para este mismo usuario) ya no describe una reserva vigente.
+        " (n.tipo != 'cancelacion' AND n.hora_id IS NOT NULL AND EXISTS ("
+        "   SELECT 1 FROM notificaciones c WHERE c.usuario_id = n.usuario_id"
+        "   AND c.tipo = 'cancelacion' AND c.hora_id = n.hora_id AND c.id > n.id)) AS cancelada"
+        " FROM notificaciones n"
+        " WHERE n.usuario_id = ? ORDER BY n.id DESC LIMIT ?",
         (usuario_id, TOPE_PANEL + 1),
     ).fetchall()
     hay_mas = len(filas) > TOPE_PANEL  # la fila TOPE_PANEL+1 solo sirve para saber esto
@@ -163,6 +169,7 @@ def listar_de_usuario(db, usuario_id):
             "mensaje": f["mensaje"],
             "hora_id": f["hora_id"],
             "leida": bool(f["leida"]),
+            "cancelada": bool(f["cancelada"]),
             "creada": tiempo.mostrar_instante(f["creada_en"]),
         }
         for f in filas

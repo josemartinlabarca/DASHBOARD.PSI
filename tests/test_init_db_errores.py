@@ -337,7 +337,9 @@ def test_init_db_avisa_con_el_procedimiento_aunque_la_version_ya_este_anotada(ap
         assert "Aviso: La tabla notificaciones es de un esquema anterior a D-016" in r.output
         assert "ON DELETE SET NULL" in r.output and "NO podrá eliminar una hora" in r.output
         ruta = app.config["DATABASE"]
-        assert f"cp {ruta} {ruta}.respaldo" in r.output and "borra " + ruta in r.output
+        # T-15 (e): la ruta se dice UNA vez (antes cuatro, dentro de «cp … ….respaldo» y «borra …»)
+        assert r.output.count(ruta) == 1, r.output
+        assert "copia el archivo de la base como respaldo" in r.output and "bórrala" in r.output
         assert "README" in r.output and "D-052" in r.output
         assert "no cambió nada" in r.output
         assert "Aviso: La tabla notificaciones se creó con un esquema anterior" not in r.output  # un solo aviso

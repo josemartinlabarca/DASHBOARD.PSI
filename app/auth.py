@@ -152,6 +152,8 @@ def validar_registro(nombre, email, password):
 @bp.route("/registro", methods=["GET", "POST"])
 def registro():
     if request.method == "GET":
+        if usuario_actual() is not None:
+            return redirect(destino_marca())  # T-15: con sesión activa no se muestra el formulario
         return render_template("registro.html", nombre="", email="", errores={})
 
     nombre = request.form.get("nombre", "").strip()
@@ -315,6 +317,8 @@ def cerrar_sesion(db, usuario_id):
 @bp.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "GET":
+        if usuario_actual() is not None:
+            return redirect(destino_marca())  # T-15: con sesión activa no se muestra el formulario
         return render_template("login.html", email="", error=None)
 
     email_bruto = request.form.get("email", "")

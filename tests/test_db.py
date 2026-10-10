@@ -349,7 +349,7 @@ from tests.test_seguridad import extraer_token  # noqa: E402
 
 
 def _post(client, ruta, **datos):
-    token = extraer_token(client.get(ruta).text)
+    token = extraer_token(client.get(ruta, follow_redirects=True).text)
     return client.post(ruta, data={"csrf_token": token, **datos})
 
 

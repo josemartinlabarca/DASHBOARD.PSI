@@ -3,6 +3,10 @@
 {% block contenido %}
   <h1>Hola, {{ usuario.nombre }}</h1>
 
+  {# T-15 (c): en pantallas angostas la campana está arriba (la hoja la oculta en pantallas anchas). #}
+  <p class="ir-notificaciones"><a href="#titulo-notificaciones"><span aria-hidden="true">&#128276;</span>
+    Ir a mis notificaciones ({{ sin_leer }} sin leer)</a></p>
+
   <section aria-labelledby="titulo-agenda">
     <h2 id="titulo-agenda">Próximas reservas</h2>
     {% if proximas %}
