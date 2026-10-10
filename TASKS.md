@@ -276,7 +276,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Origen:** backlog de T-02c #4, T-05 R-02/R-06, T-05b R-02, T-06 R-01, T-08d R-02, T-08e R-03/R-11, T-09, T-10, T-11b R-02, T-12 R-04, D-044.
 
 ### T-14c — README, recorrido de punta a punta y revisión final
-- **Estado:** EN CURSO — arreglos y README hechos; faltan recorrido y revisión final
+- **Estado:** HECHA (2026-10-10 12:19) — arreglos y README (implementador), recorrido de punta a punta (Verificador: US-1..13 cumplen, sin fallos bloqueantes, 6 defectos S4) y revisión final (Revisor: APROBADO, sin S1–S3; ver REVIEW.md). Las casillas de «Definición de terminado» de SPEC las marca el humano con esa evidencia.
 - **Hecho por el Implementador (2026-10-09 23:58):** notas (a)–(f) de la revisión de T-14b (ver D-052 y PROGRESS), punto 1 (README completo, comandos ejecutados de verdad en una copia limpia), punto 4 (accesibilidad de las tablas: medido en Chromium, la semántica no se pierde; Firefox/WebKit/lectores sin medir) y punto 5 (Windows documentado). **Faltan:** punto 2 (Verificador: recorrido de SPEC §9 con navegador y marcar la «Definición de terminado»; NO se marcó) y punto 3 (Revisor: revisión final).
 - **Depende de:** T-14b
 - **Qué:** (1) README completo: instalación, variables (`SECRET_KEY`, `DATABASE`, `OUTBOX_PATH`, `SESSION_COOKIE_SECURE`), cron de `send-reminders` (periodo < 24 h, ejemplo de crontab, mismas variables que el servidor web, código de salida 1 si falla), despliegue detrás de HTTPS y proxy, advertencia sobre `--debug` (solo local; `FLASK_DEBUG=off` cuenta como verdadero en Flask), reglas de negocio incluida la regla 7, y el recorrido manual; (2) el **Verificador** ejecuta el recorrido completo de `SPEC.md` §9 con navegador real (registro → reserva → confirmación → recordatorio → cancelación; con D-029 el recordatorio solo coincide a las 24 h exactas: adelantar el `inicio` por SQL y cancelar otra reserva) y marca la «Definición de terminado»; (3) **Revisión final** del Revisor contra SPEC (todas las US y reglas §4), con la suite completa corrida con un token CSRF hostil una vez (propuesta de T-13c) y la lista de pendientes del humano en `ARCHITECTURE.md` (`errores.py`, `error.html`, `_notificaciones.html`, `static/`, rutas POST de «leídas», `correo.py`, `tiempo.py`, tablas nuevas de D-041); (4) accesibilidad de las tablas en tarjetas con lector de pantalla (`display:block` puede perder la semántica; probar o documentar) y backlog restante reasignado con motivo o cerrado; (5) Windows: las pruebas con `zona_sistema` se saltan (T-08 R-08), documentarlo.
@@ -284,6 +284,13 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Término:** todas las casillas de «Definición de terminado» de SPEC marcadas; hallazgos en `REVIEW.md` resueltos o reasignados con motivo por el humano.
 - **Origen:** T-14 original (dividida el {ts}).
 
+
+### T-15 — Pulido posterior al cierre (sin decisiones humanas)
+- **Estado:** PENDIENTE
+- **Depende de:** T-14c
+- **Qué:** (1) 6 defectos S4 del Verificador: `/login` y `/registro` con sesión activa deben redirigir al panel; el texto de la notificación de confirmación queda obsoleto tras cancelar (indicar que fue cancelada o no mostrar «Ver la reserva» engañoso, ver T-12 R-01); campana de notificaciones al final de la página en móvil (≤640 px); reservar una hora ocupada con <24 h da el mensaje de las 24 h (debe decir que ya no está disponible); avisos de `init-db` muy largos que repiten la ruta; README: aclarar que registrarse no inicia sesión y la frase «Password input may be echoed». (2) T-12 R-04: `reservar_hora` debe usar la función única `es_reservable` (D-036). (3) Ninguna regla de SPEC/ARCHITECTURE/esquema cambia; si algo lo exige, parar y proponer en DECISIONS.md.
+- **Término:** suite verde 3 veces, cada defecto con prueba que falle sin el arreglo, revisión sin S1–S3.
+- **Origen:** Verificador de T-14c, REVIEW.md final y backlog (2026-10-10 12:19).
 
 ---
 

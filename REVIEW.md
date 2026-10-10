@@ -1,99 +1,56 @@
-# REVIEW.md — Revisión de T-14b (commit `3786328`, rama `agentes/loop`)
+# REVIEW.md — Revisión final (Revisor)
 
-Revisor. Contrastado con TASKS (T-14b, 7 puntos y notas de T-14a ronda 2), D-006, D-007, D-029, D-044, D-045…D-049, **D-050** (amplía D-006), D-051 (propuesta) y la última entrada de PROGRESS (23:17; el commit es de las 23:18:24, coincide).
-Todo se ejecutó en copias bajo el scratchpad (`w` = `git archive 3786328`, `t` = copia para la suite, `m`/`mm` = copias mutadas, guiones sueltos `mig*.py`, `rt*.py`, `win*.py`, `busy.py`, `ob.py`, `forz.py`, `idx.py`, `conc.py`, `mut.py`). El repo no se tocó (`git status` limpio, sin `agenda.db` ni `outbox.log`). El contenedor se reinició a mitad de la revisión: se repitieron las comprobaciones de `send-reminders`/`create-professional` tras el reinicio; ningún servidor ni proceso quedó vivo.
+Alcance: trazabilidad US-1..US-13, barrido de seguridad por ruta x rol, reglas críticas. No se modificó código, tests ni SPEC/ARCHITECTURE. Los 6 defectos S4 ya conocidos no se repiten. No se tocó `agenda.db` ni `outbox.log` (verificado: no existen en el repo).
 
-## Veredicto: APROBADA (con 2 hallazgos medios/bajos que recomiendo absorber en T-14c)
+## Veredicto: APROBADO
 
-Lo central funciona y aguanta lo que intenté: ningún dato se pierde en `init-db` con los 6 esquemas históricos, es transaccional e idempotente, la ventana de D-044 coincide con un oráculo independiente en miles de casos (incluidos los cambios de horario), la base ocupada da 503 en español sin duplicar datos y las mediciones declaradas se reproducen. Lo que encontré es un caso real de 500 sobre bases muy antiguas que la documentación dice que «funcionan» (R-01) y varios bordes del CLI `init-db` sin pulir. Ninguno pierde datos.
+Sin hallazgos S1, S2 ni S3. Suite completa verde en UTC y con `TZ=Asia/Tokyo`. El barrido de seguridad no encontró desviaciones.
 
 ## Hallazgos
 
-### R-01 (media) — Base anterior a T-02f: tras `init-db` «sigue funcionando», pero eliminar una hora libre con notificaciones da 500
-Las tablas de los esquemas `748f18e`, `cd9f209` y `0f29be6` no tienen `ON DELETE SET NULL` en `notificaciones.hora_id`. `init-db` solo lo avisa y además sella `user_version = 1`. La documentación (aviso de `init-db`, README «la base sigue funcionando, sin esas protecciones», D-050) lo presenta como inocuo. No lo es: cancelar una reserva deja una notificación con `hora_id` apuntando a una hora que vuelve a `libre`, y si el profesional la elimina:
-```
-python3 rt2.py   # crea la base con el esquema antiguo, init-db, login del profesional, POST /profesional/horas/2/eliminar
-748f18e post-init: {'eliminar libre con notif': 500}   sqlite3.IntegrityError: FOREIGN KEY constraint failed
-cd9f209 post-init: {'eliminar libre con notif': 500}
-df7a71f post-init: {'eliminar libre con notif': 302}   (esquema con SET NULL: correcto)
-```
-Es el flujo normal «reservar → cancelar → el profesional elimina esa hora». Alcance real acotado: bases creadas en las primeras ~48 h del proyecto (D-007 las daba por de práctica). Además, una vez sellado `user_version = 1`, `es_esquema_antiguo` ya no puede ayudar (y un `IntegrityError` no es `OperationalError`).
-**Recomendación (T-14c, tarea pequeña):** o (a) corregir el texto del aviso/README/D-050 («funciona salvo eliminar horas con avisos: 500») y recomendar recrear la base, o (b) capturar `IntegrityError` en `eliminar_hora` y responder con mensaje (o hacer `UPDATE notificaciones SET hora_id = NULL WHERE hora_id = ?` antes del `DELETE`, que no destruye nada). La opción (b) cierra el caso sin reconstruir tablas.
+- Sin S1-S3.
+- S4 (nuevo, informativo): `TZ=Asia/Tokyo python3 -m pytest -q` no ejercita realmente esa zona. `tests/conftest.py` fija la zona del sistema por prueba (UTC, y las pruebas de borde la parametrizan con `zona_sistema` = UTC/Tokyo/Santiago). La cobertura de zonas sí existe, pero la variable de entorno externa es irrelevante. Evidencia: ambas corridas dan `2249 passed, 1 skipped` (77.6 s y 76.3 s). El skip es `test_aislamiento.py:256` ("esta corrida no usa la memoria compartida"), esperado.
+- S4 (nuevo, informativo): la regla 3 de SPEC (horas del profesional sin solape) se garantiza solo en código (`profesional.buscar_solape`); el esquema tiene `UNIQUE (profesional_id, inicio)` pero no impide solapes parciales. Aceptable con un único profesional y escritura serializada (D-003); cubierto por `test_horas.py::test_solapes_se_rechazan`.
 
-### R-02 (baja) — Dos `init-db` simultáneos: el segundo falla con traza («duplicate column name»)
-`inicializar` decide (columnas, tablas, `user_version`, nº de profesionales) **antes** de `BEGIN IMMEDIATE`; si otro `init-db` confirma entre la lectura y el bloqueo, el segundo ejecuta `ALTER TABLE … ADD COLUMN` otra vez. Reproducido de forma determinista (pausa en la lectura de columnas del hilo B):
-```
-python3 race3.py  ->  {'A': ('ok', ['se agregó la columna usuarios.sesion_version']), 'B': ('ERR', 'OperationalError', 'duplicate column name: sesion_version')}
-```
-La base queda correcta (la transacción se revierte; la carrera no ocurrió espontáneamente en 18 intentos con 6 procesos reales porque el arranque de Flask los serializa). Misma ventana para «aparece un 2.º profesional entre la comprobación y el bloqueo» (el `CREATE UNIQUE INDEX` falla y se revierte, con traza). Sin pérdida de datos.
-**Recomendación (backlog / T-14c):** abrir `BEGIN IMMEDIATE` antes de leer el estado, o reintentar una vez la decisión si el `ALTER` falla por columna duplicada.
+## 1. Trazabilidad
 
-### R-03 (baja) — `init-db` muestra traza de Python ante archivos que no son una base utilizable
-`abrir_base_existente` (send-reminders/create-professional) trata esos casos con mensajes claros; `init-db` no:
-```
-archivo de texto            -> rc 1, Traceback … sqlite3.DatabaseError: file is not a database
-base corrupta               -> rc 1, Traceback … database disk image is malformed
-DATABASE = carpeta / carpeta inexistente -> rc 1, Traceback … unable to open database file
-solo lectura (chattr +i)    -> rc 1, Traceback … attempt to write a readonly database
-bloqueada (BEGIN IMMEDIATE) -> rc 1 tras 5,2 s, Traceback … database is locked
-archivo vacío (0 bytes)     -> rc 0, «Base de datos inicializada.» (correcto)
-esquema que falla a medias  -> rc 1, Traceback; la base queda intacta (verificado)
-```
-Código de salida ≠ 0 y datos intactos en todos, pero la traza contradice el espíritu del punto 4. Una base de versión más nueva (`user_version = 7`) se acepta: avisa y no cambia el número, pero sí agrega el índice faltante (`se creó el índice intentos_acceso_instante`): lo que el README dice («avisa y no cambia su número») es verdad solo a medias.
-**Recomendación (backlog):** envolver `inicializar` en el mismo traductor de errores de `abrir_base_existente` (mensaje en español, código 1).
+| US | Ruta / función principal | Test que la cubre |
+|---|---|---|
+| US-1 registro | `POST /registro` · `auth.registro`, `validar_registro`, `crear_usuario` | `tests/test_registro.py` (41 pruebas); `test_roles.py::test_flujo_completo_registro_login_panel_logout` |
+| US-2 login/logout | `/login` · `auth.login`; `POST /logout` · `auth.logout` | `tests/test_login.py` (62); `test_roles.py::test_flujo_completo_registro_login_panel_logout`; `test_limite.py` (límite de intentos) |
+| US-3 aislamiento por rol | `auth._exigir` → `solo_paciente` / `solo_profesional` (403, o 302 a /login) | `test_roles.py::test_paciente_ve_su_panel_y_no_el_del_profesional`, `::test_profesional_ve_su_panel_y_no_el_del_paciente`, `::test_sin_sesion_se_redirige_al_login`; `test_dashboard_paciente.py::test_el_profesional_recibe_403`; `test_dashboard_profesional.py::test_el_paciente_no_accede_ni_ve_nada` |
+| US-4 agregar hora | `/profesional/horas/nueva` · `profesional.nueva_hora`, `crear_hora`, `validar_formulario` | `test_horas.py` (93): `::test_no_se_crean_horas_en_el_pasado`, `::test_solapes_se_rechazan`, `::test_el_pasado_se_juzga_con_la_hora_de_chile_y_no_la_del_servidor` |
+| US-5 eliminar hora libre | `POST /profesional/horas/<id>/eliminar` · `profesional.eliminar_hora` | `test_horas.py::test_eliminar_una_hora_libre`, `::test_no_se_elimina_una_hora_reservada`, `::test_reservar_cancelar_y_eliminar_conserva_las_notificaciones` |
+| US-6 dashboard profesional | `/profesional` · `profesional.dashboard`, `listar_agenda`, `listar_horas_libres` | `test_dashboard_profesional.py` (42): `::test_el_profesional_ve_su_panel_sin_cache_ni_javascript`, `::test_orden_de_las_secciones` |
+| US-7 horas libres futuras | `/paciente/horas` · `paciente.horas_libres`, `listar_horas_libres_futuras` | `test_horas_libres.py` (39): `::test_el_borde_de_las_24_horas_y_el_de_inicio`, `::test_la_fraccion_de_segundo_cuenta_en_el_borde` |
+| US-8 reservar (>24 h) + confirmación | `POST /horas/<id>/reservar` · `paciente.reservar`, `reservar_hora` | `test_reservar.py` (56): `::test_a_las_24_h_exactas_no_se_reserva_y_un_segundo_mas_si`, `::test_una_hora_que_empieza_en_menos_de_24_h_se_rechaza_con_mensaje_claro`, `::test_el_update_condicional_decide_y_se_revisa_rowcount`, `::test_doble_clic_del_mismo_paciente_dice_ya_reservaste` |
+| US-9 cancelar (≥24 h) | `POST /horas/<id>/cancelar` · `paciente.cancelar`, `cancelar_reserva` | `test_cancelar.py` (51): `::test_cancelar_con_mas_de_24_horas_deja_la_hora_libre`, `::test_una_fraccion_de_segundo_menos_de_24_horas_se_rechaza`, `::test_otro_paciente_no_puede_cancelar_la_reserva_ajena` |
+| US-10 dashboard paciente | `/paciente` · `paciente.dashboard`, `listar_reservas_futuras`, `listar_sesiones` | `test_dashboard_paciente.py` (37): `::test_el_paciente_ve_su_panel_sin_cache`, `::test_el_html_es_accesible` |
+| US-11 notificación al reservar | `notificaciones.registrar(CONFIRMACION)` dentro de `reservar_hora`; `escribir_outbox` | `test_notificaciones.py::test_reservar_crea_una_notificacion_para_el_paciente_y_otra_para_el_profesional`, `::test_el_mensaje_del_paciente_se_basta_solo_y_dice_hasta_cuando_cancelar`; `test_correo.py` |
+| US-12 recordatorio 24 h | CLI `flask send-reminders` · `notificaciones.send_reminders_command` (`0 < faltan <= 24 h`, `recordatorio_enviado`) | `test_recordatorios.py` (46): `::test_ejecutar_dos_veces_envia_una_sola_vez`, `::test_el_borde_se_mide_en_instantes_al_empezar_el_horario_de_verano`, `::test_una_hora_cancelada_no_se_recuerda` |
+| US-13 notificación al cancelar | `notificaciones.registrar(CANCELACION)` en `cancelar_reserva` | `test_notificaciones.py::test_cada_paciente_recibe_su_propio_aviso_y_la_contraparte_correcta` y pruebas de cancelación de ese archivo; `test_cancelar.py` |
 
-### R-04 (baja) — `create-professional` con la base ocupada sigue mostrando traza; además pide la contraseña antes de comprobar la base
-Confirmado D-051 D: con `BEGIN IMMEDIATE` retenido por otro proceso, `create-professional` lanza `OperationalError: database is locked` (traza). Con `BEGIN EXCLUSIVE` sí da el mensaje claro (falla antes, al listar tablas). Tampoco comprueba la base antes de `click.prompt("Contraseña")`: con `DATABASE` mal escrito el usuario escribe la contraseña dos veces y recién entonces ve el error. `send-reminders` y los 7 casos de archivo (inexistente, carpeta inexistente, es carpeta, no SQLite, sin tablas, 0 bytes, enlace roto) dan mensaje en español, código 1, sin traza y **sin crear ningún `.db`** (verificado con listado del directorio). Con la base ocupada (EXCLUSIVE) `send-reminders` responde en 5,2 s con el mensaje claro.
-**Recomendación:** hacerlo en T-14c (ya propuesto en D-051 D), y abrir la base antes de pedir la contraseña.
+Sin US sin test ni código claro. Las funciones y rutas existen (verificado con `grep` de decoradores) y los nombres de test se leyeron en los archivos.
 
-### R-05 (baja, razonado, no ejecutado) — TOCTOU en `abrir_base_existente`
-Se comprueba `os.path.isfile` y luego `sqlite3.connect` crea el archivo si desapareció entre ambos pasos (ventana de microsegundos). No lo reproduje (exigiría borrar el archivo en esa ventana). Se cierra abriendo con URI `file:…?mode=rw`. Solo informativo.
+## 2. Barrido de seguridad
 
-### R-06 (baja) — Un POST forzado SÍ distingue una hora oculta de una inexistente (D-050 punto 6 lo afirma al revés)
-Libre y ocupada dan lo mismo (objetivo de T-08e R-03: mensaje, código, cuerpo y tiempo; mediana 1,7 ms ambas, sin diferencia medible), pero la frase de D-050 «una hora oculta … responde lo mismo que una inexistente» no es cierta:
-```
-python3 forz.py
-libre 12h       302 /paciente/horas  flash=Solo se puede reservar con más de 24 horas…
-ocupada 12h     302 /paciente/horas  flash=Solo se puede reservar con más de 24 horas…
-libre pasada    302 …                flash=Esa hora ya empezó o ya pasó…
-ocupada pasada  302 …                flash=Esa hora ya empezó o ya pasó…
-ocupada lejos   302 …                flash=Esa hora ya no está disponible…
-inexistente     302 …                flash=Esa hora ya no está disponible…
-```
-Quien prueba ids sabe qué ids existen (horas pasadas o a ≤ 24 h) frente a los que no. Impacto casi nulo (ids secuenciales, horas publicadas son visibles de todos modos). **Recomendación:** corregir la redacción de D-050 (o, si importa, hacer que inexistente dé el mismo mensaje de «ya empezó» solo para ids ≤ máximo, lo que sería peor). Basta con la corrección del texto.
+Script: `scratchpad/revfinal/sweep.py` (base temporal en `scratchpad/revfinal/tmp*/t.db`; usuarios: profesional, paciente A, paciente B; horas: 1 reservada por A, 2-4 libres). Corrido con `python3 -I sweep.py` y con `TZ=Asia/Tokyo`; mismos resultados.
 
-### R-07 (baja) — `esta_ocupada` también convierte `SQLITE_LOCKED` en 503 y esa rama no tiene prueba
-Mutación M06 (solo `SQLITE_BUSY`) **sobrevive** (13 pruebas OK). «database table is locked» es un fallo del propio programa (dos cursores en una conexión), no una base ocupada por otro proceso; hoy se disfrazaría de 503. Los demás `OperationalError` (por ejemplo «no such column» con la base al día, «disk I/O error») sí se relanzan como 500: probado por `test_otro_error_de_sqlite_sigue_siendo_500…` y M14 la mata. Las respuestas 503 son texto fijo: no filtran texto de SQLite (verificado en cuerpo: sin «locked»/«sqlite»). **Recomendación:** quitar `SQLITE_LOCKED` o añadir una prueba que fije la decisión.
+Rutas (`app.url_map`): `/` GET; `/login` GET/POST; `/registro` GET/POST; `POST /logout`; `/paciente`, `/paciente/horas` GET; `POST /notificaciones/leidas`; `POST /horas/<id>/reservar`; `POST /horas/<id>/cancelar`; `/profesional` GET; `/profesional/horas/nueva` GET/POST; `POST /profesional/horas/<id>/eliminar`; `POST /profesional/notificaciones/leidas`; `/static/...`.
 
-### R-08 (baja) — Bordes de `outbox.log`
-Verificado: crea con 0600 con `umask` 022/077/000 (con 277 queda 0400 y las escrituras siguientes fallan registradas en el log, sin romper la reserva); existente 0644 avisa una sola vez por proceso; NUL en la ruta, carpeta como ruta y `/dev/full` (ENOSPC) devuelven False con `logger.error` sin lanzar; carpeta inexistente se crea (la hoja `c` 0700, pero las intermedias `a`, `a/b` quedan 0755); 8 procesos × 50 escrituras de 3 KB: 400 líneas, 0 mal formadas, modo 0600; un enlace simbólico a un archivo existente **escribe en el destino** (y avisa si es 0644), y uno colgante **crea el destino** con 0600: documentado en README, aceptable porque `OUTBOX_PATH` lo fija el administrador. Un FIFO sin lector bloquearía la petición (`os.open` sin `O_NONBLOCK`); la ruta es del administrador, solo informativo. El README/D-050 dicen «carpeta 0700 solo si la crea la app»: es cierto solo para la última carpeta.
+Resultados (anónimo / A / B / profesional), solo lo observado, sin desviaciones:
+- GET públicos (`/`, `/login`, `/registro`): 200 para todos.
+- `/paciente`, `/paciente/horas`: 302 / 200 / 200 / 403. `/profesional`, `/profesional/horas/nueva`: 302 / 403 / 403 / 200.
+- Todo POST sin token CSRF (los 9 POST, 4 actores): 400; el estado de `horas` no cambió.
+- POST con CSRF a rutas de otro rol: 403 (anónimo: 302 a /login).
+- IDOR: B cancela la hora 1 de A -> 302 con mensaje y la hora sigue `reservada` por A; profesional cancela -> 403; anónimo -> 302; sin cambios. Paciente eliminando horas (A, B) -> 403. Profesional eliminando hora reservada -> 302 con aviso, sin cambios. El dashboard de B no muestra el correo de A ni enlaces a la hora 1.
+- IDs inválidos (`abc`, `0`, `-1`, `1'`): 404. ID inexistente (99999): 302 con mensaje genérico (cancelar/reservar) o 403 (eliminar, paciente), sin 500.
+- Logout: 302 y `/paciente` pasa a 302 (sesión cerrada).
+- Cabeceras: `Content-Security-Policy` (default-src 'self', frame-ancestors 'none'), `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Cache-Control: no-store`.
 
-### R-09 (baja) — README conserva una afirmación incondicional que la nota (b) corrigió en el código
-La «Advertencia» dice «En debug la clave es un valor público fijo … cualquiera podría falsificar sesiones» sin el matiz «si no defines `SECRET_KEY`». El mensaje de rechazo del código sí es veraz (nota (b)). Notas (a), (c) y (d) cumplidas: CLI propio con `FLASK_DEBUG=1` y sin clave → `RuntimeError: Me niego a servir…` (probado con un `click.command` propio); README y docstrings citan D-049 y D-050; la consecuencia (d) está documentada.
+## 3. Reglas críticas
 
-### R-10 (informativa) — Ruta con id justo sobre el máximo: GET da 405 y no 404
-`/horas/9223372036854775808/reservar`: POST 404 (correcto) pero GET 405 (el `ValidationError` del convertidor hace que Werkzeug considere la ruta como existente solo para otros métodos); con 20 dígitos da 404. Inofensivo.
-
-### R-11 (informativa) — Evaluación de D-050 como ampliación de D-006
-- **¿Debe decidirlo el humano?** Ya estaba autorizado en esencia: TASKS T-14b punto 3 pide «aviso claro **o migración mínima** con `PRAGMA user_version` … sin borrar datos». D-050 elige la migración mínima, pero cambia una frase aprobada de D-006 («no modifica tablas ya existentes»): ahora hace `ALTER TABLE usuarios ADD COLUMN`. Aun así D-006 lleva la nota «Ampliada por D-050» y D-050 se marcó para el humano. **Recomiendo que el humano lo confirme explícitamente** (una línea), porque abre la puerta a futuras migraciones aditivas.
-- **Riesgo real:** bajo. Probado con 6 esquemas (`748f18e`, `cd9f209`, `0f29be6`, `df7a71f`, `f06bdb5`, `e2384c2`) con datos (usuarios, horas reservadas, notificaciones con y sin `hora_id`): todos los datos y columnas previas idénticos antes/después, `foreign_key_check` vacío, `integrity_check` ok, `user_version` 0 → 1, segunda ejecución idempotente (salida «inicializada», base idéntica), 2 profesionales (4 esquemas) → se detiene con código 1 y base **byte a byte idéntica**, dos veces seguidas. El `ALTER` es aditivo (valor por defecto 0, no reescribe filas). Lo único que cambia es que `user_version = 1` se sella aunque queden tablas viejas (ver R-01).
-- Los tres `.sql` de `tests/esquemas_antiguos/` son idénticos (`diff`) a `git show <hash>:app/schema.sql` de `748f18e`, `df7a71f` y `f06bdb5`. Faltan en las pruebas `cd9f209`, `0f29be6` y `e2384c2` (distintos en la práctica: R-01 aparece justo en los dos primeros).
-- Con 748f18e/df7a71f… sin `init-db` y con la app sirviendo: login, registro y paneles con cookie dan **503 en español** (nunca 500); el log lleva el detalle. `send-reminders` da el mensaje de tabla faltante, código 1.
-
-### R-12 (informativa) — Documentación y backlog
-- PROGRESS 23:17 / D-050 23:16 / commit 23:18:24: coherentes con `git log`. Mediciones reproducidas (ver abajo). No pude verificar las cifras de mutaciones declaradas (26 + 18 + …) ni las capturas de navegador: no ejecuté el navegador.
-- La tabla de backlog de TASKS no tachó las filas cubiertas por T-14b (el propio PROGRESS lo dice): el orquestador debería hacerlo (T-14a R-05/R-06/R-09, T-05 R-06, T-05b R-02, T-08e R-03/R-11, T-09 R-02/R-04/R-06, T-10 R-01, T-11b R-02).
-- **Para `ARCHITECTURE.md` (humano):** `db.py` (`user_version`, `ConvertidorId`, `abrir_base_existente`), `errores.py` (503 y `error_de_base`), `intentos_acceso_instante`, `DATABASE_TIMEOUT`, `tests/esquemas_antiguos/`, `tests/test_base_ocupada.py`.
-- **Para T-14c:** R-01 (500 al eliminar con avisos en bases antiguas), R-02/R-03/R-04 (`init-db`/`create-professional` sin traza), D-051 A…D, el matiz de R-09 en el README, tachar el backlog, y la prueba con lector de pantalla de las tablas en tarjetas ya listada. La suite completa con token hostil sigue siendo una corrida manual.
-
-## Verificado ejecutando (resultados)
-- **Ventana D-044:** 6 bordes exactos (24 h−1 s, 24 h, 24 h+1 s, 60 d−1 s, 60 d, 60 d+1 s) → se listan exactamente `+1 s`, `60 d−1 s` y `60 d` (24 h estricto, 60 d inclusivo); 100 horas → sin aviso, 101 → 100 + aviso, 100 + 1 fuera de ventana → sin aviso (la propuesta C de D-051 sigue vigente); 3 profesionales × 140 con inicios repetidos (paginación por teclas): 100 filas, 0 repetidas, igual a la lista completa; 300 casos aleatorios + 400 casos con cortes a ±6 h de los cambios de horario de sept-2026/abr-2027/sept-2027/abr-2028 y horas inexistentes/ilegibles: **0 discrepancias** con un oráculo que recorre toda la tabla. 50 000 horas: `/paciente/horas` 0,0083 s y 44 888 bytes con aviso (declarado 0,008 s/45 KB).
-- **`buscar_solape`:** 1 500 casos aleatorios contra fuerza bruta (cruzando los cambios de horario, duraciones hasta 100 000 min insertadas por SQL, ventana): 0 discrepancias. 12 procesos × 3 altas con 50 000 horas: 0,88 s y 0 errores `locked` (declarado 0,79 s).
-- **Base ocupada** (retención real de 6,5 s, 5,0 s de espera): reservar, cancelar, marcar leídas (paciente y profesional), agregar, eliminar, login y registro → 503, `Retry-After: 5`, en español, enlace de reintento, sin traza; «Agregar hora» y registro conservan lo escrito; tras liberar, el reintento funciona y no hay duplicados (3 horas/1 reservada, 1 usuario nuevo). GET de `/paciente` con bloqueo EXCLUSIVE → 503.
-- **Índice nuevo:** `EXPLAIN QUERY PLAN` del `UPDATE` y del `DELETE … LIMIT 500` usan `intentos_acceso_instante`; `reservar()` con 1 000 000 de filas: 17–22 ms; reloj 24 h adelantado → espera 900 s (no crece).
-- **Convertidor:** `%D9%A1`, ancho completo, `01`, 20 dígitos, `-1`, `0`, `1.0` → 404; `9223372036854775807` válido; ruta legítima sigue con 302 (POST) / 405 (GET).
-- **Suite:** 2179 pruebas OK 3 veces (46,7 / 45,1 / 44,8 s; ~45 s frente a ~42 s de T-14a ronda 2: +3 s), 1 vez más con `SECRET_KEY`, `FLASK_DEBUG`, `TZ=Asia/Tokyo`, `SESSION_COOKIE_SECURE`, `TRUSTED_PROXY_COUNT`, `DATABASE` inexistente, `OUTBOX_PATH=/dev/full` y el token CSRF hostil juntas: OK; sin `outbox.log` ni `agenda.db` residuales. Lo más lento: la guarda de CSRF hostil (4,1 s). Las pruebas que miran el reloj real usan tolerancia de 5 s o sincronizan procesos con margen.
-- **Mutaciones propias (22; en copias, nunca en el repo), 21 matadas por la razón declarada y 1 sobrevive:** 24 h `>=`, ventana 60 d exclusiva, tope 101, aviso `>=`, convertidor con ceros, `init-db` sin transacción (BEGIN+COMMIT: muere `test_si_el_script_falla_a_medias_no_queda_nada_a_medias`), sin `user_version`, 2 profesionales `> 2`, `MARGEN_VENTANA` 0, sin rama de filas largas, outbox 0644, outbox sin `O_APPEND`, estado antes que fecha, 503 que enmascara todo, sin reubicar marcas futuras, sin índice, texto «no más de», abrir base sin comprobar archivo, hora repetida sin aclaración. **Sobrevive:** solo `SQLITE_BUSY` en `esta_ocupada` (R-07).
-
-## No verificado
-Navegador (capturas de PROGRESS), el recorrido con un servidor HTTP real y proxy, Windows, la carrera real de dos `init-db` sin pausas artificiales (solo la provocada), el TOCTOU de R-05, la afirmación de «26 + 18 mutaciones» del implementador, y base de solo lectura por permisos (se probó con `chattr +i` porque se ejecuta como root).
+- Doble reserva imposible: `reservar_hora` abre `BEGIN IMMEDIATE` (bloqueo de escritura antes de leer), decide con `UPDATE ... WHERE id = ? AND estado = 'libre'` y revisa `rowcount`; el esquema añade `CHECK` de coherencia estado/paciente y `UNIQUE (profesional_id, inicio)`. Sweep: A y B reservan la hora 3 en secuencia, queda solo con A. Pruebas: `test_reservar.py::test_el_update_condicional_decide_y_se_revisa_rowcount`, `::test_el_mismo_paciente_con_dos_horas_solapadas_a_la_vez_se_queda_con_una`. No ejecuté una carrera con hilos propia; me apoyo en esas pruebas (verdes).
+- Regla >24 h estricta: `paciente.es_reservable` (`inicio - ahora > 24 h`, instantes absolutos, reloj leído dentro del bloqueo); la lista usa la misma función. Pruebas de borde: `test_reservar.py::test_a_las_24_h_exactas_no_se_reserva_y_un_segundo_mas_si`, `::test_una_fraccion_de_segundo_mas_de_24_h_se_reserva_y_menos_o_igual_no`; `test_horas_libres.py::test_el_borde_de_las_24_horas_y_el_de_inicio`. Cancelar con 24 h exactas permitido (coherente con SPEC regla 7).
+- Recordatorio ≤24 h: `notificaciones.py:266` `0 < faltan_s <= ANTICIPACION_RECORDATORIO_S`, marcado con `UPDATE` condicional (`recordatorio_enviado = 0`); no recuerda libres, canceladas ni iniciadas; idempotente (`test_recordatorios.py::test_ejecutar_dos_veces_envia_una_sola_vez`).
+- Zona horaria: se decide con instantes absolutos y `zoneinfo` de Chile, no con la zona del equipo. `python3 -m pytest -q` en UTC y con `TZ=Asia/Tokyo`: `2249 passed, 1 skipped` ambas (ver S4 sobre el alcance real del `TZ` externo). Cobertura de DST: `test_horas_libres.py::test_el_borde_se_mide_en_instantes_al_empezar_el_horario_de_verano` / `..._al_terminar_...`, `test_reservar.py::test_solape_entre_septiembre_con_instantes_absolutos`, `test_zona_horaria.py`.

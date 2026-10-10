@@ -251,6 +251,12 @@ Aquí el ciclo ya es rutina: implementador → mi verificación → revisor → 
 - **Un incidente de entorno:** el contenedor se reinició mientras el revisor trabajaba. Verifiqué que el repositorio, las dependencias y el commit estaban intactos y **reanudé al revisor desde su transcripción** en lugar de rehacer su trabajo; lo único que se pierde en un reinicio son los procesos en curso.
 - **Lección:** *una migración que "funciona" no es una migración que deja el esquema igual al esperado.* Compara el esquema resultante con `schema.sql`, no solo «no dio error». Y: *el estado vive en git, no en los procesos*: por eso un reinicio no destruyó nada.
 
+### Vuelta 34 — T-14c Cierre: recorrido de punta a punta y revisión final
+- **Qué se hizo:** el implementador cerró los arreglos de `init-db` y escribió el README completo (comandos ejecutados en una copia limpia). Yo verifiqué su commit (2249 pruebas pasando 3 veces, también con variables de entorno de producción). Luego dos agentes independientes: un **Verificador** que recorrió las 13 historias del SPEC como usuario (US-1..13 cumplen, 6 defectos menores) y el **Revisor final**.
+- **El Revisor final falló la primera vez** por un límite de uso de la sesión (error 429), sin producir nada. En vez de repetir lo mismo, lo relancé **acotado**: un solo agente, ~25 min, tres comprobaciones (trazabilidad SPEC→código→test, barrido de seguridad ruta × rol × CSRF, reglas críticas) y escribiendo `REVIEW.md` por secciones.
+- **Resultado: APROBADO**, sin hallazgos S1–S3: 14 rutas × 4 actores sin desviaciones, doble reserva imposible, regla de 24 h estricta. Lo verifiqué: solo cambió `REVIEW.md`, la suite sigue verde.
+- **Lección:** *una revisión que no cabe en un intento no es mejor por ser más grande.* Acota el alcance a lo que más riesgo tiene y haz que el agente guarde avance a medida que trabaja; si cae, no pierdes todo.
+
 ### Historial git resultante
 
 ```
@@ -281,9 +287,9 @@ docs: documentación base del proyecto Agenda Psi
 
 ## 4. Estado actual y qué sigue
 
-- Hecho: **T-01 a T-13, T-14a y T-14b** (2179 pruebas pasando). Solo queda el cierre, T-14c.
+- Hecho: **T-01 a T-14c** (2249 pruebas pasando): el plan original está completo y la revisión final aprobó.
 - **Decisiones tuyas ya tomadas (D-035 incluida):** D-007 (esquema), D-015 (correo), D-016 (borrar horas), D-017 (formato de fecha), D-018 (carácter nulo). Pendientes: **D-020** (caracteres invisibles en el correo), **D-022** (revocar la cookie al cerrar sesión), **D-023** (un solo profesional) y **D-029** (reservar con menos de 24 h; conviene antes de T-09).
-- Siguiente: **T-14c** (arreglos de `init-db`, README, recorrido de punta a punta con navegador y revisión final).
+- Siguiente: **T-15** (pulido: 6 defectos menores del Verificador y `reservar_hora` con la función única de 24 h).
 - Pendiente solo tuyo: autorizar (o no) que `app/correo.py` figure en `ARCHITECTURE.md`; es una línea de documentación.
 
 **Tu primer ejercicio:** lanza tú mismo la vuelta de T-14c con el prompt del Paso B y revisa el resultado con la lista del Paso C. Antes de dar por buena cualquier tarea, haz cinco preguntas extra: *¿rompió algo documentado?*, *¿las pruebas fallarían si quitara la protección?*, *¿el reporte afirma algo que no ejecutó?*, *¿cómo interactúa esto con las tareas futuras?* y *¿el arreglo propuesto realmente funciona?*
@@ -336,6 +342,9 @@ docs: documentación base del proyecto Agenda Psi
 44. **Un control que solo existe en una forma de arrancar no es un control.** El bloqueo del debug cubría `flask run` y no un servidor WSGI; el revisor lo demostró forjando una cookie.
 45. **«No dio error» no es «quedó bien».** Una migración debe dejar el esquema igual al esperado: compáralo con `schema.sql`, no te fíes del mensaje de éxito.
 46. **El estado vive en git, no en los procesos.** Un reinicio del contenedor no destruyó nada porque todo estaba confirmado; lo único que se pierde son los procesos en curso, que se reanudan.
+
+47. **Acota la revisión al riesgo, y haz que guarde avance.** Un revisor «de todo» que muere por un límite de uso no entrega nada; uno acotado que escribe por secciones entrega algo siempre.
+48. **Un plan terminado no es un proyecto terminado.** Los hallazgos menores del cierre se juntan en una tarea nueva (T-15) en lugar de quedar flotando.
 
 ## 6. Trampas de principiante que ya viste en acción
 
