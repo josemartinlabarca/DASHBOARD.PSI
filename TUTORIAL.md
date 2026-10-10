@@ -257,6 +257,12 @@ Aquí el ciclo ya es rutina: implementador → mi verificación → revisor → 
 - **Resultado: APROBADO**, sin hallazgos S1–S3: 14 rutas × 4 actores sin desviaciones, doble reserva imposible, regla de 24 h estricta. Lo verifiqué: solo cambió `REVIEW.md`, la suite sigue verde.
 - **Lección:** *una revisión que no cabe en un intento no es mejor por ser más grande.* Acota el alcance a lo que más riesgo tiene y haz que el agente guarde avance a medida que trabaja; si cae, no pierdes todo.
 
+### Vuelta 35 — T-15 Pulido posterior al cierre
+- **Qué se hizo:** los 6 defectos menores del Verificador (sesión activa en `/login`, aviso «cancelada después», enlace a notificaciones en móvil, mensaje de hora ocupada, aviso de `init-db`, README) y se comprobó que `reservar_hora` ya usaba la función única de 24 h.
+- **Verificación mía:** 2267 pruebas ×3 y con variables de producción; ni SPEC, ni esquema, ni requirements tocados; las 13 líneas de test quitadas eran ayudantes y textos, no cobertura.
+- **Revisor: CON OBSERVACIONES**, sin S1–S3. Probó la campana en Chromium a 390 px (se ve) y a 1280 px (no se ve), y revirtió 2 arreglos en una copia: las pruebas fallaron como debían. Un S4 de robustez va al backlog.
+- **Lección:** *una prueba nueva solo vale si falla sin el arreglo.* El implementador lo comprobó quitando cada arreglo, y el revisor lo repitió por su cuenta.
+
 ### Historial git resultante
 
 ```
@@ -287,9 +293,9 @@ docs: documentación base del proyecto Agenda Psi
 
 ## 4. Estado actual y qué sigue
 
-- Hecho: **T-01 a T-14c** (2249 pruebas pasando): el plan original está completo y la revisión final aprobó.
+- Hecho: **T-01 a T-15** (2267 pruebas pasando): el plan original está completo y la revisión final aprobó.
 - **Decisiones tuyas ya tomadas (D-035 incluida):** D-007 (esquema), D-015 (correo), D-016 (borrar horas), D-017 (formato de fecha), D-018 (carácter nulo). Pendientes: **D-020** (caracteres invisibles en el correo), **D-022** (revocar la cookie al cerrar sesión), **D-023** (un solo profesional) y **D-029** (reservar con menos de 24 h; conviene antes de T-09).
-- Siguiente: **T-15** (pulido: 6 defectos menores del Verificador y `reservar_hora` con la función única de 24 h).
+- Siguiente: no hay tareas pendientes de código; quedan las decisiones tuyas (D-048, D-050, D-051, D-052) y subir el proyecto a GitHub.
 - Pendiente solo tuyo: autorizar (o no) que `app/correo.py` figure en `ARCHITECTURE.md`; es una línea de documentación.
 
 **Tu primer ejercicio:** lanza tú mismo la vuelta de T-14c con el prompt del Paso B y revisa el resultado con la lista del Paso C. Antes de dar por buena cualquier tarea, haz cinco preguntas extra: *¿rompió algo documentado?*, *¿las pruebas fallarían si quitara la protección?*, *¿el reporte afirma algo que no ejecutó?*, *¿cómo interactúa esto con las tareas futuras?* y *¿el arreglo propuesto realmente funciona?*

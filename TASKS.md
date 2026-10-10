@@ -286,7 +286,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 
 
 ### T-15 — Pulido posterior al cierre (sin decisiones humanas)
-- **Estado:** IMPLEMENTADA, pendiente de verificación
+- **Estado:** HECHA (2026-10-10 12:43) — verificada por el orquestador (2267 pruebas ×3) y revisada: CON OBSERVACIONES, sin S1–S3 (ver REVIEW.md).
 - **Hecho por el Implementador (2026-10-10 12:35):** los 6 defectos y el punto 2 (ver D-053 y PROGRESS). Pendiente: Verificador y Revisor.
 - **Depende de:** T-14c
 - **Qué:** (1) 6 defectos S4 del Verificador: `/login` y `/registro` con sesión activa deben redirigir al panel; el texto de la notificación de confirmación queda obsoleto tras cancelar (indicar que fue cancelada o no mostrar «Ver la reserva» engañoso, ver T-12 R-01); campana de notificaciones al final de la página en móvil (≤640 px); reservar una hora ocupada con <24 h da el mensaje de las 24 h (debe decir que ya no está disponible); avisos de `init-db` muy largos que repiten la ruta; README: aclarar que registrarse no inicia sesión y la frase «Password input may be echoed». (2) T-12 R-04: `reservar_hora` debe usar la función única `es_reservable` (D-036). (3) Ninguna regla de SPEC/ARCHITECTURE/esquema cambia; si algo lo exige, parar y proponer en DECISIONS.md.
@@ -373,6 +373,8 @@ en qué tarea conviene absorberlo.
 | T-14a r2 R-03 | `tests/test_entorno_hermetico.py` solo detecta lecturas literales de variables de entorno: no ve `os.getenv ('X')` con espacio, el nombre en una constante, `from os import environ as e`, `'X' in os.environ`, `from_envvar` ni `from_prefixed_env`; y una fixture de limpieza vacía sobrevive si el equipo no tiene variables definidas | cuando se toque ese archivo |
 | T-14a r2 R-04 | El aviso de proxy no mira `Forwarded`; con `TRUSTED_PROXY_COUNT=1` y un proxy que solo manda `X-Real-IP` no avisa (`ProxyFix` solo usa `X-Forwarded-For`) | **HECHO en T-14c** (README, «Despliegue…»: la app solo lee `X-Forwarded-For`; medido con `X-Real-IP` y `Forwarded`) |
 | T-02c #9 | En `tests/test_esquema.py` la cobertura de NOT NULL y FK es triplemente redundante y la rama `usuarios` de `test_not_null_rechaza_null` es poco legible | cuando se toque ese archivo |
+| T-15 R-01 | Con cookie de sesión y la tabla `usuarios` ausente, `GET /login` y `/registro` dan 500 (`usuario_actual()` en `app/auth.py` no captura `sqlite3.Error`; `destino_marca()` sí); base ya inválida, ya cubierta por `init-db` | cuando se toque `auth.py` |
+| T-15 R-02/R-03 | «Ya no está disponible» para una hora libre de <24 h es algo ambiguo; la marca «cancelada» no cubre avisos de horas eliminadas (documentado en D-053) | si el humano lo pide |
 
 ---
 
