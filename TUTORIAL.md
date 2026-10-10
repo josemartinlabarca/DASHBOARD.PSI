@@ -236,6 +236,13 @@ Aquí el ciclo ya es rutina: implementador → mi verificación → revisor → 
 - **Mi verificación de T-13c:** diff, 47 líneas eliminadas de pruebas (la guarda se reescribió), suite 6 veces (3 seguidas + 3 variantes de entorno), y **mis propias capturas a 320 px** con un profesional y un paciente reales: tarjetas legibles, sin scroll horizontal. Aquí no lancé un revisor aparte (como en T-08c): el riesgo es acotado, hay verificación visual propia, y el revisor ya había comprobado todo salvo lo que cambió.
 - **Lección:** *repite la suite varias veces antes de dar por buena una tarea;* las pruebas intermitentes no aparecen en la primera pasada y erosionan la confianza en todas las demás. Y una prueba que busca una cadena corta en una página completa es frágil si la página contiene datos aleatorios.
 
+### Vuelta 32 — T-14a Seguridad de acceso (la primera con "cambios requeridos" en una ronda grande)
+- **Qué se hizo, con tus decisiones D-041…D-043:** límite de intentos de login y registro con bloqueo temporal en SQLite (tabla nueva `intentos_acceso`), cookie `Secure` por variable de entorno, negativa a arrancar con debug en un host no local, y cabeceras de seguridad (CSP estricta, `nosniff`, `X-Frame-Options`, `Referrer-Policy`) en todas las respuestas. 1956 pruebas, 56 mutaciones.
+- **Mi verificación:** diff (esquema nuevo exacto), suite en 6 entornos, 5 mutaciones propias (una sobrevivió y probé que era equivalente: el `DELETE` previo ya limpia lo vencido).
+- **Revisor: CAMBIOS REQUERIDOS** (auditoría de seguridad, 24 mutaciones, ráfagas de 40 procesos, CSP real en Chromium). Tres hallazgos medios: (1) bajo un servidor WSGI el bloqueo del debug no existía: con `FLASK_DEBUG` y sin clave, **forjó la cookie del profesional y entró** (200); (2) detrás de un proxy sin configurar, 20 fallos de un atacante bloquean a todos, incluido el profesional; (3) **la suite fallaba si el equipo tenía definidas `SESSION_COOKIE_SECURE` o `TRUSTED_PROXY_COUNT`: yo no había probado esas dos variables.**
+- **Ronda 2:** la app ya no se crea con la clave pública fuera de `flask run` local (D-049, la dejé señalada para que la veas: cambia una conducta aprobada, antes solo avisaba), aviso de proxy en el log y README, y suite **hermética** (cada prueba parte sin ninguna variable de entorno de la app; hay una prueba que falla si `app/` empieza a leer una variable nueva). 2025 pruebas. Yo comprobé con servidores reales que `flask run --debug` local sigue en 200, que `--host 0.0.0.0 --debug` se niega (exit 1) y que el servidor WSGI simulado ya no sirve. **Revisor de la ronda 2: APROBADA** (3 bajos, 3 informativos).
+- **Lección:** *prueba tu suite con las variables de entorno de producción definidas.* Un test que pasa en tu máquina y falla en la de otro porque hay una variable heredada es una trampa; el orquestador (yo) probó cuatro variables y se me escaparon dos. Y: *un control que solo existe en una forma de arrancar (`flask run`) no es un control.*
+
 ### Historial git resultante
 
 ```
@@ -266,12 +273,12 @@ docs: documentación base del proyecto Agenda Psi
 
 ## 4. Estado actual y qué sigue
 
-- Hecho: **T-01 a T-13** (incluidas las tareas «b/c/d/e/f/g» de endurecimiento; 1726 pruebas pasando).
+- Hecho: **T-01 a T-13 y T-14a** (1 pendiente grande de endurecimiento, T-14b, y el cierre T-14c; 2025 pruebas pasando).
 - **Decisiones tuyas ya tomadas (D-035 incluida):** D-007 (esquema), D-015 (correo), D-016 (borrar horas), D-017 (formato de fecha), D-018 (carácter nulo). Pendientes: **D-020** (caracteres invisibles en el correo), **D-022** (revocar la cookie al cerrar sesión), **D-023** (un solo profesional) y **D-029** (reservar con menos de 24 h; conviene antes de T-09).
-- Siguiente: **T-14** (recorrido de punta a punta y revisión final), que dividiré en partes porque acumula mucho backlog de seguridad.
+- Siguiente: **T-14b** (robustez y datos) → **T-14c** (README, recorrido de punta a punta y revisión final).
 - Pendiente solo tuyo: autorizar (o no) que `app/correo.py` figure en `ARCHITECTURE.md`; es una línea de documentación.
 
-**Tu primer ejercicio:** lanza tú mismo la vuelta de T-14 con el prompt del Paso B y revisa el resultado con la lista del Paso C. Antes de dar por buena cualquier tarea, haz cinco preguntas extra: *¿rompió algo documentado?*, *¿las pruebas fallarían si quitara la protección?*, *¿el reporte afirma algo que no ejecutó?*, *¿cómo interactúa esto con las tareas futuras?* y *¿el arreglo propuesto realmente funciona?*
+**Tu primer ejercicio:** lanza tú mismo la vuelta de T-14b con el prompt del Paso B y revisa el resultado con la lista del Paso C. Antes de dar por buena cualquier tarea, haz cinco preguntas extra: *¿rompió algo documentado?*, *¿las pruebas fallarían si quitara la protección?*, *¿el reporte afirma algo que no ejecutó?*, *¿cómo interactúa esto con las tareas futuras?* y *¿el arreglo propuesto realmente funciona?*
 
 ## 5. Consejos profesionales (lo que hace la diferencia)
 
@@ -317,6 +324,8 @@ docs: documentación base del proyecto Agenda Psi
 40. **Automatiza lo que se repite.** Tres horas inventadas pese a una regla escrita: la regla no basta, hay que verificarlo con un comando.
 41. **Repite la suite varias veces antes de aceptar.** Una prueba que falla el 2 % de las veces no aparece en una sola pasada; un revisor que corre la suite una vez no la ve.
 42. **Una cadena corta buscada en una página completa es frágil** si la página lleva datos aleatorios (tokens, ids). Busca en la zona exacta o usa un marcador imposible por azar.
+43. **Prueba la suite con las variables de entorno de producción definidas.** Una variable heredada (`SESSION_COOKIE_SECURE`, `TRUSTED_PROXY_COUNT`) hizo fallar pruebas que pasaban en el entorno del orquestador; hazlas herméticas.
+44. **Un control que solo existe en una forma de arrancar no es un control.** El bloqueo del debug cubría `flask run` y no un servidor WSGI; el revisor lo demostró forjando una cookie.
 
 ## 6. Trampas de principiante que ya viste en acción
 
