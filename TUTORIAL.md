@@ -243,6 +243,14 @@ Aquí el ciclo ya es rutina: implementador → mi verificación → revisor → 
 - **Ronda 2:** la app ya no se crea con la clave pública fuera de `flask run` local (D-049, la dejé señalada para que la veas: cambia una conducta aprobada, antes solo avisaba), aviso de proxy en el log y README, y suite **hermética** (cada prueba parte sin ninguna variable de entorno de la app; hay una prueba que falla si `app/` empieza a leer una variable nueva). 2025 pruebas. Yo comprobé con servidores reales que `flask run --debug` local sigue en 200, que `--host 0.0.0.0 --debug` se niega (exit 1) y que el servidor WSGI simulado ya no sirve. **Revisor de la ronda 2: APROBADA** (3 bajos, 3 informativos).
 - **Lección:** *prueba tu suite con las variables de entorno de producción definidas.* Un test que pasa en tu máquina y falla en la de otro porque hay una variable heredada es una trampa; el orquestador (yo) probó cuatro variables y se me escaparon dos. Y: *un control que solo existe en una forma de arrancar (`flask run`) no es un control.*
 
+### Vuelta 33 — T-14b Robustez y datos (D-044 y un cambio de `init-db` que tienes que mirar)
+- **Qué se hizo:** `/paciente/horas` limitada a los próximos 60 días y 100 horas (D-044, tu decisión); con la base ocupada más de 5 s las acciones responden «El sistema está ocupado» con 503 y se puede reintentar (antes: 500); `buscar_solape` con ventana de fechas; índice nuevo para el borrado del límite de intentos; `send-reminders` y `create-professional` con la base inexistente o inválida dan mensaje claro sin traza ni crear un `.db` vacío; `outbox.log` con permisos 0600; una sola comprobación de 24 h; ids de ruta solo ASCII; textos corregidos. 2179 pruebas.
+- **Mediciones reales con 50 000 horas** (antes → después): `/paciente/horas` 1,12 s y 22 MB → 0,008 s y 45 KB; `buscar_solape` 402 → 10,5 ms; 12 procesos agregando horas a la vez 11 s con 9 «database is locked» → 0,8 s sin errores.
+- **Una decisión del implementador que te señalo (D-050):** `init-db` dejó de ser «solo crear tablas que faltan»: ahora agrega la columna `sesion_version` y los índices a una base antigua y anota `PRAGMA user_version`, sin borrar ni reconstruir tablas ni tocar datos. Mi encargo de T-14b decía «aviso claro o migración mínima», así que no fue ajeno al encargo, pero cambia lo que D-006 prometía. Te lo marco para que lo confirmes en una línea.
+- **Revisor: APROBADA** con un hallazgo medio que vale la pena entender: en bases de las primeras ~48 horas del proyecto (esquemas muy antiguos), `init-db` «funciona», pero esas bases no tienen `ON DELETE SET NULL` en las notificaciones (D-016) y **eliminar una hora libre con notificaciones da 500**. La migración aditiva no puede arreglar eso sin reconstruir tablas. Queda para T-14c: `init-db` debe detectarlo y avisar. El revisor probó 6 esquemas históricos con datos reales, 1 500 casos de solape contra fuerza bruta y 8 procesos escribiendo el log a la vez.
+- **Un incidente de entorno:** el contenedor se reinició mientras el revisor trabajaba. Verifiqué que el repositorio, las dependencias y el commit estaban intactos y **reanudé al revisor desde su transcripción** en lugar de rehacer su trabajo; lo único que se pierde en un reinicio son los procesos en curso.
+- **Lección:** *una migración que "funciona" no es una migración que deja el esquema igual al esperado.* Compara el esquema resultante con `schema.sql`, no solo «no dio error». Y: *el estado vive en git, no en los procesos*: por eso un reinicio no destruyó nada.
+
 ### Historial git resultante
 
 ```
@@ -273,12 +281,12 @@ docs: documentación base del proyecto Agenda Psi
 
 ## 4. Estado actual y qué sigue
 
-- Hecho: **T-01 a T-13 y T-14a** (1 pendiente grande de endurecimiento, T-14b, y el cierre T-14c; 2025 pruebas pasando).
+- Hecho: **T-01 a T-13, T-14a y T-14b** (2179 pruebas pasando). Solo queda el cierre, T-14c.
 - **Decisiones tuyas ya tomadas (D-035 incluida):** D-007 (esquema), D-015 (correo), D-016 (borrar horas), D-017 (formato de fecha), D-018 (carácter nulo). Pendientes: **D-020** (caracteres invisibles en el correo), **D-022** (revocar la cookie al cerrar sesión), **D-023** (un solo profesional) y **D-029** (reservar con menos de 24 h; conviene antes de T-09).
-- Siguiente: **T-14b** (robustez y datos) → **T-14c** (README, recorrido de punta a punta y revisión final).
+- Siguiente: **T-14c** (arreglos de `init-db`, README, recorrido de punta a punta con navegador y revisión final).
 - Pendiente solo tuyo: autorizar (o no) que `app/correo.py` figure en `ARCHITECTURE.md`; es una línea de documentación.
 
-**Tu primer ejercicio:** lanza tú mismo la vuelta de T-14b con el prompt del Paso B y revisa el resultado con la lista del Paso C. Antes de dar por buena cualquier tarea, haz cinco preguntas extra: *¿rompió algo documentado?*, *¿las pruebas fallarían si quitara la protección?*, *¿el reporte afirma algo que no ejecutó?*, *¿cómo interactúa esto con las tareas futuras?* y *¿el arreglo propuesto realmente funciona?*
+**Tu primer ejercicio:** lanza tú mismo la vuelta de T-14c con el prompt del Paso B y revisa el resultado con la lista del Paso C. Antes de dar por buena cualquier tarea, haz cinco preguntas extra: *¿rompió algo documentado?*, *¿las pruebas fallarían si quitara la protección?*, *¿el reporte afirma algo que no ejecutó?*, *¿cómo interactúa esto con las tareas futuras?* y *¿el arreglo propuesto realmente funciona?*
 
 ## 5. Consejos profesionales (lo que hace la diferencia)
 
@@ -326,6 +334,8 @@ docs: documentación base del proyecto Agenda Psi
 42. **Una cadena corta buscada en una página completa es frágil** si la página lleva datos aleatorios (tokens, ids). Busca en la zona exacta o usa un marcador imposible por azar.
 43. **Prueba la suite con las variables de entorno de producción definidas.** Una variable heredada (`SESSION_COOKIE_SECURE`, `TRUSTED_PROXY_COUNT`) hizo fallar pruebas que pasaban en el entorno del orquestador; hazlas herméticas.
 44. **Un control que solo existe en una forma de arrancar no es un control.** El bloqueo del debug cubría `flask run` y no un servidor WSGI; el revisor lo demostró forjando una cookie.
+45. **«No dio error» no es «quedó bien».** Una migración debe dejar el esquema igual al esperado: compáralo con `schema.sql`, no te fíes del mensaje de éxito.
+46. **El estado vive en git, no en los procesos.** Un reinicio del contenedor no destruyó nada porque todo estaba confirmado; lo único que se pierde son los procesos en curso, que se reanudan.
 
 ## 6. Trampas de principiante que ya viste en acción
 
