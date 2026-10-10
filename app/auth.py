@@ -27,7 +27,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from . import limite
 from .correo import normalizar_email
-from .db import get_db
+from .db import abrir_base_existente, get_db
 from .seguridad import generar_token
 
 bp = Blueprint("auth", __name__)
@@ -450,6 +450,7 @@ def create_professional_command(email, nombre):
         errores["email"] = MENSAJE_EMAIL_INVALIDO
     if errores:
         raise click.ClickException(" ".join(errores.values()))
+    abrir_base_existente()  # no crea un .db vacío si DATABASE está mal escrita (T-10 R-01)
     db = get_db()
     # D-023: la comprobación y la inserción van en la misma transacción con
     # bloqueo de escritura (BEGIN IMMEDIATE); aun así, si otro proceso se cuela,

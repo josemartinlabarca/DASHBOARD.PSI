@@ -5,7 +5,7 @@ profesional no se solapan) y 4 (no se elimina una hora reservada).
 """
 import re
 import sqlite3
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timedelta, timezone
 
 from flask import (
     Blueprint,
@@ -17,9 +17,10 @@ from flask import (
     url_for,
 )
 
+from . import errores as paginas_de_error
 from . import notificaciones, paciente, tiempo
 from .auth import solo_profesional, usuario_actual, zona_chile
-from .db import get_db
+from .db import MENSAJE_BASE_OCUPADA, esta_ocupada, get_db
 from .tiempo import FORMATO_GUARDADO, mostrar_inicio
 
 bp = Blueprint("profesional", __name__)
@@ -27,7 +28,6 @@ bp = Blueprint("profesional", __name__)
 DURACION_DEFECTO = 50  # US-4
 TOPE_PASADAS = 20  # T-13: el panel muestra las 20 sesiones pasadas más recientes
 DURACION_MAX = 480  # minutos (8 horas); límite de la aplicación, no del esquema
-ID_MAX = 2**63 - 1  # mayor INTEGER de SQLite: un id mayor es 404, no 500 (R-10)
 FORMATO_FECHA = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")  # solo dígitos ASCII
 FORMATO_HORA = re.compile(r"[0-9]{2}:[0-9]{2}")
 FORMATO_DURACION = re.compile(r"[0-9]{1,4}")
@@ -170,6 +170,19 @@ def es_la_misma(fila, inicio, duracion):
         return False
 
 
+# Holgura de la ventana de `buscar_solape` sobre el texto de reloj de pared: el desfase de Chile
+# con UTC cambia a lo más una hora entre dos instantes cercanos; Python decide con el instante.
+MARGEN_VENTANA = timedelta(hours=2)
+
+
+def _texto_o_none(momento):
+    """Texto de reloj de pared de un límite de la ventana (solo para acotar el SQL; no se guarda)."""
+    try:
+        return momento.isoformat(timespec="seconds")
+    except (OverflowError, ValueError):
+        return None
+
+
 def buscar_solape(db, profesional_id, inicio, duracion):
     """Fila de una hora **del mismo profesional** que se solape con la nueva, o `None`.
 
@@ -181,17 +194,33 @@ def buscar_solape(db, profesional_id, inicio, duracion):
     solapadas, devuelve la idéntica a la nueva (mismo inicio y duración) si
     existe y si no la primera por fecha. Las filas que el esquema deja pasar
     pero no son una fecha real o una duración entera positiva no se comparan.
+
+    Ventana de fechas (T-05b R-02, D-050): solo se leen las horas que pueden cruzarse. Una hora
+    creada por la aplicación dura a lo más `DURACION_MAX` minutos, así que para cruzarse con la
+    nueva debe empezar entre `DURACION_MAX` minutos antes y el fin de la nueva (más la holgura
+    `MARGEN_VENTANA`). Como el esquema no limita `duracion_min` (D-007) y se puede insertar una
+    fila más larga por otro camino, esas filas (`duracion_min > DURACION_MAX`, normalmente
+    ninguna) se leen aparte, aunque estén lejos: la regla 3 se sigue cumpliendo contra ellas.
+    Con 50 000 horas del profesional el barrido completo tardaba ~0,6 s dentro del bloqueo de
+    escritura; así lee unas pocas filas.
     """
     inicio_s = tiempo.a_segundos_utc(inicio)
     if inicio_s is None:
         raise ValueError("inicio fuera del rango representable")
     fin_s = inicio_s + duracion * 60
     primera = None
+    desde = _texto_o_none(inicio - timedelta(minutes=DURACION_MAX) - MARGEN_VENTANA)
+    hasta = _texto_o_none(inicio + timedelta(minutes=duracion) + MARGEN_VENTANA)
+    limites = (desde or "0000", hasta or "9999-99")
     filas = db.execute(
-        "SELECT inicio, duracion_min FROM horas WHERE profesional_id = ? ORDER BY inicio",
-        (profesional_id,),
+        "SELECT inicio, duracion_min FROM horas WHERE profesional_id = ?"
+        " AND inicio >= ? AND inicio <= ?"
+        " UNION ALL"
+        " SELECT inicio, duracion_min FROM horas WHERE profesional_id = ?"
+        " AND duracion_min > ? AND NOT (inicio >= ? AND inicio <= ?)",
+        (profesional_id, *limites, profesional_id, DURACION_MAX, *limites),
     ).fetchall()
-    for fila in filas:
+    for fila in sorted(filas, key=lambda f: f["inicio"]):
         intervalo = tiempo.intervalo_guardado(fila)
         if intervalo is None or not (intervalo[0] < fin_s and inicio_s < intervalo[1]):
             continue
@@ -361,7 +390,21 @@ def nueva_hora():
     duracion_texto = request.form.get("duracion", "").strip()
     inicio, duracion, errores = validar_formulario(fecha, hora, duracion_texto, tiempo.ahora_chile())
     if not errores:
-        rechazo = crear_hora(get_db(), usuario_actual()["id"], inicio, duracion)
+        try:
+            rechazo = crear_hora(get_db(), usuario_actual()["id"], inicio, duracion)
+        except sqlite3.OperationalError as error:
+            if not esta_ocupada(error):
+                raise
+            # Otro proceso retiene el bloqueo más de 5 s: el formulario vuelve con lo que
+            # escribió, el aviso y 503 + Retry-After (como el límite de intentos).
+            errores["general"] = MENSAJE_BASE_OCUPADA
+            return (
+                render_template(
+                    "nueva_hora.html", fecha=fecha, hora=hora, duracion=duracion_texto, errores=errores
+                ),
+                503,
+                {"Retry-After": str(paginas_de_error.ESPERA_REINTENTO_S)},
+            )
         if rechazo is None:
             flash("La hora se agregó correctamente.", "exito")
             return redirect(url_for("profesional.dashboard"))
@@ -371,9 +414,7 @@ def nueva_hora():
     )
 
 
-@bp.route(
-    f"/profesional/horas/<int(min=1, max={ID_MAX}):hora_id>/eliminar", methods=["POST"]
-)
+@bp.route("/profesional/horas/<id_hora:hora_id>/eliminar", methods=["POST"])
 @solo_profesional
 def eliminar_hora(hora_id):
     """Elimina una hora **libre y propia**; todo en una sola sentencia atómica.

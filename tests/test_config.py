@@ -6,7 +6,9 @@ import threading
 import time
 
 import click
+import click.testing
 import pytest
+from flask.cli import ScriptInfo
 
 from app import (
     MENSAJE_DEBUG_EN_SERVIDOR,
@@ -97,7 +99,7 @@ def test_con_secret_key_funciona_sin_testing_ni_debug(tmp_path, monkeypatch):
 
 
 def _comando(nombre):
-    return click.Context(click.Command(nombre), info_name=nombre)
+    return click.Context(click.Command(nombre), obj=ScriptInfo(), info_name=nombre)
 
 
 @pytest.mark.parametrize("comando", ["run", "init-db", "create-professional", "send-reminders"])
@@ -210,21 +212,21 @@ def test_aviso_al_cargar_la_app_sin_secret_key_como_servidor(tmp_path, caplog):
 
 
 def test_aviso_con_flask_run_y_una_sola_vez(tmp_path, caplog):
-    with click.Context(click.Command("run")), caplog.at_level(logging.WARNING):
+    with click.Context(click.Command("run"), obj=ScriptInfo()), caplog.at_level(logging.WARNING):
         create_app(_config(tmp_path))
     assert len(_avisos_de_clave(caplog)) == 1
 
 
 @pytest.mark.parametrize("comando", ["init-db", "create-professional", "flask", "routes"])
 def test_sin_aviso_en_los_demas_comandos(tmp_path, caplog, comando):
-    with click.Context(click.Command(comando)), caplog.at_level(logging.WARNING):
+    with click.Context(click.Command(comando), obj=ScriptInfo()), caplog.at_level(logging.WARNING):
         create_app(_config(tmp_path))
     assert _avisos_de_clave(caplog) == []
 
 
 @pytest.mark.parametrize("extra", [{"SECRET_KEY": "clave"}, {"TESTING": True}, {"DEBUG": True}])
 def test_sin_aviso_si_hay_clave_testing_o_debug(tmp_path, caplog, extra):
-    with click.Context(click.Command("run")), caplog.at_level(logging.WARNING):
+    with click.Context(click.Command("run"), obj=ScriptInfo()), caplog.at_level(logging.WARNING):
         create_app(_config(tmp_path, **extra))
     assert _avisos_de_clave(caplog) == []
 
@@ -272,3 +274,75 @@ def test_flask_run_real_avisa_al_arrancar_sin_secret_key(tmp_path):
         if proceso.poll() is None:
             proceso.kill()
     assert "Falta la variable de entorno SECRET_KEY" in error
+
+
+# --- T-14b (D-050): la clave pública solo bajo la CLI de Flask; textos de D-043/D-049 ------------
+
+
+def _click_propio(nombre="run", **params):
+    """Un script que usa click pero NO es la CLI de Flask (sin `ScriptInfo`): como un servidor."""
+    contexto = click.Context(click.Command(nombre), info_name=nombre)
+    contexto.params = params
+    return contexto
+
+
+@pytest.mark.parametrize("nombre", ["run", "serve", "init-db", "seed"])
+@pytest.mark.parametrize("valor", ["1", "off"])
+def test_un_script_propio_con_click_no_obtiene_la_clave_publica(tmp_path, monkeypatch, nombre, valor):
+    """R-01 de la ronda 2: antes cualquier contexto de click bastaba (`g serve` con FLASK_DEBUG=1
+    creaba la app con la clave pública y una cookie forjada daba 200 en /profesional)."""
+    monkeypatch.setenv("FLASK_DEBUG", valor)
+    with _click_propio(nombre), pytest.raises(RuntimeError) as error:
+        create_app(_config(tmp_path))
+    assert str(error.value) == MENSAJE_DEBUG_SIN_CLAVE
+
+
+def test_un_script_propio_con_click_y_clave_propia_crea_la_app_y_solo_avisa(tmp_path, monkeypatch, caplog):
+    monkeypatch.setenv("FLASK_DEBUG", "1")
+    monkeypatch.setenv("SECRET_KEY", "una-clave-propia-larga")
+    with _click_propio("serve"), caplog.at_level(logging.WARNING):
+        app = create_app(_config(tmp_path))
+    assert app.config["SECRET_KEY"] == "una-clave-propia-larga"
+    assert [r for r in caplog.records if r.getMessage() == MENSAJE_DEBUG_EN_SERVIDOR]
+
+
+def test_un_flaskgroup_propio_cuenta_como_la_cli_de_flask(tmp_path, monkeypatch):
+    """Frase exacta de D-050/README: cualquier comando que cuelgue de `FlaskGroup` (`flask ...`,
+    `python -m flask ...` o un grupo propio) puede usar la clave pública con debug."""
+    from flask.cli import FlaskGroup
+
+    monkeypatch.setenv("FLASK_DEBUG", "1")
+    resultado = {}
+
+    @click.group(cls=FlaskGroup, create_app=lambda: None)
+    def grupo():
+        pass
+
+    @grupo.command("mantener", with_appcontext=False)
+    def mantener():
+        resultado["clave"] = create_app(_config(tmp_path)).config["SECRET_KEY"]
+
+    ejecucion = click.testing.CliRunner().invoke(grupo, ["mantener"])
+    assert ejecucion.exit_code == 0, ejecucion.output
+    assert resultado["clave"] == SECRET_KEY_DESARROLLO
+
+
+def test_el_mensaje_de_debug_publico_solo_afirma_lo_cierto(tmp_path, monkeypatch):
+    """Ronda 2 R-02: con SECRET_KEY propia la clave NO es pública; el rechazo se debe al depurador."""
+    from app import MENSAJE_DEBUG_PUBLICO
+
+    texto = MENSAJE_DEBUG_PUBLICO.format(host="0.0.0.0")
+    assert "si no defines SECRET_KEY" in texto and "depurador interactivo" in texto
+    assert "la SECRET_KEY es un valor público" not in texto
+    assert "En debug la SECRET_KEY es un valor público fijo" not in texto
+    monkeypatch.setenv("SECRET_KEY", "una-clave-propia-larga")
+    contexto = click.Context(click.Command("run"), obj=ScriptInfo(), info_name="run")
+    contexto.params = {"host": "0.0.0.0"}
+    with contexto, pytest.raises(click.ClickException) as error:
+        create_app(_config(tmp_path, DEBUG=True))
+    assert error.value.format_message() == texto
+
+
+def test_el_mensaje_de_debug_sin_clave_nombra_la_cli_de_flask_y_no_solo_flask_run():
+    assert "línea de comandos de Flask" in MENSAJE_DEBUG_SIN_CLAVE
+    assert "solo se admite bajo `flask run` en un host local" not in MENSAJE_DEBUG_SIN_CLAVE

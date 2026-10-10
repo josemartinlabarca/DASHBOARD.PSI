@@ -14,6 +14,8 @@ por rol. El mensaje se basta solo (fecha, hora de Chile, contraparte): `hora_id`
 si la hora se elimina (D-016).
 """
 import os
+import sqlite3
+import stat
 import unicodedata
 from datetime import datetime, timedelta
 from typing import NamedTuple
@@ -24,7 +26,7 @@ from flask.cli import with_appcontext
 
 from . import tiempo
 from .auth import zona_chile
-from .db import get_db
+from .db import MENSAJE_COMANDO_BASE_OCUPADA, abrir_base_existente, esta_ocupada
 
 NOMBRE_OUTBOX = "outbox.log"
 ANTICIPACION_CANCELAR_S = 24 * 3600  # igual que paciente.ANTICIPACION_CANCELAR_S (US-9)
@@ -36,8 +38,14 @@ TIPOS = (CONFIRMACION, RECORDATORIO, CANCELACION)  # los mismos del CHECK de `no
 
 MSG_CONFIRMACION_PACIENTE = (
     "Confirmamos tu hora con {profesional} el {cuando} (hora de Chile), de {duracion} minutos. "
-    "Puedes cancelarla hasta el {limite} (hora de Chile)."
+    "Puedes cancelarla hasta el {limite} (hora de Chile){repetida}."
 )
+# T-09 R-06: en abril el reloj marca dos veces la hora de la noche del cambio; si el límite cae
+# ahí, la hora de pared sola es ambigua y se dice cuál de las dos es.
+ACLARACION_HORA_REPETIDA = {
+    0: ", la primera vez que el reloj marca esa hora",
+    1: ", la segunda vez que el reloj marca esa hora",
+}
 MSG_CONFIRMACION_PROFESIONAL = (
     "{paciente} reservó una hora contigo el {cuando} (hora de Chile), de {duracion} minutos."
 )
@@ -74,10 +82,12 @@ def _cuando(inicio):
 
 
 def _limite_para_cancelar(inicio):
-    """Hasta cuándo se puede cancelar: inicio - 24 h en instantes absolutos, en hora de Chile.
+    """`(texto, aclaración)` de hasta cuándo se puede cancelar: inicio - 24 h, en hora de Chile.
 
     Se resta sobre el instante, no sobre la hora de pared: en la noche de cambio de horario
-    las dos cuentas difieren en una hora. `None` si el inicio no se puede interpretar.
+    las dos cuentas difieren en una hora. Si ese instante cae en la hora que el reloj marca dos
+    veces (noche de abril), `aclaración` dice cuál de las dos es (T-09 R-06); si no, es vacía.
+    `None` si el inicio no se puede interpretar.
     """
     try:
         local = datetime.strptime(inicio, tiempo.FORMATO_GUARDADO)
@@ -88,9 +98,11 @@ def _limite_para_cancelar(inicio):
         return None
     try:
         limite = datetime.fromtimestamp(inicio_s - ANTICIPACION_CANCELAR_S, zona_chile())
+        repetida = limite.replace(fold=0).utcoffset() != limite.replace(fold=1).utcoffset()
     except (OverflowError, OSError, ValueError):
         return None
-    return _cuando(limite.strftime(tiempo.FORMATO_GUARDADO))
+    aclaracion = ACLARACION_HORA_REPETIDA[limite.fold] if repetida else ""
+    return _cuando(limite.strftime(tiempo.FORMATO_GUARDADO)), aclaracion
 
 
 def _mensajes(tipo, hora):
@@ -106,7 +118,9 @@ def _mensajes(tipo, hora):
         "duracion": hora["duracion_min"],
     }
     if tipo == CONFIRMACION:
-        datos["limite"] = _limite_para_cancelar(hora["inicio"]) or "24 horas antes de la sesión"
+        datos["limite"], datos["repetida"] = (
+            _limite_para_cancelar(hora["inicio"]) or ("24 horas antes de la sesión", "")
+        )
         return (
             MSG_CONFIRMACION_PACIENTE.format(**datos),
             MSG_CONFIRMACION_PROFESIONAL.format(**datos),
@@ -277,8 +291,19 @@ def enviar_recordatorios(db, reloj=None):
 @click.command("send-reminders")
 @with_appcontext
 def send_reminders_command():
-    """Envía el recordatorio a los pacientes cuya hora empieza en 24 horas o menos (sin repetir)."""
-    cantidad = enviar_recordatorios(get_db())
+    """Envía el recordatorio a los pacientes cuya hora empieza en 24 horas o menos (sin repetir).
+
+    Pensado para cron: ante cualquier problema con la base responde con un mensaje en español,
+    sin traza, y termina con código 1 (T-10 R-01/R-02). No crea la base si no existe. Con la base
+    bloqueada más de 5 s no cambia nada y la siguiente ejecución del cron reintenta.
+    """
+    db = abrir_base_existente()
+    try:
+        cantidad = enviar_recordatorios(db)
+    except sqlite3.Error as error:
+        if esta_ocupada(error):
+            raise click.ClickException(MENSAJE_COMANDO_BASE_OCUPADA) from error
+        raise click.ClickException(f"Error de la base de datos: {error}") from error
     click.echo(f"Recordatorios enviados: {cantidad}.")
 
 
@@ -330,11 +355,38 @@ def _escribir_completo(descriptor, datos):
         datos = datos[escritos:]
 
 
+# El log guarda nombres y correos: solo el dueño lo lee (T-09 R-02). El modo se aplica al CREAR el
+# archivo (menos lo que quite el umask); uno que ya existe con permisos más amplios no se cambia
+# (puede ser a propósito, p. ej. un grupo que lee el log) y se avisa una vez por proceso.
+MODO_OUTBOX = 0o600
+MODO_CARPETA_OUTBOX = 0o700  # solo si la aplicación crea la carpeta
+_avisos_de_permisos = set()
+
+
+def _avisar_si_es_legible_por_otros(descriptor, ruta):
+    """Una sola vez por proceso y archivo: avisa si `outbox.log` es legible por grupo u otros."""
+    if os.name != "posix" or ruta in _avisos_de_permisos:
+        return
+    try:
+        modo = stat.S_IMODE(os.fstat(descriptor).st_mode)
+    except OSError:  # el aviso es un extra: nunca impide escribir
+        return
+    if modo & 0o077:
+        _avisos_de_permisos.add(ruta)
+        current_app.logger.warning(
+            "El outbox %s tiene permisos %s: contiene nombres y correos y otros usuarios del "
+            "sistema pueden leerlo. Para dejarlo solo para su dueño: chmod 600 %s",
+            ruta, oct(modo), ruta,
+        )
+
+
 def escribir_outbox(avisos):
     """Añade una línea por aviso a `outbox.log` (UTF-8, modo append, un `write` por línea).
 
     Con `O_APPEND` y un único `write` por línea, dos procesos que escriben a la vez no
-    entrelazan sus líneas. Crea la carpeta si falta. Nunca lanza `OSError`: si el disco falla
+    entrelazan sus líneas. Crea la carpeta si falta (modo 0700) y el archivo con modo 0600.
+    El archivo se abre en CADA llamada: rotarlo (renombrarlo o moverlo) no necesita reiniciar
+    nada, la siguiente escritura crea uno nuevo. Nunca lanza `OSError`: si el disco falla
     lo registra con `app.logger.error` (sin el contenido de los mensajes) y sigue, porque la
     reserva ya está confirmada. Devuelve True si se escribió todo.
     """
@@ -343,9 +395,10 @@ def escribir_outbox(avisos):
         ruta = ruta_outbox()
         carpeta = os.path.dirname(ruta)
         if carpeta:
-            os.makedirs(carpeta, exist_ok=True)
-        descriptor = os.open(ruta, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+            os.makedirs(carpeta, mode=MODO_CARPETA_OUTBOX, exist_ok=True)
+        descriptor = os.open(ruta, os.O_WRONLY | os.O_APPEND | os.O_CREAT, MODO_OUTBOX)
         try:
+            _avisar_si_es_legible_por_otros(descriptor, ruta)
             for aviso in avisos:
                 _escribir_completo(descriptor, linea_outbox(aviso).encode("utf-8"))
         finally:

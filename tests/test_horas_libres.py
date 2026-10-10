@@ -4,7 +4,7 @@ T-08e (D-029): solo se listan las horas que se pueden reservar, es decir, las qu
 empiezan a MÁS de 24 h de «ahora» (las demás se ocultan; no se muestran marcadas).
 """
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -208,12 +208,12 @@ def test_el_borde_de_24_horas_usa_la_hora_de_chile_y_no_la_de_utc(app, pro_id, p
 
 
 def test_orden_por_inicio_aunque_se_insertaron_desordenadas(app, pro_id, paciente_cli):
-    for inicio in ["2026-12-01T10:00:00", "2026-10-10T18:00:00", "2027-01-05T08:00:00",
+    for inicio in ["2026-12-01T10:00:00", "2026-10-10T18:00:00", "2026-12-05T08:00:00",
                    "2026-10-10T09:00:00", "2026-11-30T23:00:00"]:
         insertar(app, pro_id, inicio)
     assert inicios_mostrados(paciente_cli.get("/paciente/horas").text) == [
         "10-10-2026 09:00", "10-10-2026 18:00", "30-11-2026 23:00",
-        "01-12-2026 10:00", "05-01-2027 08:00",
+        "01-12-2026 10:00", "05-12-2026 08:00",
     ]
 
 
@@ -227,12 +227,12 @@ def test_el_orden_con_el_mismo_inicio_es_estable_por_id(app, paciente_cli):
 
 
 def test_formato_duracion_y_nombre_del_profesional(app, pro_id, paciente_cli):
-    insertar(app, pro_id, "2027-03-01T08:05:00", 90)
+    insertar(app, pro_id, "2026-11-03T08:05:00", 90)
     html = paciente_cli.get("/paciente/horas").text
-    assert "01-03-2027 08:05" in html
+    assert "03-11-2026 08:05" in html
     assert "90 min" in html
     assert "Dr. Pro" in html
-    assert "2027-03-01" not in html
+    assert "2026-11-03" not in html
 
 
 def test_con_varios_profesionales_cada_hora_trae_su_nombre(app, paciente_cli):
@@ -318,3 +318,175 @@ def test_el_borde_de_24_horas_usa_instantes_y_no_el_reloj_de_pared(
     fijar_reloj(monkeypatch, ahora_local, fold=fold)
     hora = insertar(app, pro_id, inicio)
     assert (f"/horas/{hora}/reservar" in paciente_cli.get("/paciente/horas").text) is ofrecida
+
+
+# --------------------------------- T-14b: ventana de 60 días y tope de 100 (D-044) ----
+
+AVISO_D044 = "Mostramos las próximas 100 horas; hay más disponibles más adelante"
+
+
+def insertar_muchas(app, pro_id, inicios, duracion=10):
+    with app.app_context():
+        db = get_db()
+        db.executemany(
+            "INSERT INTO horas (profesional_id, inicio, duracion_min) VALUES (?, ?, ?)",
+            [(pro_id, inicio, duracion) for inicio in inicios],
+        )
+        db.commit()
+
+
+def cada_20_minutos(desde, cantidad):
+    return [(desde + timedelta(minutes=20 * i)).strftime("%Y-%m-%dT%H:%M:%S") for i in range(cantidad)]
+
+
+def test_las_constantes_de_d044():
+    assert paciente.VENTANA_DIAS == 60 and paciente.TOPE_HORAS == 100
+
+
+def test_el_aviso_es_el_texto_de_d044():
+    assert paciente.MENSAJE_RECORTE == AVISO_D044 + "."
+
+
+def test_solo_se_ofrecen_las_horas_de_los_proximos_60_dias_borde_inclusivo(app, pro_id, paciente_cli):
+    # AHORA = 2026-10-08 12:00 (UTC-3); 60 días = 60 x 86 400 s -> 2026-12-07 12:00 (sin cambio de hora)
+    for inicio in ("2026-12-07T11:59:59", "2026-12-07T12:00:00", "2026-12-07T12:00:01", "2026-12-08T10:00:00"):
+        insertar(app, pro_id, inicio)
+    assert inicios_mostrados(paciente_cli.get("/paciente/horas").text) == [
+        "07-12-2026 11:59", "07-12-2026 12:00",
+    ]
+
+
+def test_la_ventana_de_60_dias_se_mide_en_instantes_y_no_en_reloj_de_pared(
+    app, pro_id, paciente_cli, monkeypatch, zona_sistema
+):
+    """Desde el 15-02-2027 12:00 (UTC-3) pasan 60 x 24 h reales hasta el 16-04-2027 11:00 de
+    pared (el 3-4 el reloj retrocede una hora): con el reloj de pared el corte sería las 12:00."""
+    fijar_reloj(monkeypatch, datetime(2027, 2, 15, 12, 0))
+    for inicio in ("2027-04-16T10:59:59", "2027-04-16T11:00:00", "2027-04-16T11:00:01", "2027-04-16T12:00:00"):
+        insertar(app, pro_id, inicio)
+    assert inicios_mostrados(paciente_cli.get("/paciente/horas").text) == [
+        "16-04-2027 10:59", "16-04-2027 11:00",
+    ]
+
+
+def test_las_de_24_horas_o_menos_siguen_ocultas_y_no_cuentan_para_el_tope(app, pro_id, paciente_cli):
+    insertar_muchas(app, pro_id, cada_20_minutos(datetime(2026, 10, 8, 12, 30), 70))  # todas en las primeras 24 h: ocultas
+    insertar(app, pro_id, "2026-10-12T10:00:00")
+    html = paciente_cli.get("/paciente/horas").text
+    assert inicios_mostrados(html) == ["12-10-2026 10:00"] and AVISO_D044 not in html
+
+
+def test_con_mas_de_100_se_muestran_las_100_primeras_y_el_aviso(app, pro_id, paciente_cli):
+    inicios = cada_20_minutos(datetime(2026, 10, 10, 8, 0), 150)
+    insertar_muchas(app, pro_id, inicios)
+    html = paciente_cli.get("/paciente/horas").text
+    mostrados = inicios_mostrados(html)
+    assert len(mostrados) == 100
+    assert mostrados[0] == "10-10-2026 08:00" and mostrados[-1] == "11-10-2026 17:00"  # la 100.ª por inicio
+    assert AVISO_D044 + "." in html
+    assert html.count("<form") == 100  # un botón de reservar por hora, ninguno de más
+
+
+@pytest.mark.parametrize("cantidad, aviso", [(99, False), (100, False), (101, True)])
+def test_el_aviso_aparece_solo_si_de_verdad_se_recorta(app, pro_id, paciente_cli, cantidad, aviso):
+    insertar_muchas(app, pro_id, cada_20_minutos(datetime(2026, 10, 10, 8, 0), cantidad))
+    html = paciente_cli.get("/paciente/horas").text
+    assert len(inicios_mostrados(html)) == min(cantidad, 100)
+    assert (AVISO_D044 in html) is aviso
+
+
+def test_las_horas_fuera_de_la_ventana_no_cuentan_para_el_tope_ni_disparan_el_aviso(app, pro_id, paciente_cli):
+    insertar_muchas(app, pro_id, cada_20_minutos(datetime(2026, 10, 10, 8, 0), 100))
+    insertar_muchas(app, pro_id, cada_20_minutos(datetime(2027, 3, 1, 8, 0), 300))
+    html = paciente_cli.get("/paciente/horas").text
+    assert len(inicios_mostrados(html)) == 100 and AVISO_D044 not in html
+
+
+def test_las_ya_reservadas_no_cuentan_para_el_tope(app, pro_id, paciente_cli):
+    ids = []
+    for inicio in cada_20_minutos(datetime(2026, 10, 10, 8, 0), 101):
+        ids.append(insertar(app, pro_id, inicio))
+    reservar_directo(app, ids[0])
+    html = paciente_cli.get("/paciente/horas").text
+    assert len(inicios_mostrados(html)) == 100 and AVISO_D044 not in html
+
+
+def test_no_lee_todas_las_horas_libres_ni_el_historial(app, pro_id, paciente_cli, monkeypatch):
+    """T-06 R-01: con miles de filas dentro y fuera de la ventana solo se interpretan ~100."""
+    insertar_muchas(app, pro_id, cada_20_minutos(datetime(2026, 10, 10, 8, 0), 3000))   # en la ventana
+    insertar_muchas(app, pro_id, cada_20_minutos(datetime(2027, 6, 1, 8, 0), 3000))     # más allá
+    insertar_muchas(app, pro_id, cada_20_minutos(datetime(2025, 1, 1, 8, 0), 3000))     # historial viejo
+    insertar_muchas(app, pro_id, cada_20_minutos(datetime(2026, 9, 1, 8, 0), 1500))     # últimas semanas
+    llamadas = []
+    real = tiempo.a_segundos_utc
+    monkeypatch.setattr(tiempo, "a_segundos_utc", lambda local: llamadas.append(local) or real(local))
+    html = paciente_cli.get("/paciente/horas").text
+    assert len(inicios_mostrados(html)) == 100 and AVISO_D044 in html
+    assert len(llamadas) <= paciente.TOPE_HORAS + 5, len(llamadas)
+
+
+def test_las_filas_ilegibles_no_ocupan_lugar_en_el_tope(app, pro_id, paciente_cli):
+    """Pasan el CHECK del esquema pero no son fechas: se saltan sin gastar los 100 lugares."""
+    ilegibles = [f"2026-11-31T{h:02d}:{m:02d}:00" for h in range(0, 24) for m in range(0, 60, 10)]  # 144
+    assert len(ilegibles) > paciente.TOPE_HORAS
+    insertar_muchas(app, pro_id, ilegibles)
+    insertar(app, pro_id, "2026-11-10T10:00:00")
+    insertar(app, pro_id, "2026-12-01T10:00:00")
+    html = paciente_cli.get("/paciente/horas").text
+    assert inicios_mostrados(html) == ["10-11-2026 10:00", "01-12-2026 10:00"]
+    assert AVISO_D044 not in html
+
+
+def test_el_cursor_no_salta_ni_repite_filas_con_el_mismo_inicio(app, paciente_cli, monkeypatch):
+    """Tres profesionales con la misma hora y un tope de 2: salen las dos primeras por id."""
+    monkeypatch.setattr(paciente, "TOPE_HORAS", 2)
+    pros = [nuevo_profesional(app, f"p{i}@example.cl", f"Profesional {i}") for i in range(3)]
+    for p in pros:
+        insertar(app, p, "2026-10-10T10:00:00")
+    insertar(app, pros[0], "2026-10-10T11:00:00")
+    html = paciente_cli.get("/paciente/horas").text
+    assert re.findall(r"Profesional \d", html) == ["Profesional 0", "Profesional 1"]
+    assert paciente.MENSAJE_RECORTE in html  # se recortó: hay 4 y el tope es 2
+
+
+def test_listar_devuelve_el_indicador_de_recorte(app, pro_id):
+    insertar_muchas(app, pro_id, cada_20_minutos(datetime(2026, 10, 10, 8, 0), 101))
+    with app.app_context():
+        horas, recortada = paciente.listar_horas_libres_futuras(get_db(), tiempo.ahora_chile())
+    assert len(horas) == 100 and recortada is True
+
+
+def test_el_cursor_no_repite_la_ultima_fila_leida_de_un_lote(app, paciente_cli, monkeypatch):
+    """Tres horas válidas y un tope de 3: no hay recorte. Un lote que repitiera su última fila
+    (cursor `>=`) contaría una cuarta y avisaría de un recorte que no existe."""
+    monkeypatch.setattr(paciente, "TOPE_HORAS", 3)
+    pros = [nuevo_profesional(app, f"p{i}@example.cl", f"Profesional {i}") for i in range(3)]
+    insertar(app, pros[0], "2026-10-09T11:00:00")   # a 23 h: la ve el SQL (margen) y Python la descarta
+    for p in pros:
+        insertar(app, p, "2026-10-10T10:00:00")
+    html = paciente_cli.get("/paciente/horas").text
+    assert re.findall(r"Profesional \d", html) == ["Profesional 0", "Profesional 1", "Profesional 2"]
+    assert paciente.MENSAJE_RECORTE not in html
+
+
+def test_el_cursor_no_se_salta_las_filas_empatadas_en_el_inicio_entre_un_lote_y_otro(app, paciente_cli, monkeypatch):
+    monkeypatch.setattr(paciente, "TOPE_HORAS", 3)
+    pros = [nuevo_profesional(app, f"p{i}@example.cl", f"Profesional {i}") for i in range(4)]
+    insertar(app, pros[0], "2026-10-09T11:00:00")   # descartada, ocupa un lugar del primer lote
+    for p in pros:
+        insertar(app, p, "2026-10-10T10:00:00")
+    html = paciente_cli.get("/paciente/horas").text
+    assert re.findall(r"Profesional \d", html) == ["Profesional 0", "Profesional 1", "Profesional 2"]
+    assert paciente.MENSAJE_RECORTE in html  # la cuarta (tras el corte del lote) sí se vio
+
+
+def test_las_filas_mas_alla_de_la_ventana_no_se_leen_aunque_haya_pocas_dentro(app, pro_id, paciente_cli, monkeypatch):
+    """Con 10 horas dentro de los 60 días y miles después, no se recorre el futuro lejano."""
+    insertar_muchas(app, pro_id, cada_20_minutos(datetime(2026, 10, 10, 8, 0), 10))
+    insertar_muchas(app, pro_id, cada_20_minutos(datetime(2027, 3, 1, 8, 0), 3000))
+    llamadas = []
+    real = tiempo.a_segundos_utc
+    monkeypatch.setattr(tiempo, "a_segundos_utc", lambda local: llamadas.append(local) or real(local))
+    html = paciente_cli.get("/paciente/horas").text
+    assert len(inicios_mostrados(html)) == 10 and AVISO_D044 not in html
+    assert len(llamadas) <= 15, len(llamadas)

@@ -53,3 +53,7 @@ CREATE TABLE IF NOT EXISTS intentos_acceso (
 );
 
 CREATE INDEX IF NOT EXISTS intentos_acceso_clave ON intentos_acceso (accion, ambito, clave, instante);
+
+-- Borrado de filas vencidas y reubicación de marcas futuras por `instante` (T-14b, D-050). Sin
+-- este índice cada intento recorría toda la tabla dentro del bloqueo de escritura.
+CREATE INDEX IF NOT EXISTS intentos_acceso_instante ON intentos_acceso (instante);

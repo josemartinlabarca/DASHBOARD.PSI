@@ -8,7 +8,7 @@ Aplicación web liviana donde un **profesional** publica horas disponibles y los
 
 - Registro e inicio de sesión (roles: `paciente`, `profesional`).
 - El profesional agrega y elimina horas disponibles.
-- El paciente ve las horas libres, reserva una y la cancela con al menos 24 horas de anticipación (lista «Mis reservas» en su panel).
+- El paciente ve las horas libres, reserva una y la cancela con al menos 24 horas de anticipación (lista «Mis reservas» en su panel). Reservar exige **más de** 24 horas: a las 24 horas exactas ya no se puede reservar, pero sí cancelar (regla 7 de `SPEC.md`, D-029).
 - Dashboard para cada rol (próximas sesiones, historial).
 - Notificaciones de confirmación y recordatorio de hora.
 
@@ -34,34 +34,51 @@ pytest                           # corre las pruebas
 
 ### Cambios de esquema y `agenda.db` existente
 
-`init-db` solo crea las tablas que faltan (`CREATE TABLE IF NOT EXISTS`, D-006):
-**no modifica tablas ya existentes**. Si ya tienes un `agenda.db` creado con un
-esquema anterior (por ejemplo, antes de T-02c, T-02f o T-02g, que agregaron restricciones: `ON DELETE SET NULL` en `notificaciones.hora_id` y el formato de `horas.inicio`, incluido el rechazo del carácter nulo), seguirá
-funcionando pero **sin las restricciones nuevas**. Mientras sea una base de
-práctica, bórrala y vuelve a ejecutar `init-db`:
+`init-db` es **aditivo** (D-006, ampliado por D-050): crea lo que falta (tablas, índices y la
+columna `usuarios.sesion_version`), anota la versión del esquema en `PRAGMA user_version` y
+**nunca borra ni reescribe datos ni reconstruye una tabla existente**. Todo ocurre en una sola
+transacción: si algo falla, la base queda como estaba. Tras actualizar el código, ejecútalo
+una vez más sobre tu `agenda.db`:
 
 ```bash
-rm agenda.db                     # en Windows: del agenda.db
 flask --app app init-db
 ```
 
-Esto borra todos sus datos; no lo hagas con datos que quieras conservar.
+Con una base antigua imprime qué hizo («Base de datos actualizada: se agregó la columna
+usuarios.sesion_version; se creó la tabla intentos_acceso…») y no pierde usuarios, horas ni
+notificaciones. Lo que **no** puede hacer:
 
-**Actualizar una base creada antes de T-14a (límite de intentos, D-045):** la
-tabla nueva `intentos_acceso` **no exige borrar nada**. Basta volver a ejecutar
-`flask --app app init-db`: como solo crea lo que falta, agrega la tabla y su
-índice y deja intactos los usuarios, horas y notificaciones. Sin ese paso, el
-login y el registro responden 500 (`no such table: intentos_acceso`). Las demás
-tablas siguen necesitando el borrado de arriba si son anteriores a T-02c, T-02f,
-T-02g o T-08d.
+- **Tablas de un esquema anterior sin sus restricciones nuevas** (por ejemplo antes de T-02c,
+  T-02f o T-02g: `ON DELETE SET NULL` en `notificaciones.hora_id`, el formato de `horas.inicio`).
+  Agregar una restricción a una tabla existente exige reconstruirla, y eso no se hace sin que
+  lo decidas tú. `init-db` lo **avisa** por la salida de error («Aviso: La tabla … se creó con un
+  esquema anterior…») y la base sigue funcionando, sin esas protecciones. Si no necesitas los datos,
+  bórrala y vuelve a crearla (esto sí borra todo):
 
-**Importante tras T-08d (D-022 y D-023):** la tabla `usuarios` ganó la columna
-`sesion_version` (cierre de sesión que invalida las cookies copiadas) y el índice
-único `un_solo_profesional` (la base impide un segundo profesional). Un
-`agenda.db` anterior **no tiene la columna**: la aplicación fallaría al iniciar
-sesión con `no such column: sesion_version`. Bórralo y ejecuta `init-db` de nuevo
-como se indica arriba. Hoy `init-db` no avisa si detecta un esquema antiguo (eso
-queda para T-14).
+  ```bash
+  rm agenda.db                     # en Windows: del agenda.db
+  flask --app app init-db
+  ```
+
+- **Dos o más profesionales** (base anterior a T-08d): la versión actual admite uno solo y la base
+  lo impide con el índice `un_solo_profesional`. `init-db` **se detiene sin cambiar nada** y explica
+  cómo decidir qué cuenta conservar; no borra ninguna.
+- **Una base de una versión más nueva** (`user_version` mayor que el de esta versión): avisa y no
+  cambia su número.
+
+Mientras no ejecutes `init-db` tras una actualización, el login y el registro sobre una base
+antigua responden una página «503» en español que pide avisar a quien administra el sistema (el
+log lleva el detalle y la orden a ejecutar), no un 500 con traza.
+
+### Base ocupada
+
+Si otro proceso retiene el bloqueo de escritura de SQLite más de 5 segundos, reservar, cancelar,
+agregar u eliminar una hora, marcar notificaciones como leídas, el login y el registro responden
+«El sistema está ocupado en este momento. Espera unos segundos e inténtalo de nuevo.» con código
+503 y la cabecera `Retry-After: 5`, y piden reintentar (el formulario de «Agregar hora» conserva lo
+escrito). `send-reminders` termina con un mensaje parecido, sin traza y con código 1 (el cron reintenta en la
+siguiente ejecución). `create-professional` con la base ocupada sigue mostrando la traza de SQLite
+(no se cambió; es un comando manual que se repite).
 
 ### Variable `SECRET_KEY`
 
@@ -102,10 +119,13 @@ y `create-professional` no lo muestran.
 > servidor, `Flask` solo trata `0`, `false` y `no` como falso y **`off` cuenta como
 > verdadero**. Por eso, **fuera de `flask run` (gunicorn, uWSGI...) con debug activo y
 > sin `SECRET_KEY` la aplicación no se crea**: falla con «Me niego a servir…» en vez de
-> usar la clave pública (D-047, ampliación de la ronda 2). Con una `SECRET_KEY` propia
-> solo avisa en el log (el host no se conoce ahí). Los comandos de mantenimiento
-> (`init-db`, `create-professional`, `send-reminders`) siguen funcionando sin
-> `SECRET_KEY`, incluso con `FLASK_DEBUG` definida.
+> usar la clave pública (D-049; D-047 solo avisaba). La clave de desarrollo se usa
+> únicamente con `flask` ejecutando uno de sus comandos (`run` o un comando de mantenimiento:
+> `init-db`, `create-professional`, `send-reminders`, que no sirven peticiones) o en las pruebas;
+> un script propio, aunque use Click, **no** cuenta (D-050). Con una `SECRET_KEY` propia
+> solo avisa en el log (el host no se conoce ahí). **Un script propio o un servidor WSGI que herede
+> `FLASK_DEBUG` y no defina `SECRET_KEY` ahora falla al crear la app** («Me niego a servir…»):
+> define `SECRET_KEY` o quita `FLASK_DEBUG` del entorno de ese proceso.
 
 ### Crear la cuenta del profesional
 
@@ -127,6 +147,40 @@ En esta versión solo puede haber **un** profesional: si ya existe uno,
 un profesional; en esta versión solo puede haber uno.» y termina con código 1
 (la base de datos también lo impide con un índice único; D-023). Si dos
 ejecuciones coinciden, una crea la cuenta y la otra recibe ese mensaje.
+
+### Recordatorios (`send-reminders`) y `outbox.log`
+
+```bash
+flask --app app send-reminders
+```
+
+Debe ver la **misma `DATABASE`** que el servidor. Si el archivo no existe, la carpeta no existe,
+la ruta es una carpeta, el archivo no es SQLite o no tiene las tablas, imprime un mensaje claro
+en español, termina con código 1, **no muestra traza y no crea un `.db` vacío** (T-10 R-01);
+lo mismo con la base ocupada. `create-professional` tampoco crea una base inexistente.
+
+Los avisos (confirmaciones, recordatorios, cancelaciones) se añaden a `outbox.log`, un archivo de
+texto que sustituye al correo real y contiene **nombres y correos**:
+
+- **Permisos:** se crea con modo `0600` (carpeta `0700` si la app la crea), menos lo que quite el
+  `umask`. Un archivo que ya existe con permisos más amplios **no se cambia** (puede ser a
+  propósito) y el log avisa una vez por proceso; ciérralo con `chmod 600 outbox.log`. En Windows
+  los modos POSIX no se aplican ni se avisa: protege la carpeta con los permisos del sistema.
+- **Ubicación:** `OUTBOX_PATH` (por defecto `outbox.log` en la carpeta de la base de datos). Una ruta
+  **relativa** se resuelve respecto al directorio de trabajo del proceso: el servidor y el cron
+  pueden escribir en archivos distintos; usa una ruta absoluta. Los **enlaces simbólicos se
+  siguen**: si `OUTBOX_PATH` apunta a un enlace, se escribe en su destino.
+- **Crecimiento y rotación:** el archivo y la tabla `notificaciones` **crecen sin límite**
+  (no hay borrado automático; ver D-051, pendiente del humano). El archivo se abre en cada
+  escritura, así que se puede rotar renombrándolo o moviéndolo (`mv outbox.log outbox.log.1`; la
+  siguiente escritura crea uno nuevo con modo `0600`). Con `logrotate` usa el modo por defecto
+  (renombrar y crear), **no** `copytruncate`.
+
+### Horas libres del paciente
+
+`/paciente/horas` muestra las horas libres que se pueden reservar y empiezan dentro de los próximos
+**60 días**, como máximo las **100** primeras (D-044). Si el tope recorta la lista, un aviso lo dice:
+«Mostramos las próximas 100 horas; hay más disponibles más adelante.»
 
 ### Cookie de sesión y variables de despliegue
 

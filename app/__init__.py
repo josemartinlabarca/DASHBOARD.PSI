@@ -4,6 +4,7 @@ import unicodedata
 
 import click
 from flask import Flask, render_template
+from flask.cli import ScriptInfo
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 NOMBRE_PROYECTO = "Agenda Psi"
@@ -22,8 +23,9 @@ MENSAJE_COOKIE_SIN_SECURE = (
 )
 MENSAJE_DEBUG_PUBLICO = (
     "Me niego a arrancar: el modo debug está activo y el servidor escucharía en {host!r}, "
-    "que no es una dirección local. En debug la SECRET_KEY es un valor público fijo (cualquiera "
-    "podría falsificar una sesión del profesional) y se ofrece un depurador interactivo. "
+    "que no es una dirección local. El modo debug ofrece un depurador interactivo que permite "
+    "ejecutar código en el servidor a quien llegue a él y, si no defines SECRET_KEY, usa una "
+    "clave pública fija con la que cualquiera podría falsificar una sesión del profesional. "
     "Quita --debug / FLASK_DEBUG o escucha solo en 127.0.0.1."
 )
 MENSAJE_DEBUG_EN_SERVIDOR = (
@@ -34,8 +36,9 @@ MENSAJE_DEBUG_EN_SERVIDOR = (
 MENSAJE_DEBUG_SIN_CLAVE = (
     "Me niego a servir: el modo debug está activo (FLASK_DEBUG) y no hay SECRET_KEY, así que "
     "se usaría la clave pública de desarrollo (está en el código) y cualquiera podría "
-    "falsificar la sesión del profesional. La clave pública solo se admite bajo `flask run` en "
-    "un host local. Define SECRET_KEY o quita FLASK_DEBUG. Ojo: fuera de `flask run` solo 0, "
+    "falsificar la sesión del profesional. La clave pública solo se admite bajo la línea de "
+    "comandos de Flask (`flask run` en un host local o un comando de mantenimiento como "
+    "`flask init-db`). Define SECRET_KEY o quita FLASK_DEBUG. Ojo: fuera de `flask run` solo 0, "
     "false y no desactivan el debug; «off» lo deja activo."
 )
 # Versión de Unicode con la que se probó la política de caracteres del correo (T-03c R-12).
@@ -89,6 +92,8 @@ def create_app(test_config=None):
     from . import db
 
     db.init_app(app)
+    # Antes de registrar los blueprints: sus reglas usan `<id_hora:...>` (T-05 R-06).
+    app.url_map.converters["id_hora"] = db.ConvertidorId
 
     from . import auth, errores, notificaciones, paciente, profesional, seguridad
 
@@ -108,6 +113,20 @@ def create_app(test_config=None):
         return render_template("inicio.html", nombre_proyecto=NOMBRE_PROYECTO)
 
     return app
+
+
+def _contexto_de_flask():
+    """El contexto de click de la CLI de Flask (`flask ...`, `python -m flask ...` o un
+    `FlaskGroup` propio), o `None` si no hay ninguno o es de otro programa con click.
+
+    Lo crea `FlaskGroup`, que le pone un `ScriptInfo` como `obj`; un script propio basado en
+    click que llama a `create_app()` no lo tiene y se trata como un servidor WSGI (gunicorn...):
+    sin contexto (T-14a ronda 2 R-01, D-050). Un `FlaskGroup` propio SÍ cuenta como la CLI de Flask.
+    """
+    contexto = click.get_current_context(silent=True)
+    if contexto is not None and isinstance(contexto.obj, ScriptInfo):
+        return contexto
+    return None
 
 
 def _fallar_configuracion(mensaje):
@@ -173,9 +192,11 @@ def _exigir_debug_solo_local(app):
     `flask run`, Click lee `FLASK_DEBUG` como booleano (`off`, `no`, `false`, `0` = falso,
     comprobado con un servidor real); fuera de `flask run`, `Flask` solo trata `0`, `false`
     y `no` como falso y `off` queda como debug (ver el aviso de abajo). Con otro servidor (gunicorn,
-    etc.) el host no se conoce: solo se avisa en el log si hay debug fuera de pruebas.
+    etc.) el host no se conoce y no se puede negar aquí: si además no hay `SECRET_KEY`,
+    `_preparar_secret_key` se niega a crear la app (D-049, D-050); con clave propia solo se avisa
+    en el log si hay debug fuera de pruebas.
     """
-    contexto = click.get_current_context(silent=True)
+    contexto = _contexto_de_flask()
     if contexto is None:
         if app.debug and not app.testing:
             app.logger.warning(MENSAJE_DEBUG_EN_SERVIDOR)
@@ -221,11 +242,11 @@ def _preparar_secret_key(app):
         app.config["SECRET_KEY"] = SECRET_KEY_DESARROLLO
         return
     if app.config.get("DEBUG"):
-        # R-01 (D-047, ampliación): la clave pública solo se admite donde D-043 se cumple, es
-        # decir, bajo comandos de `flask` (`run`, que además exige host local, y los de
-        # mantenimiento, que no sirven). Sin contexto de click (gunicorn, uWSGI...) se serviría
-        # con ella: se niega.
-        if click.get_current_context(silent=True) is None:
+        # R-01 (D-049, acotado en D-050): la clave pública solo se admite donde D-043 se cumple,
+        # es decir, bajo la CLI de Flask (`run`, que además exige host local, y los comandos de
+        # mantenimiento, que no sirven). Sin contexto de Flask (gunicorn, uWSGI, un script propio
+        # aunque use click) se serviría con ella: se niega.
+        if _contexto_de_flask() is None:
             raise RuntimeError(MENSAJE_DEBUG_SIN_CLAVE)
         app.config["SECRET_KEY"] = SECRET_KEY_DESARROLLO
         return
@@ -242,10 +263,10 @@ def _se_va_a_servir():
     """True si esta app se está cargando para atender peticiones.
 
     Es así con `flask run` (comando `run`) y con un servidor WSGI como gunicorn
-    (no hay contexto de click). Los demás comandos CLI (`init-db`,
+    (no hay contexto de la CLI de Flask). Los demás comandos CLI (`init-db`,
     `create-professional`, ...) cargan la app sin servir, así que no avisan.
     Solo decide si se muestra un aviso: la exigencia real de la clave sigue
     siendo el `before_request` (D-008), que no depende de esto.
     """
-    contexto = click.get_current_context(silent=True)
+    contexto = _contexto_de_flask()
     return contexto is None or contexto.command.name == "run"

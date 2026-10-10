@@ -752,3 +752,91 @@ def test_un_usuario_borrado_durante_la_verificacion_no_inicia_sesion(app, client
     r = intentar(client, password=CLAVE)
     assert r.status_code == 200 and auth.MENSAJE_LOGIN_INVALIDO in r.text
     assert "usuario_id" not in sesion(client)
+
+
+# ----------------------------------------- T-14b: reloj atrasado y limpieza acotada (D-050)
+
+
+def test_si_el_reloj_retrocede_la_espera_no_pasa_de_la_ventana(app, client, reloj):
+    """T-14a R-05: con el reloj 24 h atrás la espera crecía con el salto (1455 minutos)."""
+    crear(app)
+    for _ in range(5):
+        intentar(client)
+    reloj.avanzar(-24 * 3600)
+    r = intentar(client)
+    assert r.status_code == 429
+    assert r.headers["Retry-After"] == str(limite.VENTANA_S)
+    assert "15 minutos" in r.text and "1455 minutos" not in r.text
+
+
+def test_tras_un_retroceso_el_bloqueo_se_libera_15_minutos_despues_de_notarlo(app, client, reloj):
+    crear(app)
+    for _ in range(5):
+        intentar(client)
+    reloj.avanzar(-24 * 3600)
+    assert intentar(client).status_code == 429  # el retroceso se nota en este intento
+    reloj.avanzar(limite.VENTANA_S - 1)
+    assert intentar(client).status_code == 429
+    reloj.avanzar(1)
+    assert intentar(client, password=CLAVE).status_code == 302
+
+
+def test_un_retroceso_pequeno_no_regala_intentos(app, client, reloj):
+    """Las marcas «futuras» se reubican en `ahora`, no se borran: siguen contando."""
+    crear(app)
+    for _ in range(5):
+        intentar(client)
+    reloj.avanzar(-1)
+    assert intentar(client).status_code == 429
+    assert len(filas(app, "ambito = 'par'")) == 5
+
+
+def test_las_marcas_futuras_se_reubican_en_ahora(app, client, reloj):
+    crear(app)
+    for _ in range(3):
+        intentar(client)
+    reloj.avanzar(-3600)
+    intentar(client)
+    ahora = int(reloj.ahora.timestamp())
+    assert {f[3] for f in filas(app)} == {ahora}
+
+
+def _insertar_vencidas(app, cantidad, instante):
+    with app.app_context():
+        db = get_db()
+        db.executemany(
+            "INSERT INTO intentos_acceso (accion, ambito, clave, instante) VALUES ('login', 'ip', ?, ?)",
+            [(f"10.0.{i // 250}.{i % 250}", instante) for i in range(cantidad)],
+        )
+        db.commit()
+
+
+def test_la_limpieza_de_vencidas_es_acotada_por_intento(app, client, reloj):
+    """T-14a R-06: el borrado de vencidas no recorre ni borra toda la tabla en un solo intento."""
+    crear(app)
+    _insertar_vencidas(app, 1500, int(reloj.ahora.timestamp()) - limite.VENTANA_S - 10)
+    intentar(client)
+    vencidas = filas(app, "instante < ?", (int(reloj.ahora.timestamp()) - limite.VENTANA_S,))
+    assert len(vencidas) == 1500 - limite.LOTE_LIMPIEZA
+    intentar(client)
+    assert len(filas(app, "instante < ?", (int(reloj.ahora.timestamp()) - limite.VENTANA_S,))) == (
+        1500 - 2 * limite.LOTE_LIMPIEZA
+    )
+
+
+def test_las_vencidas_que_quedan_sin_borrar_no_cuentan(app, client, reloj):
+    crear(app)
+    with app.app_context():
+        db = get_db()
+        db.executemany(
+            "INSERT INTO intentos_acceso (accion, ambito, clave, instante) VALUES (?, ?, ?, ?)",
+            [("login", "par", f"{IP}|ana@example.cl", int(reloj.ahora.timestamp()) - 5000)] * 2000,
+        )
+        db.commit()
+    for _ in range(5):
+        assert intentar(client).status_code == 200  # 2000 vencidas del mismo par: ninguna cuenta
+    assert intentar(client).status_code == 429
+
+
+def test_el_lote_de_limpieza_es_chico_frente_a_una_tabla_enorme():
+    assert 100 <= limite.LOTE_LIMPIEZA <= 5000

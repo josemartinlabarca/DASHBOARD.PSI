@@ -15,7 +15,17 @@ bp = Blueprint("paciente", __name__)
 # que el SQL traiga de más y Python decida con el instante exacto.
 MARGEN_SQL_DIAS = 1
 
-ID_MAX = 2**63 - 1  # mayor INTEGER de SQLite: un id mayor es 404, no 500 (R-10)
+
+# D-044: la lista del paciente muestra solo las horas que empiezan dentro de los próximos 60 días
+# (instantes absolutos: 60 x 86 400 s desde ahora) y, como máximo, las 100 primeras por inicio.
+VENTANA_DIAS = 60
+TOPE_HORAS = 100
+MENSAJE_RECORTE = (
+    f"Mostramos las próximas {TOPE_HORAS} horas; hay más disponibles más adelante."
+)
+# Margen del SQL alrededor de los cortes: el desfase de Chile cambia a lo más una hora en 60 días
+# de distancia entre dos instantes; Python decide con el instante exacto.
+MARGEN_SQL = timedelta(hours=2)
 
 MENSAJE_NO_DISPONIBLE = (
     "Esa hora ya no está disponible. Elige otra de la lista."
@@ -27,13 +37,15 @@ MENSAJE_YA_PASO = "Esa hora ya empezó o ya pasó. Elige otra de la lista."
 # exactamente 24 h (>=): toda reserva aceptada tiene, al aceptarse, más de 24 h,
 # así que siempre podría cancelarse en ese mismo instante.
 ANTICIPACION_RESERVAR_S = 24 * 3600
+# «no más de»: vale para las 24 h exactas (que ya no se pueden reservar) y para menos (T-08e R-11).
 MENSAJE_POCA_ANTICIPACION_RESERVA = (
-    "Solo se puede reservar con más de 24 horas de anticipación, y a esa hora "
-    "le falta menos. Elige otra de la lista."
+    "Solo se puede reservar con más de 24 horas de anticipación, y esa hora empieza en "
+    "no más de 24 horas. Elige otra de la lista."
 )
+# La reserva con la que se cruza puede tener menos de 24 h y no poder cancelarse: no se promete.
 MENSAJE_SOLAPE = (
     "No pudimos reservarla: se cruza con otra hora que ya reservaste ({otra}). "
-    "Cancela esa reserva o elige otro horario."
+    "Elige otro horario o, si esa reserva todavía se puede cancelar, cancélala primero."
 )
 MENSAJE_CONFIRMACION = "Reservaste tu hora: {cuando} con {profesional}."
 
@@ -73,38 +85,59 @@ def es_reservable(inicio_s, ahora_s):
     return inicio_s - ahora_s > ANTICIPACION_RESERVAR_S
 
 
-def listar_horas_libres_futuras(db, ahora):
-    """Horas `libre` que todavía se pueden reservar, por inicio (T-08e, D-029).
+def _texto_local(instante_s):
+    """Hora de pared de Chile (`YYYY-MM-DDTHH:MM:SS`) de un instante absoluto, para acotar el SQL."""
+    return datetime.fromtimestamp(instante_s, tiempo.zona_chile()).strftime(FORMATO_GUARDADO)
 
-    Solo se listan las que empiezan a MÁS de 24 h de `ahora` (con zona): las que
-    faltan menos (o ya pasaron) se ocultan, porque `reservar_hora` las rechazaría.
-    La decisión se toma con instantes absolutos (hora de Chile
-    convertida a UTC, contra `ahora.timestamp()`), no con el texto ni con la
-    hora UTC en reloj de pared. El SQL solo acota por un margen de un día para
-    no leer todo el historial. Una sola consulta con JOIN trae el nombre del
-    profesional (sin N+1); no se lee ningún correo. El orden lo fija Python: instante y luego id.
-    Las filas con una fecha que el esquema deja pasar pero no existe (o que no
-    se puede representar) no se muestran.
+
+def listar_horas_libres_futuras(db, ahora):
+    """`(horas, recortada)`: horas `libre` reservables en los próximos 60 días, máximo 100 (D-044).
+
+    Una hora se lista si se puede reservar (empieza a MÁS de 24 h de `ahora`, `es_reservable`;
+    D-029) y empieza como máximo 60 días (60 x 86 400 s) después de `ahora`: todo con instantes
+    absolutos (hora de Chile convertida a UTC), nunca con el texto ni con la hora UTC en reloj de
+    pared. `recortada` es verdadero si había más de `TOPE_HORAS` en esa ventana (se muestran las
+    primeras por inicio, desempata el id) y la página lo avisa.
+
+    El SQL acota por los dos cortes (con `MARGEN_SQL` de holgura) y lee de a `TOPE_HORAS + 1`
+    filas en orden de inicio con un cursor `(inicio, id)`: nunca trae el historial ni las 50 000
+    horas libres de dos años (T-06 R-01). Python decide con el instante exacto; las filas que el
+    esquema deja pasar pero no son una fecha real (o no se pueden representar) se saltan sin
+    contar para el tope. Una sola consulta con JOIN trae el nombre del profesional (sin N+1);
+    no se lee ningún correo. El orden final es por instante y luego id.
     """
-    corte = ahora.replace(tzinfo=None) - timedelta(days=MARGEN_SQL_DIAS)
-    filas = db.execute(
-        "SELECT h.id, h.inicio, h.duracion_min, u.nombre AS profesional"
-        " FROM horas h JOIN usuarios u ON u.id = h.profesional_id"
-        " WHERE h.estado = 'libre' AND h.inicio > ?",
-        (corte.strftime(FORMATO_GUARDADO),),
-    ).fetchall()
     ahora_s = ahora.timestamp()
+    limite_s = ahora_s + VENTANA_DIAS * 86400
+    zona = tiempo.zona_chile()
+    desde = (datetime.fromtimestamp(ahora_s + ANTICIPACION_RESERVAR_S, zona).replace(tzinfo=None)
+             - MARGEN_SQL).strftime(FORMATO_GUARDADO)
+    hasta = (datetime.fromtimestamp(limite_s, zona).replace(tzinfo=None)
+             + MARGEN_SQL).strftime(FORMATO_GUARDADO)
     horas = []
-    for fila in filas:
-        try:
-            local = datetime.strptime(fila["inicio"], FORMATO_GUARDADO)
-        except (ValueError, TypeError):
-            continue
-        inicio_s = tiempo.a_segundos_utc(local)
-        if inicio_s is None or not es_reservable(inicio_s, ahora_s):
-            continue
-        horas.append((inicio_s, fila["id"], fila))
+    ultimo = ("", 0)  # cursor: (inicio, id) de la última fila leída
+    while len(horas) <= TOPE_HORAS:
+        filas = db.execute(
+            "SELECT h.id, h.inicio, h.duracion_min, u.nombre AS profesional"
+            " FROM horas h JOIN usuarios u ON u.id = h.profesional_id"
+            " WHERE h.estado = 'libre' AND h.inicio >= ? AND h.inicio <= ?"
+            " AND (h.inicio > ? OR (h.inicio = ? AND h.id > ?))"
+            " ORDER BY h.inicio, h.id LIMIT ?",
+            (desde, hasta, ultimo[0], ultimo[0], ultimo[1], TOPE_HORAS + 1),
+        ).fetchall()
+        for fila in filas:
+            try:
+                local = datetime.strptime(fila["inicio"], FORMATO_GUARDADO)
+            except (ValueError, TypeError):
+                continue
+            inicio_s = tiempo.a_segundos_utc(local)
+            if inicio_s is None or not es_reservable(inicio_s, ahora_s) or inicio_s > limite_s:
+                continue
+            horas.append((inicio_s, fila["id"], fila))
+        if len(filas) < TOPE_HORAS + 1:
+            break
+        ultimo = (filas[-1]["inicio"], filas[-1]["id"])
     horas.sort(key=lambda t: (t[0], t[1]))
+    recortada = len(horas) > TOPE_HORAS
     return [
         {
             "id": fila["id"],
@@ -112,8 +145,8 @@ def listar_horas_libres_futuras(db, ahora):
             "duracion_min": fila["duracion_min"],
             "profesional": fila["profesional"],
         }
-        for _, _, fila in horas
-    ]
+        for _, _, fila in horas[:TOPE_HORAS]
+    ], recortada
 
 
 def listar_reservas_futuras(db, paciente_id, ahora):
@@ -224,8 +257,11 @@ def marcar_notificaciones_leidas():
 @bp.route("/paciente/horas")
 @solo_paciente
 def horas_libres():
-    horas = listar_horas_libres_futuras(get_db(), tiempo.ahora_chile())
-    return render_template("horas_libres.html", usuario=usuario_actual(), horas=horas)
+    horas, recortada = listar_horas_libres_futuras(get_db(), tiempo.ahora_chile())
+    return render_template(
+        "horas_libres.html", usuario=usuario_actual(), horas=horas,
+        mensaje_recorte=MENSAJE_RECORTE if recortada else None,
+    )
 
 
 # ------------------------------------------------------------- reservar ----
@@ -247,8 +283,10 @@ def reservar_hora(db, hora_id, paciente_id, reloj=None):
     de `rowcount`. Regla 5: el paciente no puede tener dos reservas cuyos
     intervalos [inicio, fin) se solapen, medidos en instantes absolutos.
     Los mensajes no dicen quién tiene una hora ocupada. D-029: solo se reserva si
-    faltan más de 24 h (`inicio - ahora > 24 h`, en instantes absolutos), con el
-    reloj leído dentro del bloqueo.
+    faltan más de 24 h (`es_reservable`: `inicio - ahora > 24 h`, en instantes absolutos),
+    con el reloj leído dentro del bloqueo. Orden de las comprobaciones (T-08e R-03): existe;
+    es del propio paciente; fecha legible; ya empezó; falta 24 h o menos; recién entonces el
+    estado. Así una hora oculta de la lista da el mismo mensaje libre u ocupada.
     """
     db.execute("BEGIN IMMEDIATE")
     try:
@@ -259,23 +297,27 @@ def reservar_hora(db, hora_id, paciente_id, reloj=None):
         if hora is None:
             db.rollback()
             return False, MENSAJE_NO_DISPONIBLE
-        if hora["estado"] != "libre":
+        if hora["estado"] == "reservada" and hora["paciente_id"] == paciente_id:
             db.rollback()
-            if hora["paciente_id"] == paciente_id:
-                return False, MENSAJE_YA_ES_TUYA
-            return False, MENSAJE_NO_DISPONIBLE
+            return False, MENSAJE_YA_ES_TUYA  # es de quien pregunta: no revela nada ajeno
         intervalo = tiempo.intervalo_guardado(hora)
         if intervalo is None:
             db.rollback()
             return False, MENSAJE_NO_DISPONIBLE
         inicio_s, fin_s = intervalo
-        faltan_s = inicio_s - ahora.timestamp()
-        if faltan_s <= 0:
+        # T-08e R-03: primero la fecha y recién después el estado. Una hora oculta de la lista
+        # (ya empezó, o falta 24 h o menos) da siempre el mismo mensaje, esté libre u ocupada
+        # por otra persona: un POST forzado no distingue una de otra.
+        ahora_s = ahora.timestamp()
+        if inicio_s <= ahora_s:
             db.rollback()
             return False, MENSAJE_YA_PASO
-        if faltan_s <= ANTICIPACION_RESERVAR_S:  # D-029: más de 24 h, estrictamente
+        if not es_reservable(inicio_s, ahora_s):  # la misma función que ofrece la lista (T-12 R-04)
             db.rollback()
             return False, MENSAJE_POCA_ANTICIPACION_RESERVA
+        if hora["estado"] != "libre":
+            db.rollback()
+            return False, MENSAJE_NO_DISPONIBLE
         for propia in db.execute(
             "SELECT inicio, duracion_min FROM horas WHERE paciente_id = ? AND estado = 'reservada'"
             " ORDER BY inicio",
@@ -307,7 +349,7 @@ def reservar_hora(db, hora_id, paciente_id, reloj=None):
     return True, MENSAJE_CONFIRMACION.format(cuando=cuando, profesional=hora["profesional"])
 
 
-@bp.route(f"/horas/<int(min=1, max={ID_MAX}):hora_id>/reservar", methods=["POST"])
+@bp.route("/horas/<id_hora:hora_id>/reservar", methods=["POST"])
 @solo_paciente
 def reservar(hora_id):
     ok, mensaje = reservar_hora(get_db(), hora_id, usuario_actual()["id"])
@@ -368,7 +410,7 @@ def cancelar_reserva(db, hora_id, paciente_id, reloj=None):
     return True, MENSAJE_CANCELADA.format(cuando=cuando, profesional=hora["profesional"])
 
 
-@bp.route(f"/horas/<int(min=1, max={ID_MAX}):hora_id>/cancelar", methods=["POST"])
+@bp.route("/horas/<id_hora:hora_id>/cancelar", methods=["POST"])
 @solo_paciente
 def cancelar(hora_id):
     ok, mensaje = cancelar_reserva(get_db(), hora_id, usuario_actual()["id"])

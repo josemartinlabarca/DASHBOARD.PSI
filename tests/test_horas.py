@@ -1115,3 +1115,84 @@ def test_interpretar_duracion_directa():
     assert profesional.interpretar_duracion("0") is None
     assert profesional.interpretar_duracion("-5") is None
     assert profesional.interpretar_duracion("5.5") is None
+
+
+# ------------------- T-14b: ventana de fechas de `buscar_solape` (T-05b R-02) y ids ASCII ----
+
+
+def _insertar_muchas(app, email, inicios, duracion=50):
+    with app.app_context():
+        db = get_db()
+        pid = usuario_id(app, email)
+        db.executemany(
+            "INSERT INTO horas (profesional_id, inicio, duracion_min) VALUES (?, ?, ?)",
+            [(pid, i, duracion) for i in inicios],
+        )
+        db.commit()
+
+
+def _cada_hora(desde, cantidad):
+    return [(desde + timedelta(minutes=60 * i)).strftime("%Y-%m-%dT%H:%M:%S") for i in range(cantidad)]
+
+
+def test_buscar_solape_solo_lee_las_horas_cercanas_al_candidato(app, pro, monkeypatch):
+    """T-05b R-02: con miles de horas (pasadas y futuras) solo se interpretan las de la ventana."""
+    _insertar_muchas(app, "pro@example.cl", _cada_hora(datetime(2027, 1, 1, 8, 0), 3000))
+    _insertar_muchas(app, "pro@example.cl", _cada_hora(datetime(2025, 1, 1, 8, 0), 3000))
+    llamadas = []
+    real = tiempo.intervalo_guardado
+    monkeypatch.setattr(tiempo, "intervalo_guardado", lambda f: llamadas.append(f["inicio"]) or real(f))
+    with app.app_context():
+        pid = usuario_id(app, "pro@example.cl")
+        assert profesional.buscar_solape(get_db(), pid, datetime(2027, 3, 1, 8, 30), 50)["inicio"] == "2027-03-01T08:00:00"
+    assert 1 <= len(llamadas) <= 25, len(llamadas)
+
+
+def test_buscar_solape_ve_una_hora_larga_que_empezo_casi_8_horas_antes(app, pro):
+    """Una hora de la aplicación dura a lo más 480 minutos: la ventana mira hacia atrás ese tiempo."""
+    insertar(app, "pro@example.cl", "2027-03-01T02:00:01", 480)  # termina 10:00:01
+    with app.app_context():
+        pid = usuario_id(app, "pro@example.cl")
+        assert profesional.buscar_solape(get_db(), pid, datetime(2027, 3, 1, 10, 0), 30) is not None
+        assert profesional.buscar_solape(get_db(), pid, datetime(2027, 3, 1, 10, 0, 1), 30) is None
+
+
+def test_buscar_solape_sigue_viendo_una_fila_con_duracion_mayor_a_la_de_la_aplicacion(app, pro):
+    """El esquema no limita `duracion_min` (D-007): una fila larga insertada por SQL, aunque
+    empiece semanas antes, sigue impidiendo un solape (regla 3)."""
+    insertar(app, "pro@example.cl", "2027-02-01T08:00:00", 60 * 24 * 40)  # 40 días
+    r = agregar(pro, "2027-03-05", "10:00", "50")
+    assert r.status_code == 200 and "se solapa con otra que ya publicaste" in r.text
+    assert len(horas(app)) == 1
+    assert agregar(pro, "2027-03-20", "10:00", "50").status_code == 302  # ya terminó
+
+
+def test_buscar_solape_la_ventana_funciona_en_las_noches_de_cambio_de_horario(app, pro):
+    insertar(app, "pro@example.cl", "2027-04-03T23:30:00", 120)  # abril 2027: cruza la hora repetida (termina 04:30Z = 00:30 de pared)
+    with app.app_context():
+        pid = usuario_id(app, "pro@example.cl")
+        db = get_db()
+        assert profesional.buscar_solape(db, pid, datetime(2027, 4, 4, 0, 10), 30) is not None
+        assert profesional.buscar_solape(db, pid, datetime(2027, 4, 4, 0, 30), 30) is None
+
+
+def test_buscar_solape_con_fechas_en_los_extremos_del_calendario_no_revienta(app, pro):
+    with app.app_context():
+        pid = usuario_id(app, "pro@example.cl")
+        db = get_db()
+        for candidato in (datetime(1, 1, 2, 0, 0), datetime(9999, 12, 30, 23, 0)):
+            try:
+                profesional.buscar_solape(db, pid, candidato, 50)
+            except ValueError:  # fuera del rango representable en UTC: el contrato de siempre
+                pass
+
+
+@pytest.mark.parametrize("ruta", ["%D9%A1", "%EF%BC%91", "%D9%A0%D9%A1", "01", "0001", "+1", "%201", "1.0"])
+def test_los_alias_del_id_no_eliminan_la_hora_1(app, pro, ruta):
+    """T-05 R-06: `%D9%A1` (١) borraba la hora 1; ahora solo hay una dirección por hora."""
+    hora = insertar(app, "pro@example.cl", "2027-03-01T10:00:00")
+    assert hora == 1
+    token = extraer_token(pro.get("/profesional").text)
+    assert pro.post(f"/profesional/horas/{ruta}/eliminar", data={"csrf_token": token}).status_code == 404
+    assert len(horas(app)) == 1
+    assert eliminar(pro, 1).status_code == 302 and horas(app) == []

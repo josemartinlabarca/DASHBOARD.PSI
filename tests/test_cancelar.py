@@ -847,3 +847,14 @@ def test_cancelar_y_reservar_la_misma_hora_a_la_vez_deja_un_estado_coherente(app
         with app.app_context():
             assert get_db().execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     assert finales  # al menos un resultado; ambos son legítimos
+
+
+@pytest.mark.parametrize("ruta", ["%D9%A1", "%EF%BC%91", "%D9%A0%D9%A1", "01", "0001", "+1", "%201", "1.0"])
+def test_los_alias_del_id_no_cancelan_la_reserva_1(app, pro_id, ana, ruta):
+    """T-05 R-06: un dígito de otro alfabeto o un cero a la izquierda no llegan a la hora 1."""
+    hora = reservada(app, pro_id, "2026-10-12T10:00:00")
+    assert hora == 1
+    token = extraer_token(ana.get("/paciente").text)
+    assert ana.post(f"/horas/{ruta}/cancelar", data={"csrf_token": token}).status_code == 404
+    assert fila(app, 1)[0] == "reservada"
+    assert cancelar(ana, 1).status_code == 302 and fila(app, 1) == ("libre", None, None)

@@ -505,3 +505,148 @@ def test_tres_procesos_a_la_vez_no_duplican_ningun_aviso(app, pro_id):
         assert [p.exitcode for p in procesos] == [0, 0, 0]
         assert len(recordatorios(app)) == 6 and len(lineas(app)) == 6
         assert len({n[1] for n in recordatorios(app)}) == 6 and len(set(lineas(app))) == 6
+
+
+# ------------- T-14b: `send-reminders` sin base, sin carpeta, sin tablas o con la base ocupada ----
+
+from app import create_app  # noqa: E402
+
+RAIZ = Path(__file__).resolve().parent.parent
+
+
+def _app_con_base(tmp_path, ruta):
+    return create_app({"TESTING": True, "DATABASE": str(ruta)})
+
+
+@pytest.fixture
+def limpia(tmp_path):
+    """Carpeta vacía propia (el `tmp_path` ya tiene la base de la fixture `app`)."""
+    carpeta = tmp_path / "limpia"
+    carpeta.mkdir()
+    return carpeta
+
+
+def _comando(app, nombre="send-reminders"):
+    return app.test_cli_runner().invoke(args=[nombre])
+
+
+def _sin_traza(r):
+    assert "Traceback" not in r.output and "sqlite3" not in r.output and "OperationalError" not in r.output
+    assert isinstance(r.exception, SystemExit) or r.exception is None, repr(r.exception)
+
+
+def test_con_la_base_inexistente_hay_un_mensaje_claro_codigo_distinto_de_cero_y_no_se_crea_el_archivo(limpia):
+    ruta = limpia / "nada.db"
+    r = _comando(_app_con_base(limpia, ruta))
+    assert r.exit_code == 1
+    assert f"No existe la base de datos {ruta}" in r.output and "DATABASE" in r.output and "init-db" in r.output
+    _sin_traza(r)
+    assert list(limpia.iterdir()) == []  # ni un .db vacío ni el outbox
+
+
+def test_con_la_carpeta_inexistente_hay_un_mensaje_claro_y_no_se_crea_nada(limpia):
+    ruta = limpia / "no" / "existe" / "x.db"
+    r = _comando(_app_con_base(limpia, ruta))
+    assert r.exit_code == 1
+    assert "No existe la carpeta de la base de datos" in r.output and str(limpia / "no" / "existe") in r.output
+    _sin_traza(r)
+    assert list(limpia.iterdir()) == []
+
+
+def test_con_un_archivo_sin_tablas_el_mensaje_nombra_las_tablas_y_no_cambia_el_archivo(limpia):
+    ruta = limpia / "vacia.db"
+    sqlite3.connect(ruta).close()
+    antes = ruta.read_bytes()
+    r = _comando(_app_con_base(limpia, ruta))
+    assert r.exit_code == 1
+    assert "no tiene las tablas" in r.output and "horas" in r.output and "init-db" in r.output
+    _sin_traza(r)
+    assert ruta.read_bytes() == antes and sorted(p.name for p in limpia.iterdir()) == ["vacia.db"]
+
+
+def test_con_algunas_tablas_faltantes_se_listan_solo_las_que_faltan(limpia):
+    ruta = limpia / "media.db"
+    con = sqlite3.connect(ruta)
+    con.execute("CREATE TABLE usuarios (id INTEGER PRIMARY KEY)")
+    con.commit()
+    con.close()
+    r = _comando(_app_con_base(limpia, ruta))
+    assert r.exit_code == 1 and "horas, intentos_acceso, notificaciones" in r.output and "usuarios," not in r.output
+
+
+def test_con_un_archivo_que_no_es_sqlite_el_mensaje_es_claro(limpia):
+    ruta = limpia / "basura.db"
+    ruta.write_bytes(b"esto no es una base de datos de SQLite" * 50)
+    r = _comando(_app_con_base(limpia, ruta))
+    assert r.exit_code == 1 and "No se pudo leer la base de datos" in r.output and "SQLite" in r.output
+    _sin_traza(r)
+
+
+def test_con_una_carpeta_en_lugar_del_archivo_el_mensaje_es_claro(limpia):
+    r = _comando(_app_con_base(limpia, limpia))
+    assert r.exit_code == 1 and "es una carpeta" in r.output
+    _sin_traza(r)
+
+
+def test_con_la_base_ocupada_mas_de_el_tiempo_de_espera_no_cambia_nada_y_dice_que_se_reintente(app, pro_id, ana):
+    reservada(app, pro_id, "2026-10-09T10:00:00")
+    app.config["DATABASE_TIMEOUT"] = 0.05
+    otra = sqlite3.connect(app.config["DATABASE"], isolation_level=None)
+    otra.execute("BEGIN IMMEDIATE")
+    try:
+        r = _comando(app)
+    finally:
+        otra.execute("ROLLBACK")
+        otra.close()
+    assert r.exit_code == 1
+    assert "La base de datos está ocupada" in r.output and "vuelve a ejecutar el comando" in r.output
+    _sin_traza(r)
+    assert not outbox(app).exists()
+    assert enviar(app) == 1  # ya liberada: el siguiente intento del cron sí envía
+
+
+def test_otro_error_de_sqlite_se_informa_sin_traza(app, monkeypatch):
+    def falla(db, reloj=None):
+        raise sqlite3.OperationalError("disk I/O error")
+
+    monkeypatch.setattr(notificaciones, "enviar_recordatorios", falla)
+    r = _comando(app)
+    assert r.exit_code == 1 and "Error de la base de datos: disk I/O error" in r.output
+    _sin_traza(r)
+
+
+def test_con_la_base_correcta_sigue_igual(app):
+    r = _comando(app)
+    assert r.exit_code == 0 and r.output == "Recordatorios enviados: 0.\n"
+
+
+def test_el_comando_real_sin_base_no_muestra_traza_ni_crea_archivos(limpia):
+    import subprocess
+
+    env = {**os.environ, "DATABASE": str(limpia / "x" / "nada.db"), "PYTHONPATH": str(RAIZ)}
+    env.pop("FLASK_DEBUG", None)
+    r = subprocess.run(
+        [sys.executable, "-m", "flask", "--app", "app", "send-reminders"],
+        capture_output=True, text=True, env=env, cwd=limpia,
+    )
+    assert r.returncode == 1
+    assert "Error: No existe la carpeta de la base de datos" in r.stderr
+    assert "Traceback" not in r.stderr and r.stdout == ""
+    assert sorted(p.name for p in limpia.iterdir()) == []
+    env["DATABASE"] = str(limpia / "nada.db")
+    r = subprocess.run(
+        [sys.executable, "-m", "flask", "--app", "app", "send-reminders"],
+        capture_output=True, text=True, env=env, cwd=limpia,
+    )
+    assert r.returncode == 1 and "Traceback" not in r.stderr and "No existe la base de datos" in r.stderr
+    assert sorted(p.name for p in limpia.iterdir()) == []  # ningún nada.db vacío
+
+
+def test_create_professional_tampoco_crea_una_base_vacia(limpia):
+    ruta = limpia / "nada.db"
+    r = _app_con_base(limpia, ruta).test_cli_runner().invoke(
+        args=["create-professional", "--email", "p@example.cl", "--nombre", "Pro"], input="clave-larga-1\nclave-larga-1\n"
+    )
+    assert r.exit_code == 1 and "No existe la base de datos" in r.output
+    _sin_traza(r)
+    assert list(limpia.iterdir()) == []

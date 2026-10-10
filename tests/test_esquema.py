@@ -869,6 +869,12 @@ SQL_ESPERADO_INDICES = {
         "CREATE INDEX intentos_acceso_clave ON intentos_acceso (accion, ambito, clave, instante)",
         "intentos_acceso",
     ),
+    # T-14b (D-050): el borrado de filas vencidas y la reubicación de marcas futuras buscan por
+    # `instante`; el índice de arriba empieza por otras columnas y no sirve para eso.
+    "intentos_acceso_instante": (
+        "CREATE INDEX intentos_acceso_instante ON intentos_acceso (instante)",
+        "intentos_acceso",
+    ),
 }
 
 
@@ -886,7 +892,7 @@ def test_el_sql_de_cada_indice_es_exactamente_el_aprobado(db, indice):
 
 @pytest.mark.base_real
 def test_no_hay_otros_objetos_en_la_base(db):
-    """Sin triggers ni vistas; los únicos índices declarados son el de D-023 y el de D-045."""
+    """Sin triggers ni vistas; los únicos índices declarados son el de D-023 y los de D-045/D-050."""
     filas = db.execute(
         "SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'"
     ).fetchall()
@@ -894,6 +900,7 @@ def test_no_hay_otros_objetos_en_la_base(db):
         ("table", "usuarios"), ("table", "horas"), ("table", "notificaciones"),
         ("table", "intentos_acceso"),
         ("index", "un_solo_profesional"), ("index", "intentos_acceso_clave"),
+        ("index", "intentos_acceso_instante"),
     }
 
 
@@ -1093,6 +1100,21 @@ def test_el_indice_de_intentos_se_usa_en_el_conteo(db):
         )
     )
     assert "intentos_acceso_clave" in plan and "TEMP B-TREE" not in plan
+
+
+@pytest.mark.parametrize(
+    "sentencia",
+    [
+        "DELETE FROM intentos_acceso WHERE id IN"
+        " (SELECT id FROM intentos_acceso WHERE instante <= 5 LIMIT 500)",
+        "UPDATE intentos_acceso SET instante = 5 WHERE instante > 5",
+    ],
+)
+def test_el_borrado_y_la_reubicacion_de_intentos_usan_el_indice_por_instante(db, sentencia):
+    """T-14a R-06 (D-050): sin el índice por `instante` ambas sentencias recorrían TODA la tabla
+    dentro del bloqueo de escritura (1 000 000 de filas: ~60 ms por intento)."""
+    plan = " ".join(str(f[3]) for f in db.execute("EXPLAIN QUERY PLAN " + sentencia))
+    assert "INDEX intentos_acceso_instante" in plan and "SCAN" not in plan
 
 
 @pytest.mark.base_real

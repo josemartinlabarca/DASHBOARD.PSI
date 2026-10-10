@@ -9,6 +9,7 @@ import unicodedata
 
 import click
 import pytest
+from flask.cli import ScriptInfo
 
 from app import (
     MENSAJE_COOKIE_SIN_SECURE,
@@ -74,7 +75,7 @@ def test_un_valor_que_no_es_ni_verdadero_ni_falso_se_rechaza(tmp_path, monkeypat
 
 def test_un_valor_invalido_en_un_comando_de_flask_da_un_error_limpio(tmp_path, monkeypatch):
     monkeypatch.setenv("SESSION_COOKIE_SECURE", "maybe")
-    with click.Context(click.Command("init-db")), pytest.raises(click.ClickException, match="SESSION_COOKIE_SECURE"):
+    with click.Context(click.Command("init-db"), obj=ScriptInfo()), pytest.raises(click.ClickException, match="SESSION_COOKIE_SECURE"):
         create_app(_config(tmp_path))
 
 
@@ -113,7 +114,7 @@ def test_aviso_si_se_sirve_sin_debug_y_sin_secure(tmp_path, caplog):
 
 
 def test_aviso_con_flask_run_una_sola_vez(tmp_path, caplog):
-    with click.Context(click.Command("run")), caplog.at_level(logging.WARNING):
+    with click.Context(click.Command("run"), obj=ScriptInfo()), caplog.at_level(logging.WARNING):
         create_app(_config(tmp_path))
     assert len(_avisos(caplog, MENSAJE_COOKIE_SIN_SECURE)) == 1
 
@@ -134,7 +135,7 @@ def test_sin_aviso_en_pruebas_ni_en_debug(tmp_path, caplog, extra):
 
 @pytest.mark.parametrize("comando", ["init-db", "create-professional", "send-reminders"])
 def test_sin_aviso_en_los_comandos_de_mantenimiento(tmp_path, caplog, comando):
-    with click.Context(click.Command(comando)), caplog.at_level(logging.WARNING):
+    with click.Context(click.Command(comando), obj=ScriptInfo()), caplog.at_level(logging.WARNING):
         create_app(_config(tmp_path))
     assert _avisos(caplog, MENSAJE_COOKIE_SIN_SECURE) == []
 
@@ -174,7 +175,7 @@ def test_es_host_local(host, local):
 
 
 def _run(host=None, debugger=None):
-    contexto = click.Context(click.Command("run"), info_name="run")
+    contexto = click.Context(click.Command("run"), obj=ScriptInfo(), info_name="run")
     contexto.params = {k: v for k, v in (("host", host), ("debugger", debugger)) if v is not None}
     return contexto
 
@@ -225,7 +226,7 @@ def test_el_depurador_pedido_aparte_tampoco_se_expone_en_un_host_publico(tmp_pat
 
 
 def test_otros_comandos_de_flask_no_comprueban_el_host(tmp_path):
-    contexto = click.Context(click.Command("init-db"))
+    contexto = click.Context(click.Command("init-db"), obj=ScriptInfo())
     contexto.params = {"host": "0.0.0.0"}
     with contexto:
         assert create_app(_config(tmp_path, DEBUG=True)).debug

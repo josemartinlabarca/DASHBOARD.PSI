@@ -25,7 +25,7 @@ import sqlite3
 
 from flask import request
 
-from .db import get_db
+from .db import MENSAJE_BASE_OCUPADA, esta_ocupada, get_db
 
 VENTANA_S = 15 * 60
 LIMITES = {
@@ -35,9 +35,10 @@ LIMITES = {
 # `par` y `correo` solo existen para el login y necesitan el correo.
 AMBITOS_CON_CORREO = ("par", "correo")
 
-MENSAJE_BASE_OCUPADA = (
-    "El sistema está ocupado en este momento. Espera unos segundos e inténtalo de nuevo."
-)
+# Cuántas filas vencidas se borran como máximo en cada intento (D-050): el borrado cabe en el
+# bloqueo de escritura aunque la tabla sea enorme. Las vencidas que quedan no cuentan (la consulta
+# filtra por la ventana) y se van borrando en los intentos siguientes.
+LOTE_LIMPIEZA = 500
 
 
 class Bloqueado(Exception):
@@ -97,18 +98,11 @@ def _claves(accion, email):
     return claves
 
 
-def _esta_ocupada(error):
-    codigo = getattr(error, "sqlite_errorcode", None)
-    if codigo is not None:
-        return (codigo & 0xFF) in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED)
-    return "locked" in str(error) or "busy" in str(error)
-
-
 def _empezar(db):
     try:
         db.execute("BEGIN IMMEDIATE")
     except sqlite3.OperationalError as error:
-        if _esta_ocupada(error):
+        if esta_ocupada(error):
             raise BaseOcupada() from error
         raise
 
@@ -125,7 +119,15 @@ def reservar(accion, email=None):
     claves = _claves(accion, email)
     _empezar(db)
     try:
-        db.execute("DELETE FROM intentos_acceso WHERE instante <= ?", (ahora - VENTANA_S,))
+        # Reloj atrasado (NTP, máquina virtual restaurada): las marcas "futuras" se reubican en
+        # `ahora`, así la espera nunca pasa de la ventana (T-14a R-05). Usa el índice por `instante`.
+        db.execute("UPDATE intentos_acceso SET instante = ? WHERE instante > ?", (ahora, ahora))
+        # Limpieza acotada y con índice por `instante` (T-14a R-06): sin él recorría toda la tabla.
+        db.execute(
+            "DELETE FROM intentos_acceso WHERE id IN"
+            " (SELECT id FROM intentos_acceso WHERE instante <= ? LIMIT ?)",
+            (ahora - VENTANA_S, LOTE_LIMPIEZA),
+        )
         espera = 0
         for ambito, clave, limite in claves:
             instantes = [
@@ -154,7 +156,7 @@ def reservar(accion, email=None):
         db.commit()
     except sqlite3.OperationalError as error:
         db.rollback()
-        if _esta_ocupada(error):
+        if esta_ocupada(error):
             raise BaseOcupada() from error
         raise
     except BaseException:

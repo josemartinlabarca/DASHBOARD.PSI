@@ -24,7 +24,7 @@ def base_inicializada(app):
 
 def ruta_de_ejemplo(regla):
     """Rellena cualquier parámetro de la ruta con un valor cualquiera (no importa si existe)."""
-    return re.sub(r"<(?:int[^:>]*:|path:|string:)?\w+>", "1", regla.rule)
+    return re.sub(r"<(?:\w+(?:\([^)]*\))?:)?\w+>", "1", regla.rule)
 
 
 def endpoints_accesibles_sin_sesion(app):

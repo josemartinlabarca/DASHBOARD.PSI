@@ -568,3 +568,168 @@ def test_procesos_reales_escribiendo_a_la_vez_no_entrelazan_ni_duplican_lineas(a
     for correo in correos:  # cada paciente: 5 confirmaciones y 5 cancelaciones, y el profesional las suyas
         assert sum(1 for l in ls if l.split("\t")[1] == correo) == por_proceso * 2
     assert sum(1 for l in ls if l.split("\t")[1] == PRO) == len(correos) * por_proceso * 2
+
+
+# ---------------------------------- T-14b: hora repetida de abril en el límite de cancelación ----
+
+LIMITE_REPETIDA = (
+    "Puedes cancelarla hasta el 04-04-2026 a las 23:30 (hora de Chile), "
+    "la {vez} vez que el reloj marca esa hora."
+)
+
+
+@pytest.mark.parametrize(
+    "inicio, vez",
+    [
+        ("2026-04-05T22:30:00", "primera"),   # 24 h reales antes: la 1.ª vez que el reloj marca las 23:30
+        ("2026-04-05T23:30:00", "segunda"),   # 24 h reales antes: la 2.ª
+    ],
+)
+def test_si_el_limite_cae_en_la_hora_repetida_de_abril_el_mensaje_dice_cual_de_las_dos(
+    app, pro_id, ana, monkeypatch, inicio, vez
+):
+    """T-09 R-06: el 4-4-2026 el reloj marca dos veces las 23:xx; la hora de pared sola es ambigua."""
+    fijar_reloj(monkeypatch, datetime(2026, 3, 30, 12, 0))
+    reservar(ana, insertar(app, pro_id, inicio))
+    assert LIMITE_REPETIDA.format(vez=vez) in por_usuario(app, ANA)[0][3]
+
+
+@pytest.mark.parametrize(
+    "ahora, inicio",
+    [
+        (datetime(2026, 3, 30, 12, 0), "2026-04-05T00:30:00"),    # el límite cae fuera de la hora repetida
+        (datetime(2026, 3, 30, 12, 0), "2026-04-06T10:00:00"),
+        (datetime(2026, 10, 8, 12, 0), HORA),
+        (datetime(2026, 9, 1, 12, 0), "2026-09-06T10:00:00"),     # septiembre: salto de 1 h hacia adelante
+    ],
+)
+def test_fuera_de_la_hora_repetida_el_mensaje_no_agrega_aclaraciones(app, pro_id, ana, monkeypatch, ahora, inicio):
+    fijar_reloj(monkeypatch, ahora)
+    reservar(ana, insertar(app, pro_id, inicio))
+    mensaje = por_usuario(app, ANA)[0][3]
+    assert "vez que el reloj" not in mensaje
+    assert mensaje.endswith("(hora de Chile).")
+
+
+def test_el_limite_de_una_fecha_ilegible_no_rompe_el_mensaje():
+    assert notificaciones._limite_para_cancelar("2026-13-45T99:99:99") is None
+    assert notificaciones._limite_para_cancelar(None) is None
+    assert notificaciones._limite_para_cancelar("2026-04-05T23:30:00")[1].endswith("segunda vez que el reloj marca esa hora")
+
+
+# ------------------------------------- T-14b: permisos, rotación y rutas de `outbox.log` ----
+
+posix = pytest.mark.skipif(os.name != "posix", reason="los permisos 0600 son de POSIX; en Windows rigen las ACL")
+
+
+def _modo(ruta):
+    return os.stat(ruta).st_mode & 0o777
+
+
+def _aviso(texto="hola"):
+    return notificaciones.Aviso("2026-10-08T12:00:00-03:00", "a@example.cl", "confirmacion", texto)
+
+
+def _escribir(app, *avisos):
+    with app.app_context():
+        return notificaciones.escribir_outbox(list(avisos) or [_aviso()])
+
+
+@posix
+@pytest.mark.parametrize("mascara", [0o000, 0o022, 0o077])
+def test_outbox_se_crea_con_permisos_0600_sea_cual_sea_la_mascara(app, mascara):
+    """T-09 R-02: contiene nombres y correos; con umask 022 quedaba 0644 (legible por todos)."""
+    anterior = os.umask(mascara)
+    try:
+        assert _escribir(app)
+    finally:
+        os.umask(anterior)
+    assert _modo(outbox(app)) == 0o600
+
+
+@posix
+def test_la_carpeta_que_crea_la_aplicacion_es_solo_del_dueno(app, tmp_path):
+    app.config["OUTBOX_PATH"] = str(tmp_path / "correo" / "simulado" / "outbox.log")
+    anterior = os.umask(0)
+    try:
+        assert _escribir(app)
+    finally:
+        os.umask(anterior)
+    assert _modo(tmp_path / "correo" / "simulado") == 0o700
+    assert _modo(tmp_path / "correo" / "simulado" / "outbox.log") == 0o600
+
+
+@posix
+def test_un_outbox_que_ya_existia_con_permisos_amplios_no_se_cambia_pero_se_avisa_una_vez(app, tmp_path, caplog):
+    ruta = tmp_path / "viejo.log"
+    ruta.write_text("linea anterior\n")
+    os.chmod(ruta, 0o644)
+    app.config["OUTBOX_PATH"] = str(ruta)
+    with caplog.at_level("WARNING"):
+        assert _escribir(app) and _escribir(app)
+    avisos = [m for m in caplog.messages if "permisos" in m and str(ruta) in m]
+    assert len(avisos) == 1 and "chmod 600" in avisos[0] and "0o644" in avisos[0]
+    assert _modo(ruta) == 0o644  # no se toca: puede ser a propósito (un grupo que lee el log)
+    assert ruta.read_text().startswith("linea anterior\n") and ruta.read_text().count("\n") == 3
+
+
+@posix
+def test_un_outbox_con_permisos_correctos_no_da_aviso(app, caplog):
+    with caplog.at_level("WARNING"):
+        assert _escribir(app) and _escribir(app)
+    assert not [m for m in caplog.messages if "permisos" in m]
+
+
+@posix
+def test_rotar_el_log_renombrandolo_no_necesita_reiniciar_nada(app):
+    """El archivo se abre en cada escritura: tras `mv outbox.log outbox.log.1` la siguiente
+    escritura crea uno nuevo (con 0600) y el rotado conserva lo suyo."""
+    _escribir(app, _aviso("antes"))
+    ruta = outbox(app)
+    rotado = Path(str(ruta) + ".1")
+    ruta.rename(rotado)
+    assert not ruta.exists()
+    _escribir(app, _aviso("despues"))
+    assert "antes" in rotado.read_text() and "despues" not in rotado.read_text()
+    assert "despues" in ruta.read_text() and "antes" not in ruta.read_text()
+    assert _modo(ruta) == 0o600
+
+
+def test_una_ruta_relativa_se_resuelve_contra_el_directorio_de_trabajo_de_cada_proceso(app, tmp_path, monkeypatch):
+    """Documentado en el README: el servidor y el cron deben usar una ruta ABSOLUTA, si no cada
+    uno escribe en su propia carpeta de trabajo."""
+    a, b = tmp_path / "a", tmp_path / "b"
+    a.mkdir(), b.mkdir()
+    app.config["OUTBOX_PATH"] = "relativo.log"
+    monkeypatch.chdir(a)
+    assert _escribir(app)
+    monkeypatch.chdir(b)
+    assert _escribir(app)
+    assert (a / "relativo.log").exists() and (b / "relativo.log").exists()
+
+
+@posix
+def test_un_enlace_simbolico_se_sigue_y_se_escribe_en_el_destino(app, tmp_path):
+    """Documentado: `OUTBOX_PATH` puede ser un enlace (p. ej. hacia /var/log); se escribe en el destino."""
+    destino = tmp_path / "destino.log"
+    enlace = tmp_path / "enlace.log"
+    enlace.symlink_to(destino)
+    app.config["OUTBOX_PATH"] = str(enlace)
+    assert _escribir(app)
+    assert enlace.is_symlink() and destino.exists() and "hola" in destino.read_text()
+    assert _modo(destino) == 0o600
+
+
+@posix
+def test_una_carpeta_sin_permiso_no_rompe_la_reserva(app, tmp_path, caplog):
+    carpeta = tmp_path / "sin_permiso"
+    carpeta.mkdir()
+    os.chmod(carpeta, 0o500)
+    app.config["OUTBOX_PATH"] = str(carpeta / "nuevo" / "outbox.log")
+    try:
+        with caplog.at_level("ERROR"):
+            resultado = _escribir(app)
+    finally:
+        os.chmod(carpeta, 0o700)
+    if os.geteuid() != 0:  # root ignora los permisos
+        assert resultado is False and any("No se pudo escribir en el outbox" in m for m in caplog.messages)

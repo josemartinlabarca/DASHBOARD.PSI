@@ -2,6 +2,7 @@
 {% block titulo %}Horas disponibles · Agenda Psi{% endblock %}
 {% block contenido %}
   <h1>Horas disponibles</h1>
+  {% if mensaje_recorte %}<p class="mensaje" role="status">{{ mensaje_recorte }}</p>{% endif %}
   {% if horas %}
     <div class="tabla-scroll" role="region" aria-label="Tabla de horas disponibles" tabindex="0">
     <table>

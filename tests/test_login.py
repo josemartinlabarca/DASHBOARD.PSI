@@ -5,6 +5,7 @@ import time
 from unittest.mock import patch
 
 import pytest
+from flask.cli import ScriptInfo
 from werkzeug.security import check_password_hash
 
 from app import auth, create_app
@@ -393,6 +394,7 @@ def test_los_comandos_cli_no_calculan_el_hash_falso(tmp_path):
     assert app.extensions["hash_falso"]._valor is not None  # servir (sin click): calculado
     with patch("app.click.get_current_context") as ctx:
         ctx.return_value.command.name = "init-db"
+        ctx.return_value.obj = ScriptInfo()  # contexto de la CLI de Flask (D-050)
         otra = create_app({"TESTING": True, "DATABASE": str(tmp_path / "y.db")})
     assert otra.extensions["hash_falso"]._valor is None
     with otra.app_context():  # sigue funcionando si alguna vez se necesita
@@ -821,7 +823,23 @@ def test_si_el_logout_falla_no_se_limpia_la_sesion_ni_se_miente(app, client, mon
     monkeypatch.setattr(auth, "cerrar_sesion", falla)
     app.config["PROPAGATE_EXCEPTIONS"] = False
     r = client.post("/logout", data={"csrf_token": antes["csrf_token"]})
-    assert r.status_code == 500
+    assert r.status_code == 503  # base ocupada (T-14b): mensaje claro y reintentar, no 500
+    assert "ocupado" in r.text and r.headers["Retry-After"] == "5"
+    assert sesion(client) == antes
+
+
+def test_si_el_logout_falla_por_otra_razon_sigue_siendo_500_y_no_se_limpia_la_sesion(app, client, monkeypatch):
+    crear(app)
+    iniciar(client)
+    antes = sesion(client)
+
+    def falla(*args, **kwargs):
+        raise sqlite3.OperationalError("disk I/O error")
+
+    monkeypatch.setattr(auth, "cerrar_sesion", falla)
+    app.config["PROPAGATE_EXCEPTIONS"] = False
+    r = client.post("/logout", data={"csrf_token": antes["csrf_token"]})
+    assert r.status_code == 500 and "ocupado" not in r.text
     assert sesion(client) == antes
 
 

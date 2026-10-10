@@ -9,6 +9,6 @@
     <p>{{ mensaje }}</p>
     {% if detalle %}<p>{{ detalle }}</p>{% endif %}
     <p class="nota">Código del error: {{ codigo }}</p>
-    <p class="acciones"><a href="{{ url_for('inicio') }}">Volver al inicio</a></p>
+    <p class="acciones">{% if volver %}<a href="{{ volver.url }}">{{ volver.texto }}</a> · {% endif %}<a href="{{ url_for('inicio') }}">Volver al inicio</a></p>
   </section>
 {% endblock %}

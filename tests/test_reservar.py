@@ -710,3 +710,153 @@ def test_el_mismo_paciente_con_dos_horas_solapadas_a_la_vez_se_queda_con_una(app
         estados = sorted([fila(app, h1)[0], fila(app, h2)[0]])
         assert estados == ["libre", "reservada"]
         assert sorted(destino for _, destino in salida) == ["/paciente", "/paciente/horas"]
+
+
+# ------------------------------ T-14b: orden de comprobaciones, 24 h unificadas, textos ----
+
+POCA = "Solo se puede reservar con más de 24 horas de anticipación, y esa hora empieza en no más de 24 horas. Elige otra de la lista."
+YA_PASO = "Esa hora ya empezó o ya pasó. Elige otra de la lista."
+NO_DISPONIBLE = "Esa hora ya no está disponible. Elige otra de la lista."
+SOLAPE = (
+    "No pudimos reservarla: se cruza con otra hora que ya reservaste ({otra}). "
+    "Elige otro horario o, si esa reserva todavía se puede cancelar, cancélala primero."
+)
+
+
+def ocupar_por_otra(app, hora_id, email="otra@example.cl"):
+    from tests.test_horas_libres import reservar_directo
+
+    reservar_directo(app, hora_id, email)
+
+
+@pytest.mark.parametrize(
+    "inicio, otro_inicio, mensaje",
+    [
+        ("2026-10-07T10:00:00", "2026-10-07T11:00:00", YA_PASO),    # ya pasó
+        ("2026-10-08T11:30:00", "2026-10-08T11:00:00", YA_PASO),    # en curso
+        ("2026-10-08T12:00:00", "2026-10-08T11:59:59", YA_PASO),    # justo ahora
+        ("2026-10-08T12:00:01", "2026-10-08T15:00:00", POCA),       # 1 s
+        ("2026-10-09T11:00:00", "2026-10-09T11:59:59", POCA),       # 23 h
+        ("2026-10-09T12:00:00", "2026-10-09T10:00:00", POCA),       # 24 h exactas
+    ],
+)
+def test_una_hora_oculta_da_el_mismo_mensaje_libre_u_ocupada(app, pro_id, ana, inicio, otro_inicio, mensaje):
+    """T-08e R-03: un POST forzado a una hora que la lista oculta no distingue libre de ocupada."""
+    libre = insertar(app, pro_id, inicio)
+    ocupada = insertar(app, pro_id, otro_inicio)
+    ocupar_por_otra(app, ocupada)
+    assert reservar_y_aviso(ana, libre) == ("error", mensaje)
+    assert reservar_y_aviso(ana, ocupada) == ("error", mensaje)
+    assert fila(app, ocupada)[0] == "reservada" and fila(app, libre) == ("libre", None, None)
+
+
+def test_una_hora_ocupada_que_la_lista_si_mostraria_sigue_siendo_no_disponible(app, pro_id, ana):
+    ocupada = insertar(app, pro_id, "2026-10-10T10:00:00")
+    ocupar_por_otra(app, ocupada)
+    assert reservar_y_aviso(ana, ocupada) == ("error", NO_DISPONIBLE)
+    assert reservar_y_aviso(ana, 999) == ("error", NO_DISPONIBLE)  # inexistente
+
+
+def test_la_propia_reserva_dice_ya_reservaste_aunque_ya_este_dentro_de_las_24_h(app, pro_id, ana, monkeypatch):
+    hora = insertar(app, pro_id, "2026-10-10T10:00:00")
+    reservar(ana, hora)
+    fijar_reloj(monkeypatch, datetime(2026, 10, 9, 20, 0))  # ahora faltan 14 h
+    assert reservar_y_aviso(ana, hora) == ("error", "Ya reservaste esta hora.")
+
+
+def test_reservar_y_la_lista_usan_la_misma_funcion_de_24_horas(app, pro_id, ana, monkeypatch):
+    """T-12 R-04 / D-036: si `es_reservable` dice que no, ni la lista ni la acción la ofrecen."""
+    hora = insertar(app, pro_id, "2026-10-12T10:00:00")  # lejos: reservable de verdad
+    monkeypatch.setattr(modulo_paciente, "es_reservable", lambda inicio_s, ahora_s: False)
+    assert f"/horas/{hora}/reservar" not in ana.get("/paciente/horas").text
+    assert reservar_y_aviso(ana, hora) == ("error", POCA)
+    assert fila(app, hora) == ("libre", None, None)
+
+
+def test_es_reservable_es_la_unica_definicion_del_borde(app, pro_id, ana, monkeypatch):
+    """El borde que acepta la acción es el que decide `es_reservable` (aquí la hacemos más estricta)."""
+    hora = insertar(app, pro_id, "2026-10-09T12:00:01")  # 24 h y 1 s: reservable de verdad
+    llamadas = []
+    real = modulo_paciente.es_reservable
+    monkeypatch.setattr(modulo_paciente, "es_reservable", lambda a, b: llamadas.append((a, b)) or real(a, b))
+    reservar(ana, hora)
+    assert fila(app, hora)[0] == "reservada"
+    assert llamadas  # la acción la consultó
+
+
+def test_el_mensaje_de_poca_anticipacion_vale_para_las_24_horas_exactas(app, pro_id, ana):
+    """T-08e R-11: a las 24 h exactas ya no faltaba «menos»: el texto dice «no más de»."""
+    exacta = insertar(app, pro_id, "2026-10-09T12:00:00")
+    assert reservar_y_aviso(ana, exacta) == ("error", POCA)
+    assert modulo_paciente.MENSAJE_POCA_ANTICIPACION_RESERVA == POCA
+    assert "le falta menos" not in POCA
+
+
+def test_el_mensaje_de_solape_no_promete_que_se_pueda_cancelar(app, pro_id, ana):
+    """T-08e R-11: la reserva con la que se cruza puede tener menos de 24 h y no cancelarse."""
+    cercana = insertar(app, pro_id, "2026-10-09T10:00:00", 480)  # empieza en 22 h, dura 8 h
+    reservar_directo_de(app, cercana, "ana@example.cl")
+    cruzada = insertar(app, nuevo_profesional(app, "b@example.cl", "Dra. B"), "2026-10-09T14:00:00")  # a 26 h
+    categoria, texto = reservar_y_aviso(ana, cruzada)
+    assert categoria == "error"
+    assert texto == SOLAPE.format(otra="09-10-2026 10:00")
+    assert "Cancela esa reserva" not in texto and "si esa reserva todavía se puede cancelar" in texto
+    assert modulo_paciente.MENSAJE_SOLAPE == SOLAPE
+
+
+def reservar_directo_de(app, hora_id, email):
+    with app.app_context():
+        db = get_db()
+        pid = db.execute("SELECT id FROM usuarios WHERE email = ?", (email,)).fetchone()[0]
+        db.execute(
+            "UPDATE horas SET estado = 'reservada', paciente_id = ?, reservada_en = ? WHERE id = ?",
+            (pid, "2026-10-08T11:00:00-03:00", hora_id),
+        )
+        db.commit()
+
+
+# ---------------------------------------- T-05 R-06: ids de ruta solo ASCII ----
+
+ALIAS_DEL_ID_1 = [
+    "%D9%A1",            # ١ arábigo-índico
+    "%DB%B1",            # ۱ arábigo-índico extendido
+    "%EF%BC%91",         # １ ancho completo
+    "%E0%A5%A7",         # १ devanagari
+    "%D9%A0%D9%A1",      # ٠١ (con cero a la izquierda)
+    "01", "001", "0001",
+    "+1", "%2B1", "%201", "1%20", "1.0", "1e0", "0x1", "%EF%BC%8B1",
+]
+
+
+@pytest.mark.parametrize("ruta", ALIAS_DEL_ID_1)
+def test_los_alias_del_id_no_llegan_a_la_hora_1(app, pro_id, ana, ruta):
+    hora = insertar(app, pro_id, "2026-10-10T10:00:00")
+    assert hora == 1
+    token = extraer_token(ana.get("/paciente").text)
+    r = ana.post(f"/horas/{ruta}/reservar", data={"csrf_token": token})
+    assert r.status_code == 404
+    assert fila(app, 1) == ("libre", None, None)
+
+
+def test_el_id_en_ascii_sigue_funcionando_y_las_url_generadas_son_canonicas(app, pro_id, ana):
+    hora = insertar(app, pro_id, "2026-10-10T10:00:00")
+    assert f'action="/horas/{hora}/reservar"' in ana.get("/paciente/horas").text
+    reservar(ana, hora)
+    assert fila(app, hora)[0] == "reservada"
+
+
+def test_el_convertidor_de_ids_rechaza_lo_que_no_es_un_entero_canonico_de_sqlite():
+    from app.db import ConvertidorId, ID_MAX
+    from werkzeug.routing import ValidationError
+    import re as _re
+
+    patron = _re.compile(ConvertidorId.regex)
+    for bueno in ("1", "9", "10", str(ID_MAX)):
+        assert patron.fullmatch(bueno)
+    for malo in ("0", "01", "-1", "+1", "1.5", "٣", "１", "", " 1", "1 ", "1" * 20):
+        assert not patron.fullmatch(malo), malo
+    convertidor = ConvertidorId(None)
+    assert convertidor.to_python(str(ID_MAX)) == ID_MAX
+    with pytest.raises(ValidationError):
+        convertidor.to_python(str(ID_MAX + 1))
+    assert convertidor.to_url(5) == "5"
