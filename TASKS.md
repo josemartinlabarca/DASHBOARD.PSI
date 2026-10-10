@@ -293,6 +293,12 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Término:** suite verde 3 veces, cada defecto con prueba que falle sin el arreglo, revisión sin S1–S3.
 - **Origen:** Verificador de T-14c, REVIEW.md final y backlog (2026-10-10 12:19).
 
+### T-15b — Hallazgos S4 de la revisión de T-15
+- **Estado:** IMPLEMENTADA, pendiente de verificación (2026-10-10 12:50)
+- **Depende de:** T-15
+- **Qué:** S4-1 `GET /login` y `/registro` con sesión y base rota muestran el formulario; S4-2 mensaje de 24 h cierto para hora libre y ocupada; S4-3 evaluado, propuesta en D-054 (no implementado).
+- **Término:** suite verde 3 veces, cada arreglo con prueba que falle sin él, revisión sin S1–S3.
+
 ---
 
 ## Backlog de baja prioridad (no bloquea nada; recoger cuando se toque la zona)
@@ -373,8 +379,9 @@ en qué tarea conviene absorberlo.
 | T-14a r2 R-03 | `tests/test_entorno_hermetico.py` solo detecta lecturas literales de variables de entorno: no ve `os.getenv ('X')` con espacio, el nombre en una constante, `from os import environ as e`, `'X' in os.environ`, `from_envvar` ni `from_prefixed_env`; y una fixture de limpieza vacía sobrevive si el equipo no tiene variables definidas | cuando se toque ese archivo |
 | T-14a r2 R-04 | El aviso de proxy no mira `Forwarded`; con `TRUSTED_PROXY_COUNT=1` y un proxy que solo manda `X-Real-IP` no avisa (`ProxyFix` solo usa `X-Forwarded-For`) | **HECHO en T-14c** (README, «Despliegue…»: la app solo lee `X-Forwarded-For`; medido con `X-Real-IP` y `Forwarded`) |
 | T-02c #9 | En `tests/test_esquema.py` la cobertura de NOT NULL y FK es triplemente redundante y la rama `usuarios` de `test_not_null_rechaza_null` es poco legible | cuando se toque ese archivo |
-| T-15 R-01 | Con cookie de sesión y la tabla `usuarios` ausente, `GET /login` y `/registro` dan 500 (`usuario_actual()` en `app/auth.py` no captura `sqlite3.Error`; `destino_marca()` sí); base ya inválida, ya cubierta por `init-db` | cuando se toque `auth.py` |
-| T-15 R-02/R-03 | «Ya no está disponible» para una hora libre de <24 h es algo ambiguo; la marca «cancelada» no cubre avisos de horas eliminadas (documentado en D-053) | si el humano lo pide |
+| T-15 R-01 | Con cookie de sesión y la tabla `usuarios` ausente, `GET /login` y `/registro` dan 500 (`usuario_actual()` en `app/auth.py` no captura `sqlite3.Error`; `destino_marca()` sí); base ya inválida, ya cubierta por `init-db` | **RESUELTO en T-15b** (pendiente de verificación; ver D-054) |
+| T-15 R-02 | «Ya no está disponible» para una hora libre de <24 h es algo ambiguo | **RESUELTO en T-15b** (pendiente de verificación; ver D-054) |
+| T-15 R-03 | La marca «cancelada» no cubre avisos de horas eliminadas (documentado en D-053) | **REASIGNADO al humano**: propuesta A/B/C en D-054 (exige tocar el esquema o cambiar una conducta de D-053) |
 
 ---
 

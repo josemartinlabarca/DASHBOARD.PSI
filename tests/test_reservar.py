@@ -714,7 +714,7 @@ def test_el_mismo_paciente_con_dos_horas_solapadas_a_la_vez_se_queda_con_una(app
 
 # ------------------------------ T-14b: orden de comprobaciones, 24 h unificadas, textos ----
 
-POCA = "Esa hora ya no está disponible: solo se puede reservar con más de 24 horas de anticipación, y esa hora empieza en no más de 24 horas. Elige otra de la lista."  # T-15 (d): antes empezaba con «Solo se puede…»
+POCA = "No se puede reservar esa hora: solo se puede reservar con más de 24 horas de anticipación, y esa hora empieza en no más de 24 horas. Elige otra de la lista."  # T-15b: antes «Esa hora ya no está disponible: solo…», ambiguo para una hora libre
 YA_PASO = "Esa hora ya empezó o ya pasó. Elige otra de la lista."
 NO_DISPONIBLE = "Esa hora ya no está disponible. Elige otra de la lista."
 SOLAPE = (
@@ -898,12 +898,12 @@ def test_la_expresion_de_ids_coincide_exactamente_con_1_a_el_maximo():
             assert (patron.fullmatch(str(n)) is not None) == (1 <= n <= maximo), (maximo, n)
 
 
-def test_t15d_una_hora_ocupada_con_menos_de_24_h_dice_que_ya_no_esta_disponible(app, pro_id, ana):
+def test_t15d_una_hora_ocupada_con_menos_de_24_h_dice_que_no_se_puede_reservar(app, pro_id, ana):
     """T-15 (d): quien veía la hora libre y llega tarde no recibe un texto que solo vale para una libre."""
     ocupada = insertar(app, pro_id, "2026-10-09T11:00:00")  # 23 h
     ocupar_por_otra(app, ocupada)
     categoria, texto = reservar_y_aviso(ana, ocupada)
-    assert categoria == "error" and texto.startswith("Esa hora ya no está disponible")
+    assert categoria == "error" and texto.startswith("No se puede reservar esa hora")
     assert "24 horas" in texto  # sigue explicando la regla, igual que para una libre
 
 
@@ -913,3 +913,11 @@ def test_t15d_el_mensaje_no_distingue_libre_de_ocupada_ni_filtra_quien_la_tiene(
     ocupar_por_otra(app, ocupada, "otra@example.cl")
     assert reservar_y_aviso(ana, libre) == reservar_y_aviso(ana, ocupada)
     assert "example.cl" not in reservar_y_aviso(ana, ocupada)[1]
+
+
+def test_t15b_el_mensaje_de_menos_de_24_h_es_cierto_para_una_hora_libre(app, pro_id, ana):
+    """S4-2: una hora LIBRE con <24 h no se presenta como «ya no está disponible»."""
+    libre = insertar(app, pro_id, "2026-10-09T11:00:00")  # 23 h
+    categoria, texto = reservar_y_aviso(ana, libre)
+    assert categoria == "error" and "ya no está disponible" not in texto
+    assert texto.startswith("No se puede reservar esa hora") and "24 horas" in texto

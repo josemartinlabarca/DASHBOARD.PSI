@@ -878,3 +878,37 @@ def test_t15a_tras_cerrar_sesion_el_formulario_vuelve(app, client):
     token = extraer_token(client.get("/paciente").text)
     assert client.post("/logout", data={"csrf_token": token}).status_code == 302
     assert client.get("/login").status_code == 200 and client.get("/registro").status_code == 200
+
+
+# ------------------------------------ T-15b (S4-1): base rota con cookie de sesión ----
+
+
+def _sesion_con_tabla_usuarios_ausente(app, client):
+    crear(app)
+    assert iniciar(client).status_code == 302
+    with app.app_context():
+        auth.get_db().execute("DROP TABLE usuarios")
+        auth.get_db().commit()
+
+
+@pytest.mark.parametrize("ruta", ["/login", "/registro"])
+def test_t15b_con_sesion_y_sin_tabla_usuarios_el_formulario_sale(app, client, ruta):
+    _sesion_con_tabla_usuarios_ausente(app, client)
+    app.config["PROPAGATE_EXCEPTIONS"] = False
+    r = client.get(ruta)
+    assert r.status_code == 200 and 'name="password"' in r.text
+
+
+@pytest.mark.parametrize("ruta", ["/login", "/registro"])
+def test_t15b_un_error_que_no_es_de_sqlite_no_se_traga(app, client, ruta):
+    crear(app)
+    assert iniciar(client).status_code == 302
+    app.config["PROPAGATE_EXCEPTIONS"] = False
+    with patch("app.auth.usuario_actual", side_effect=RuntimeError("otro fallo")):
+        assert client.get(ruta).status_code == 500
+
+
+def test_t15b_una_ruta_protegida_no_oculta_el_error_de_base(app, client):
+    _sesion_con_tabla_usuarios_ausente(app, client)
+    app.config["PROPAGATE_EXCEPTIONS"] = False
+    assert client.get("/paciente").status_code == 500

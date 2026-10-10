@@ -152,7 +152,7 @@ def validar_registro(nombre, email, password):
 @bp.route("/registro", methods=["GET", "POST"])
 def registro():
     if request.method == "GET":
-        if usuario_actual() is not None:
+        if _hay_sesion_valida():
             return redirect(destino_marca())  # T-15: con sesión activa no se muestra el formulario
         return render_template("registro.html", nombre="", email="", errores={})
 
@@ -317,7 +317,7 @@ def cerrar_sesion(db, usuario_id):
 @bp.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "GET":
-        if usuario_actual() is not None:
+        if _hay_sesion_valida():
             return redirect(destino_marca())  # T-15: con sesión activa no se muestra el formulario
         return render_template("login.html", email="", error=None)
 
@@ -384,6 +384,20 @@ def usuario_actual():
                 (usuario_id, version),
             ).fetchone()
     return g.usuario_actual
+
+
+def _hay_sesion_valida():
+    """¿Hay sesión válida? Para las páginas públicas (/login, /registro), que deben abrirse siempre.
+
+    T-15b: un fallo de la base (tabla ausente, archivo ilegible, base ocupada) se trata como
+    «sin sesión» y se muestra el formulario, igual que ya hace `destino_marca` (D-039). Solo
+    se captura `sqlite3.Error`: cualquier otro error sigue subiendo. Las rutas protegidas
+    siguen llamando a `usuario_actual()` directamente y no ocultan nada.
+    """
+    try:
+        return usuario_actual() is not None
+    except sqlite3.Error:
+        return False
 
 
 def destino_marca():
