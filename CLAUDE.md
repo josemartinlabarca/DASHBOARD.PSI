@@ -23,7 +23,7 @@ Una tarea no está terminada si `pytest` no pasa.
 
 ## Convenciones
 
-- Python 3.11+, funciones cortas, nombres claros.
+- Python 3.13 (recomendado; 3.11 y 3.12 también pasan la suite), funciones cortas, nombres claros.
 - SQL siempre parametrizado (`?`), nunca concatenado.
 - Contraseñas con `werkzeug.security` (hash), nunca en texto plano.
 - Formularios con token CSRF.

@@ -263,6 +263,7 @@ RELLENOS = (
     [0x3164, 0x115F, 0x1160, 0x2800, 0xFFFD, 0xFFFC, 0x00B7]
     + list(range(0x2400, 0x2423))
     + list(range(0x2010, 0x2016))
+    + [0x13441, 0x13442]  # D-048 B1 (aprobada 2026-10-10)
 )
 
 
@@ -297,7 +298,7 @@ def test_solo_el_relleno_hangul_necesita_la_lista_el_resto_ya_cae_por_categoria(
     assert unicodedata.normalize("NFKC", "\u3164") == "\u1160"
     for cp in RELLENOS:
         categoria = unicodedata.category(chr(cp))
-        if cp in (0x115F, 0x1160):
+        if cp in (0x115F, 0x1160, 0x13441, 0x13442):  # D-048 B1: estos dos también son `Lo`
             assert categoria == "Lo", hex(cp)
         elif cp != 0x3164:
             assert categoria[0] not in "LN", (hex(cp), categoria)
@@ -370,7 +371,7 @@ def modelo_acepta(texto):
         else:
             if unicodedata.category(ch)[0] not in ("L", "N"):
                 return False
-            if cp in (0x3164, 0x115F, 0x1160, 0x2800, 0xFFFD, 0xFFFC, 0x00B7):
+            if cp in (0x3164, 0x115F, 0x1160, 0x2800, 0xFFFD, 0xFFFC, 0x00B7, 0x13441, 0x13442):
                 return False
             if 0x2400 <= cp <= 0x2422 or 0x2010 <= cp <= 0x2015:
                 return False
@@ -426,3 +427,50 @@ def test_el_modelo_acepta_y_rechaza_lo_que_debe():
 def test_entradas_que_no_son_texto_lanzan_value_error(valor):
     with pytest.raises(ValueError):
         normalizar_email(valor)
+
+
+# --- D-048 B1 y C2 (aprobadas por el humano el 2026-10-10) ---------------------
+
+
+@pytest.mark.parametrize("cp", [0x13441, 0x13442])
+def test_b1_los_jeroglificos_en_blanco_son_letras_y_solo_la_lista_los_frena(cp):
+    assert unicodedata.category(chr(cp)) == "Lo"
+    with pytest.raises(ValueError):
+        normalizar_email(f"ana{chr(cp)}@example.cl")
+    # los jeroglifos vecinos (no en blanco) siguen siendo letras válidas
+    assert normalizar_email("ana\U00013000@example.cl") == "ana\U00013000@example.cl"
+
+
+@pytest.mark.parametrize("entrada", ["col\u00b7legi@example.cl", "ana\u00bd@example.cl"])
+def test_b1_el_punto_medio_y_las_fracciones_siguen_rechazados(entrada):
+    with pytest.raises(ValueError):
+        normalizar_email(entrada)
+
+
+@pytest.mark.parametrize(
+    ("entrada", "esperado"),
+    [
+        ("  ANA@Example.CL ", "ana@example.cl"),
+        ("ＡＮＡ@example.cl", "ana@example.cl"),
+        ("stra\u00dfe@example.cl", "strasse@example.cl"),
+        ("ana\U00013441@example.cl", "ana\U00013441@example.cl"),  # hoy rechazado en el registro
+        ("ana\u200b@example.cl", "ana\u200b@example.cl"),  # ancho cero: no se quita, no coincide
+        ("a na@example.cl", "a na@example.cl"),  # espacio interno: no se quita
+        ("col\u00b7legi@example.cl", "col\u00b7legi@example.cl"),
+        (None, ""),
+        (5, ""),
+        (b"ana@example.cl", ""),
+        ("ana\ud800@example.cl", ""),  # sustituto suelto: no cabe en SQLite
+    ],
+)
+def test_c2_la_normalizacion_del_login_no_rechaza_nunca(entrada, esperado):
+    from app.correo import normalizar_email_login
+
+    assert normalizar_email_login(entrada) == esperado
+
+
+def test_c2_coincide_con_la_estricta_en_todo_lo_aceptable():
+    from app.correo import normalizar_email_login
+
+    for valor in ("Ana@Example.CL", " señor@x.cl ", "ＡＢＣ@x.cl", "STRASSE@x.cl", "n\u0303@x.cl".replace("n\u0303", "\u00f1")):
+        assert normalizar_email_login(valor) == normalizar_email(valor)

@@ -26,9 +26,34 @@ MARCAS_PROHIBIDAS = frozenset({"Mn", "Mc", "Me"})
 LETRAS_Y_NUMEROS = frozenset({"L", "N"})
 RELLENOS_RECHAZADOS = frozenset(
     {0x3164, 0x115F, 0x1160, 0x2800, 0xFFFD, 0xFFFC, 0x00B7}
+    | {0x13441, 0x13442}  # D-048 B1: jeroglíficos `Lo` que se ven como un hueco
     | set(range(0x2400, 0x2423))
     | set(range(0x2010, 0x2016))
 )
+
+
+def _normalizar_sin_rechazar(valor):
+    texto = unicodedata.normalize("NFKC", valor).strip()
+    return unicodedata.normalize("NFKC", texto.casefold())
+
+
+def normalizar_email_login(valor):
+    """Clave de búsqueda para el login (D-048 C2): igual que `normalizar_email`, sin rechazar.
+
+    Solo NFKC, recorte, `casefold` y NFKC: no aplica la política de caracteres, que rige
+    únicamente el REGISTRO. Así una cuenta guardada cuando un carácter era válido puede seguir
+    entrando aunque hoy se rechace. Nunca lanza: lo que no sea texto, o no se pueda guardar en
+    SQLite (sustitutos sueltos), da `""`, que no coincide con ninguna cuenta. Un correo con
+    espacios internos o ancho cero sigue sin coincidir con nada.
+    """
+    if not isinstance(valor, str):
+        return ""
+    texto = _normalizar_sin_rechazar(valor)
+    try:
+        texto.encode("utf-8")
+    except UnicodeEncodeError:
+        return ""
+    return texto
 
 
 def normalizar_email(valor):
@@ -52,8 +77,7 @@ def normalizar_email(valor):
     """
     if not isinstance(valor, str):
         raise ValueError("el correo debe ser texto")
-    texto = unicodedata.normalize("NFKC", valor).strip()
-    texto = unicodedata.normalize("NFKC", texto.casefold())
+    texto = _normalizar_sin_rechazar(valor)
     for caracter in texto:
         if caracter.isspace():
             raise ValueError("el correo no puede contener espacios")

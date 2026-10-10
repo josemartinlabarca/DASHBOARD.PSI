@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from app import auth, create_app, limite, seguridad, tiempo
+from app import auth, correo, create_app, limite, seguridad, tiempo
 from app import db as modulo_db
 from app.db import get_db, init_db
 from tests.test_login import CLAVE, crear, sesion
@@ -309,10 +309,89 @@ def test_el_correo_se_normaliza_para_la_clave(app, client, reloj):
     assert {f[2] for f in filas(app, "ambito = 'correo'")} == {"ana@example.cl"}
 
 
-def test_un_correo_inaceptable_solo_cuenta_para_la_direccion(app, client, reloj):
-    for malo in ["", "a na@example.cl", "ana​@example.cl", "x" * 300 + "@example.cl"]:
+def test_una_basura_inutilizable_solo_cuenta_para_la_direccion(app, client, reloj):
+    # Vacío y más largo que EMAIL_MAX no dan clave de correo (D-056): solo cuenta la IP.
+    for malo in ["", "   ", "x" * 300 + "@example.cl"]:
         intentar(client, malo)
     assert {f[1] for f in filas(app)} == {"ip"}
+
+
+@pytest.mark.parametrize("basura", [None, 5, b"ana@example.cl", ["ana@example.cl"], "", "x" * 255])
+def test_clave_de_correo_vacia_para_lo_inutilizable(basura):
+    assert auth._correo_para_limite(basura) == ""
+    # el sustituto suelto ya sale vacío de la normalización de login
+    assert auth._correo_para_limite(correo.normalizar_email_login("a\ud800b@example.cl")) == ""
+
+
+def test_clave_de_correo_acepta_hasta_email_max():
+    exacto = "x" * auth.EMAIL_MAX
+    assert auth._correo_para_limite(exacto) == exacto
+    assert auth._correo_para_limite(exacto + "x") == ""
+
+
+def crear_legacy(app, email):
+    """Cuenta guardada por SQL con un carácter que hoy el registro rechaza (D-048 C2)."""
+    with app.app_context():
+        db = get_db()
+        db.execute(
+            "INSERT INTO usuarios (nombre, email, password_hash, rol, creado_en)"
+            " VALUES ('Mía', ?, ?, 'paciente', '2020-01-01T00:00:00-03:00')",
+            (email, auth.generate_password_hash(CLAVE)),
+        )
+        db.commit()
+
+
+LEGACY = "m·ia@example.cl"  # U+00B7: el registro lo rechaza, el login lo acepta
+
+
+def test_cuenta_legacy_se_bloquea_por_par_a_los_5_fallos(app, client, reloj):
+    crear_legacy(app, LEGACY)
+    assert [intentar(client, LEGACY).status_code for _ in range(5)] == [200] * 5
+    r = intentar(client, LEGACY)
+    assert r.status_code == 429
+    assert {f[2].split("|")[0] for f in filas(app, "ambito = 'par'")} == {IP}
+    assert intentar(client, LEGACY, ip=OTRA_IP).status_code == 200  # otra IP aún puede intentar
+
+
+def test_cuenta_legacy_se_corta_por_correo_con_ips_distintas(app, client, reloj):
+    crear_legacy(app, LEGACY)
+    codigos = [intentar(client, LEGACY, ip=f"198.51.{n // 250}.{n % 250 + 1}").status_code for n in range(31)]
+    assert codigos[:30] == [200] * 30
+    assert codigos[30] == 429
+    assert {f[2] for f in filas(app, "ambito = 'correo'")} == {LEGACY}
+
+
+def test_variantes_del_mismo_correo_suman_a_la_misma_clave(app, client, reloj):
+    variantes = ["ana@example.cl", "ANA@EXAMPLE.CL", "ａｎａ＠ｅｘａｍｐｌｅ.ｃｌ", " Ana@Example.cl "]
+    for v in variantes:
+        intentar(client, v)
+    assert {f[2] for f in filas(app, "ambito = 'correo'")} == {"ana@example.cl"}
+    assert len(filas(app, "ambito = 'par'")) == 4
+    assert intentar(client, "ANA@example.cl").status_code == 200  # 5.º fallo
+    assert intentar(client, "ａｎａ＠ｅｘａｍｐｌｅ.ｃｌ").status_code == 429
+
+
+def test_variantes_de_una_cuenta_legacy_suman_a_la_misma_clave(app, client, reloj):
+    crear_legacy(app, LEGACY)
+    for v in [LEGACY, "M·IA@EXAMPLE.CL", "ｍ·ｉａ＠ｅｘａｍｐｌｅ.ｃｌ", " m·ia@example.cl "]:
+        intentar(client, v)
+    assert {f[2] for f in filas(app, "ambito = 'correo'")} == {LEGACY}
+    assert intentar(client, "M·ia@example.cl").status_code == 200  # 5.º fallo
+    assert intentar(client, LEGACY).status_code == 429
+
+
+def test_correo_sobredimensionado_no_crea_filas_por_correo(app, client, reloj):
+    for largo in (auth.EMAIL_MAX + 1, 5000):
+        intentar(client, "y" * largo)
+    assert {f[1] for f in filas(app)} == {"ip"}
+
+
+def test_el_login_normaliza_el_correo_una_sola_vez(app, client, reloj, monkeypatch):
+    llamadas = []
+    original = auth.normalizar_email_login
+    monkeypatch.setattr(auth, "normalizar_email_login", lambda v: llamadas.append(v) or original(v))
+    intentar(client, "Ana@Example.cl")
+    assert len(llamadas) == 1
 
 
 def test_ipv6_se_agrupa_por_su_prefijo_64(app, client, reloj):

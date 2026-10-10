@@ -353,10 +353,11 @@ Unas 2 250 pruebas, ~45 segundos. Son herméticas: ignoran `SECRET_KEY`, `DATABA
 ### Versión de Python
 
 Se prueba con **Python 3.13** (Unicode 15.1) y ese es el recomendado. La política de caracteres
-del correo juzga cada letra por la versión de Unicode de Python: con una versión más antigua, un
-correo con una letra añadida después podría rechazarse al iniciar sesión aunque la cuenta exista.
-Si la app se sirve con Unicode anterior al 15.1, el log avisa. Mantén la misma versión (o una más
-nueva) que la que creó las cuentas.
+del correo (solo en el **registro**) juzga cada letra por la versión de Unicode de Python: con una
+versión más antigua, una letra añadida después se rechaza al registrarse. El inicio de sesión no
+aplica esa política (D-048 C2): una cuenta ya guardada entra aunque su correo tenga hoy un carácter
+rechazado. Si la app se sirve con Unicode anterior al 15.1, el log avisa. Mantén la misma versión
+(o una más nueva) que la que creó las cuentas.
 
 Medido en entornos nuevos (`python3.11 -m venv` / `python3.12 -m venv` + `pip install -r
 requirements.txt`): la suite completa pasa en 3.11, 3.12 y 3.13 (2 249 pruebas, 1 saltada: la de

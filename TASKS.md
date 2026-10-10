@@ -299,6 +299,18 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Qué:** S4-1 `GET /login` y `/registro` con sesión y base rota muestran el formulario; S4-2 mensaje de 24 h cierto para hora libre y ocupada; S4-3 evaluado, propuesta en D-054 (no implementado).
 - **Término:** suite verde 3 veces, cada arreglo con prueba que falle sin él, revisión sin S1–S3.
 
+### T-16 — Aplicar las decisiones del humano (D-048 B1/C2, ARCHITECTURE.md, CLAUDE.md)
+- **Estado:** HECHA (2026-10-10 13:32) — verificada (2303 pruebas ×3) y revisada: CON OBSERVACIONES; el S3 se cerró en T-16b.
+- **Depende de:** T-15b
+- **Qué:** (1) marcar D-048, D-050, D-051, D-052 y D-054 como resueltas por el humano (2026-10-10, ~13:10) sin borrar su texto; (2) B1: U+13441 y U+13442 a `RELLENOS_RECHAZADOS`; (3) C2: login tolerante (`correo.normalizar_email_login`), con el registro igual de estricto y fallos idénticos con un solo hash; (4) agregar a `ARCHITECTURE.md` solo lo pendiente (D-052 / T-13 R-08) y cambiar «Python 3.11+» en `CLAUDE.md`; (5) ver D-055.
+- **Término:** suite verde 3 veces, pruebas que fallan sin el cambio, nombres de `ARCHITECTURE.md` comprobados con `grep`.
+
+### T-16b — Clave del límite con la normalización de la búsqueda (S3 de la revisión de T-16)
+- **Estado:** HECHA (2026-10-10 13:32) — verificada por el orquestador (2316 pruebas ×3; el ataque del revisor con 300 IPs ahora se corta a los 30 fallos, igual que una cuenta normal).
+- **Depende de:** T-16
+- **Qué:** la clave de `par`/`correo` usa `normalizar_email_login`, acotada a `EMAIL_MAX`, normalizada una sola vez por petición; ver D-056. Sin cambios de esquema ni de topes.
+- **Término:** suite verde 3 veces; pruebas de cuenta legacy, variantes y clave sobredimensionada que fallan sin el arreglo.
+
 ---
 
 ## Backlog de baja prioridad (no bloquea nada; recoger cuando se toque la zona)
@@ -369,7 +381,7 @@ en qué tarea conviene absorberlo.
 | T-12 R-01 | «Ver la reserva» es engañoso en avisos viejos: si Ana reserva, cancela y Beto reserva la misma hora, los avisos del profesional (incluido «La hora quedó libre») enlazan a la fila de Beto | T-13 (rotular el enlace o quitarlo en cancelaciones) |
 | T-12 R-02 | Las mutaciones que quitan el `sort` de libres/agenda o su desempate por id sobreviven: el orden sale del índice `UNIQUE(profesional_id, inicio)`, no del código ni de las pruebas | cuando se toque `tests/test_dashboard_profesional.py` |
 | T-12 R-04 | D-036 dice «función única» para las 24 h, pero `reservar_hora` (`app/paciente.py`) conserva su propia comparación en vez de `es_reservable` | **HECHO en T-14b** (revisado; ver D-050) |
-| T-13 R-08 | Pendientes del humano en `ARCHITECTURE.md`: `errores.py`, `error.html`, `_notificaciones.html`, `static/`, las rutas POST de «leídas» (paciente y profesional), `correo.py`, `tiempo.py` | el humano (lista consolidada y ampliada en D-052) |
+| T-13 R-08 | Pendientes del humano en `ARCHITECTURE.md`: `errores.py`, `error.html`, `_notificaciones.html`, `static/`, las rutas POST de «leídas» (paciente y profesional), `correo.py`, `tiempo.py` | ~~el humano~~ — hecho en T-16 (2026-10-10 13:15) |
 | T-14a R-04 | Un atacante con 6 o más direcciones puede dejar fuera 15 minutos al dueño de una cuenta (documentado en D-045); el profesional puede quedar fuera aunque ponga la contraseña correcta | README documentado por T-14c («Despliegue…»); la política sigue siendo decisión humana |
 | T-14a R-05 | Si el reloj retrocede, la espera crece con el salto (24 h atrás dio 1455 min) y las filas «futuras» no se limpian | **HECHO en T-14b** (revisado; ver D-050) |
 | T-14a R-06 | El `DELETE` de filas vencidas de `intentos_acceso` recorre toda la tabla dentro del bloqueo de escritura (1 000 000 de filas ≈ 60 ms por intento); índice por `instante` o limpieza periódica | **HECHO en T-14b** (revisado; ver D-050) |

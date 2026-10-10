@@ -95,3 +95,45 @@ Esto evita la doble reserva sin necesidad de bloqueos complejos.
 - `flask --app app init-db`
 - `flask --app app create-professional --email ... --nombre ...`
 - `flask --app app send-reminders`
+
+---
+
+## Adiciones posteriores (T-16; el humano autorizó editar este archivo el 2026-10-10)
+
+Solo agrega lo que existía en el código y no estaba aquí (lista de D-052 y T-13 R-08). Nada de lo anterior cambió.
+
+### Módulos y archivos agregados
+
+| Módulo / archivo | Responsabilidad | No debe hacer |
+|---|---|---|
+| `app/limite.py` | Límite de intentos de login y registro (`reservar`, `absolver`, `Bloqueado`, `BaseOcupada`, `VENTANA_S`, `LIMITES`) sobre la tabla `intentos_acceso` | Reglas de negocio de reservas |
+| `app/errores.py` | Páginas de error en español para cualquier `HTTPException` y para la base ocupada (`pagina_de_error`, `error_de_base`, `init_app`) | Mostrar descripciones de Werkzeug ni leer la sesión |
+| `app/correo.py` | Normalización de correos: `normalizar_email` (registro, política de caracteres) y `normalizar_email_login` (login, nunca rechaza) | Flask ni base de datos |
+| `app/tiempo.py` | Reloj único de la app (`ahora_chile`) y conversión de horas locales a instantes absolutos (`a_segundos_utc`, `mostrar_inicio`, `mostrar_instante`) | Reglas de reserva |
+| `app/templates/error.html` | Página de error común | Leer sesión o mensajes flash |
+| `app/templates/acceso_denegado.html` | Respuesta 403 de los decoradores de rol | — |
+| `app/templates/_notificaciones.html` | Panel de notificaciones compartido por `/paciente` y `/profesional` | — |
+| `app/static/` | `style.css` y `favicon.svg` | — |
+| `tests/esquemas_antiguos/` | Esquemas SQL de commits anteriores, como datos de prueba de `init-db` | — |
+
+`db.py` ahora también contiene: `version_esquema` (lee `PRAGMA user_version`) y `VERSION_ESQUEMA`, `ConvertidorId` y `regex_de_ids_hasta` (ids de ruta acotados), `abrir_base_existente`, `comprobar_que_se_puede_escribir`, `errores_de_sqlite_como_mensaje`, `inicializar` (transaccional), `fk_de_avisos_sin_set_null` y `avisar_si_la_base_es_antigua`. `seguridad.py` además fija la política CSP y otras cabeceras de seguridad (`agregar_cabeceras_de_seguridad`) y avisa de cabeceras de proxy sin configurar (`avisar_si_hay_proxy_sin_configurar`).
+
+### Tabla `intentos_acceso`
+
+- `id` INTEGER PK
+- `accion` TEXT NOT NULL CHECK (accion IN ('login','registro'))
+- `ambito` TEXT NOT NULL CHECK (ambito IN ('ip','par','correo'))
+- `clave` TEXT NOT NULL (no vacía)
+- `instante` INTEGER NOT NULL (segundos desde 1970, UTC)
+- índices `intentos_acceso_clave ON (accion, ambito, clave, instante)` e `intentos_acceso_instante ON (instante)`.
+
+### Rutas agregadas
+
+| Método | Ruta | Rol | Descripción |
+|---|---|---|---|
+| POST | `/notificaciones/leidas` | paciente | Marcar todas sus notificaciones como leídas |
+| POST | `/profesional/notificaciones/leidas` | profesional | Marcar todas sus notificaciones como leídas |
+
+### Configuración y variables
+
+Claves de `app.config`: `SECRET_KEY`, `SESSION_COOKIE_SECURE`, `TRUSTED_PROXY_COUNT`, `OUTBOX_PATH`, `DATABASE` y `DATABASE_TIMEOUT` (esta última solo la cambian las pruebas). Todas salen de variables de entorno del mismo nombre salvo `DATABASE_TIMEOUT`; el detalle de uso está en `README.md`.
