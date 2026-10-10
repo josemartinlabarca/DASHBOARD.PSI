@@ -263,6 +263,12 @@ Aquí el ciclo ya es rutina: implementador → mi verificación → revisor → 
 - **Revisor: CON OBSERVACIONES**, sin S1–S3. Probó la campana en Chromium a 390 px (se ve) y a 1280 px (no se ve), y revirtió 2 arreglos en una copia: las pruebas fallaron como debían. Un S4 de robustez va al backlog.
 - **Lección:** *una prueba nueva solo vale si falla sin el arreglo.* El implementador lo comprobó quitando cada arreglo, y el revisor lo repitió por su cuenta.
 
+### Vuelta 36 — T-15b Arreglar bien los S4 de la revisión
+- **Qué se hizo:** pediste corregir el S4 «de la mejor forma». Una función `_hay_sesion_valida()` captura **solo** `sqlite3.Error` en `/login` y `/registro` (el formulario sale aunque la base falle; los demás errores siguen subiendo); el mensaje de 24 h ahora dice «No se puede reservar esa hora…», cierto para hora libre y ocupada.
+- **Lo que NO se implementó, a propósito (D-054):** la marca «cancelada» para avisos de horas eliminadas necesita una columna nueva o una inferencia frágil. El implementador probó la inferencia: rompía 3 pruebas existentes. En vez de forzarla, la dejó como propuesta A/B/C para ti.
+- **Verificación mía:** 2273 pruebas ×3 y con variables de producción; mutación propia (cambiar el `except`) detectada por la prueba nueva.
+- **Lección:** *corregir de la mejor forma no es corregir todo.* Un arreglo que obliga a tocar el esquema o a romper pruebas es una decisión del humano, no del implementador.
+
 ### Historial git resultante
 
 ```
@@ -293,7 +299,7 @@ docs: documentación base del proyecto Agenda Psi
 
 ## 4. Estado actual y qué sigue
 
-- Hecho: **T-01 a T-15** (2267 pruebas pasando): el plan original está completo y la revisión final aprobó.
+- Hecho: **T-01 a T-15b** (2273 pruebas pasando): el plan original está completo y la revisión final aprobó.
 - **Decisiones tuyas ya tomadas (D-035 incluida):** D-007 (esquema), D-015 (correo), D-016 (borrar horas), D-017 (formato de fecha), D-018 (carácter nulo). Pendientes: **D-020** (caracteres invisibles en el correo), **D-022** (revocar la cookie al cerrar sesión), **D-023** (un solo profesional) y **D-029** (reservar con menos de 24 h; conviene antes de T-09).
 - Siguiente: no hay tareas pendientes de código; quedan las decisiones tuyas (D-048, D-050, D-051, D-052) y subir el proyecto a GitHub.
 - Pendiente solo tuyo: autorizar (o no) que `app/correo.py` figure en `ARCHITECTURE.md`; es una línea de documentación.

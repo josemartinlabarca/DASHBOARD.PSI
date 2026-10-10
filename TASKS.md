@@ -294,7 +294,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Origen:** Verificador de T-14c, REVIEW.md final y backlog (2026-10-10 12:19).
 
 ### T-15b — Hallazgos S4 de la revisión de T-15
-- **Estado:** IMPLEMENTADA, pendiente de verificación (2026-10-10 12:50)
+- **Estado:** HECHA (2026-10-10 13:00) — verificada por el orquestador (2273 pruebas ×3, mutación propia detectada). S4-3 queda como decisión del humano (D-054).
 - **Depende de:** T-15
 - **Qué:** S4-1 `GET /login` y `/registro` con sesión y base rota muestran el formulario; S4-2 mensaje de 24 h cierto para hora libre y ocupada; S4-3 evaluado, propuesta en D-054 (no implementado).
 - **Término:** suite verde 3 veces, cada arreglo con prueba que falle sin él, revisión sin S1–S3.
