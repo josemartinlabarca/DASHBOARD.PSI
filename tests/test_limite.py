@@ -1,4 +1,5 @@
 """Límite de intentos de login y registro (T-14a, D-041, D-045)."""
+import logging
 import re
 import sqlite3
 import subprocess
@@ -10,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from app import auth, create_app, limite, tiempo
+from app import auth, create_app, limite, seguridad, tiempo
 from app import db as modulo_db
 from app.db import get_db, init_db
 from tests.test_login import CLAVE, crear, sesion
@@ -386,6 +387,115 @@ def test_con_un_proxy_de_confianza_el_limite_usa_la_direccion_real(tmp_path):
         intentar(cliente, headers={"X-Forwarded-For": "7.7.7.7, 198.51.100.4"})
     assert intentar(cliente, headers={"X-Forwarded-For": "8.8.8.8, 198.51.100.4"}).status_code == 429
     assert intentar(cliente, password=CLAVE, headers={"X-Forwarded-For": "8.8.8.8, 198.51.100.5"}).status_code == 302
+
+
+@pytest.mark.parametrize(
+    "cabecera, valor",
+    [
+        ("X-Forwarded-Proto", "https"),
+        ("X-Forwarded-Host", "malo.example"),
+        ("X-Forwarded-Port", "8443"),
+        ("X-Forwarded-Prefix", "/malo"),
+    ],
+)
+@pytest.mark.parametrize("cantidad", [1, 2])
+def test_proxyfix_solo_confia_en_la_direccion_no_en_esquema_host_puerto_ni_prefijo(
+    tmp_path, cantidad, cabecera, valor
+):
+    """R-07 (D-047): con proxies de confianza solo cuenta X-Forwarded-For. Confiar además en
+    Proto/Host/Port/Prefix dejaría que un cliente cambie `request.scheme`, `host` o las URL absolutas."""
+    app = _app_con_proxies(tmp_path, cantidad)
+
+    @app.route("/_origen")
+    def ver_origen():
+        from flask import request
+
+        return "|".join([request.scheme, request.host, request.script_root, request.url_root])
+
+    cliente = app.test_client()
+    base = cliente.get("/_origen", headers={"X-Forwarded-For": "198.51.100.4"}).text
+    esperado = "http|localhost||http://localhost/"
+    assert base == esperado
+    forjada = cliente.get("/_origen", headers={"X-Forwarded-For": "198.51.100.4", cabecera: valor}).text
+    assert forjada == esperado
+
+
+@pytest.mark.parametrize(
+    "segundos, minutos",
+    [(1, 1), (59, 1), (60, 1), (61, 2), (119, 2), (120, 2), (121, 3), (299, 5), (300, 5), (899, 15), (900, 15), (901, 16)],
+)
+def test_el_mensaje_de_espera_redondea_hacia_arriba(segundos, minutos):
+    """Un mensaje que diga 14 minutos con 899 s dejaría al usuario intentar demasiado pronto."""
+    texto = limite.mensaje_bloqueo(segundos)
+    unidad = "minuto" if minutos == 1 else "minutos"
+    assert f"espera {minutos} {unidad} antes" in texto
+
+
+def test_el_mensaje_de_espera_llega_redondeado_a_la_pagina(app, client, reloj):
+    crear(app)
+    for _ in range(5):
+        intentar(client)
+    reloj.avanzar(1)  # quedan 899 s
+    r = intentar(client)
+    assert r.status_code == 429 and r.headers["Retry-After"] == "899"
+    assert "espera 15 minutos" in r.text
+
+
+# ------------------------------------- R-02: proxy sin TRUSTED_PROXY_COUNT
+
+
+@pytest.fixture
+def aviso_de_proxy_nuevo(monkeypatch):
+    """Cada prueba parte de «aún no se avisó» (el aviso es una vez por proceso)."""
+    monkeypatch.setitem(seguridad._aviso_de_proxy, "dado", False)
+
+
+def _avisos_de_proxy(caplog):
+    return [r for r in caplog.records if r.getMessage().startswith("Llegó una petición con X-Forwarded-For")]
+
+
+@pytest.mark.parametrize("cabecera", ["X-Forwarded-For", "X-Real-IP", "x-forwarded-for"])
+def test_r02_cabeceras_de_proxy_sin_configurar_avisan_una_sola_vez(
+    app, client, caplog, aviso_de_proxy_nuevo, cabecera
+):
+    with caplog.at_level(logging.WARNING):
+        for _ in range(3):
+            client.get("/login", headers={cabecera: "9.9.9.9"}, environ_overrides={"REMOTE_ADDR": "10.0.0.1"})
+    (aviso,) = _avisos_de_proxy(caplog)
+    texto = aviso.getMessage()
+    assert "TRUSTED_PROXY_COUNT" in texto and "10.0.0.1" in texto
+    assert "20 intentos fallidos" in texto and "15 minutos" in texto
+
+
+def test_r02_sin_cabeceras_de_proxy_no_avisa(app, client, caplog, aviso_de_proxy_nuevo):
+    with caplog.at_level(logging.WARNING):
+        client.get("/login")
+        client.get("/")
+    assert _avisos_de_proxy(caplog) == []
+    assert seguridad._aviso_de_proxy["dado"] is False
+
+
+def test_r02_con_trusted_proxy_count_no_avisa(tmp_path, caplog, aviso_de_proxy_nuevo):
+    cliente = _app_con_proxies(tmp_path, 1).test_client()
+    with caplog.at_level(logging.WARNING):
+        cliente.get("/login", headers={"X-Forwarded-For": "198.51.100.4", "X-Real-IP": "198.51.100.4"})
+    assert _avisos_de_proxy(caplog) == []
+
+
+def test_r02_el_aviso_no_cambia_la_respuesta_ni_la_direccion(app, client, caplog, aviso_de_proxy_nuevo):
+    """Solo informa: sigue ignorando la cabecera (el límite cuenta la dirección de la conexión)."""
+    crear(app)
+    with caplog.at_level(logging.WARNING):
+        for n in range(5):
+            assert intentar(client, headers={"X-Forwarded-For": f"10.0.0.{n}"}).status_code == 200
+        assert intentar(client, headers={"X-Forwarded-For": "10.0.0.99"}).status_code == 429
+    assert len(_avisos_de_proxy(caplog)) == 1
+
+
+def test_r02_la_consecuencia_esta_explicita_en_el_readme():
+    readme = (RAIZ / "README.md").read_text(encoding="utf-8")
+    assert "TRUSTED_PROXY_COUNT" in readme
+    assert "20 intentos fallidos" in readme and "bloquean" in readme and "todos" in readme
 
 
 @pytest.mark.parametrize("valor", ["abc", "-1", "11", "1.5", "uno"])

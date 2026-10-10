@@ -27,8 +27,16 @@ MENSAJE_DEBUG_PUBLICO = (
     "Quita --debug / FLASK_DEBUG o escucha solo en 127.0.0.1."
 )
 MENSAJE_DEBUG_EN_SERVIDOR = (
-    "El modo debug está activo fuera de `flask run`: la SECRET_KEY es un valor público "
-    "fijo y cualquiera podría falsificar una sesión. No uses FLASK_DEBUG en un servidor."
+    "El modo debug de Flask está activo fuera de `flask run` (FLASK_DEBUG). Fuera de "
+    "`flask run` solo 0, false y no lo desactivan; «off» lo deja activo. No lo uses en un "
+    "servidor."
+)
+MENSAJE_DEBUG_SIN_CLAVE = (
+    "Me niego a servir: el modo debug está activo (FLASK_DEBUG) y no hay SECRET_KEY, así que "
+    "se usaría la clave pública de desarrollo (está en el código) y cualquiera podría "
+    "falsificar la sesión del profesional. La clave pública solo se admite bajo `flask run` en "
+    "un host local. Define SECRET_KEY o quita FLASK_DEBUG. Ojo: fuera de `flask run` solo 0, "
+    "false y no desactivan el debug; «off» lo deja activo."
 )
 # Versión de Unicode con la que se probó la política de caracteres del correo (T-03c R-12).
 UNICODE_PROBADO = (15, 1, 0)
@@ -209,7 +217,16 @@ def _preparar_secret_key(app):
     if isinstance(clave, str) and clave.strip():
         return  # clave válida: se respeta tal cual, sin modificarla
     # app.config["DEBUG"] ya refleja FLASK_DEBUG (lo fija `flask run --debug`).
-    if app.config.get("TESTING") or app.config.get("DEBUG"):
+    if app.config.get("TESTING"):
+        app.config["SECRET_KEY"] = SECRET_KEY_DESARROLLO
+        return
+    if app.config.get("DEBUG"):
+        # R-01 (D-047, ampliación): la clave pública solo se admite donde D-043 se cumple, es
+        # decir, bajo comandos de `flask` (`run`, que además exige host local, y los de
+        # mantenimiento, que no sirven). Sin contexto de click (gunicorn, uWSGI...) se serviría
+        # con ella: se niega.
+        if click.get_current_context(silent=True) is None:
+            raise RuntimeError(MENSAJE_DEBUG_SIN_CLAVE)
         app.config["SECRET_KEY"] = SECRET_KEY_DESARROLLO
         return
     app.config["SECRET_KEY"] = None  # ausente, vacía o solo espacios

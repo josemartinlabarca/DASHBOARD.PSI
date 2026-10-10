@@ -331,11 +331,47 @@ def cache_de_constructores_de_url():
         yield
 
 
+# --- Entorno hermético (T-14a ronda 2, R-03) ---------------------------------------
+# La suite no debe depender de las variables de entorno del equipo (el de despliegue tiene
+# SESSION_COOKIE_SECURE, TRUSTED_PROXY_COUNT, SECRET_KEY...). Se quitan al empezar cada prueba: la prueba que
+# necesite una la define con `monkeypatch.setenv`. `tests/test_entorno_hermetico.py` comprueba
+# que esta lista contiene todo lo que lee `app/`. Se conservan a propósito AGENDA_PSI_CSRF_TOKEN
+# y AGENDA_PSI_TMPFS (mandos de la propia suite) y TZ (la maneja `zona_del_sistema_fija`).
+VARIABLES_DE_ENTORNO_DE_LA_APP = (
+    "SECRET_KEY",
+    "DATABASE",
+    "OUTBOX_PATH",
+    "SESSION_COOKIE_SECURE",
+    "TRUSTED_PROXY_COUNT",
+    # Las lee Flask/Click, no `app/`, pero cambian el comportamiento de `create_app` y de
+    # `flask run`: debug, host, puerto, aplicación, archivos .env.
+    "FLASK_DEBUG",
+    "FLASK_APP",
+    "FLASK_ENV",
+    "FLASK_RUN_HOST",
+    "FLASK_RUN_PORT",
+    "FLASK_RUN_CERT",
+    "FLASK_RUN_KEY",
+    "FLASK_RUN_RELOAD",
+    "FLASK_RUN_DEBUGGER",
+    "FLASK_RUN_EXTRA_FILES",
+    "FLASK_RUN_EXCLUDE_PATTERNS",
+    "FLASK_RUN_WITH_THREADS",
+    "FLASK_SKIP_DOTENV",
+)
+
+
+def _variables_de_flask_presentes():
+    # Cualquier otra FLASK_* (p. ej. una futura) también se quita.
+    return [n for n in os.environ if n.startswith("FLASK_") and n not in VARIABLES_DE_ENTORNO_DE_LA_APP]
+
+
 @pytest.fixture(autouse=True)
-def sin_outbox_del_entorno(monkeypatch):
+def entorno_de_la_app_limpio(monkeypatch):
     # T-09: si el equipo tiene OUTBOX_PATH definida, ninguna prueba debe escribir allí;
     # sin ella, `outbox.log` queda junto a la base de la prueba (en su carpeta temporal).
-    monkeypatch.delenv("OUTBOX_PATH", raising=False)
+    for nombre in (*VARIABLES_DE_ENTORNO_DE_LA_APP, *_variables_de_flask_presentes()):
+        monkeypatch.delenv(nombre, raising=False)
 
 
 @pytest.fixture

@@ -90,3 +90,21 @@ def test_post_a_ruta_inexistente_da_400_no_404(client):
     """El CSRF corre antes del enrutamiento (D-009)."""
     assert client.post("/no-existe").status_code == 400
     assert client.get("/no-existe").status_code == 404
+
+
+def test_el_token_csrf_en_la_url_no_es_un_canal_valido(app):
+    """T-14a R-07 (D-046): solo el campo del formulario. En la URL el token acabaría en logs y en Referer."""
+
+    @app.route("/ruta-futura", methods=["POST", "PUT", "DELETE"])
+    def ruta_futura():
+        return "ok"
+
+    client = app.test_client()
+    token = extraer_token(client.get("/registro").text)
+    for metodo in (client.post, client.put, client.delete):
+        assert metodo(f"/ruta-futura?csrf_token={token}").status_code == 400
+        assert metodo(f"/ruta-futura?csrf_token={token}", data={"otro": "x"}).status_code == 400
+    # Control: el mismo token en el formulario sí vale (la prueba no pasa por rechazar todo).
+    assert client.post("/ruta-futura", data={"csrf_token": token}).status_code == 200
+    # Y el de la URL no sustituye a uno inválido del formulario.
+    assert client.post(f"/ruta-futura?csrf_token={token}", data={"csrf_token": "0" * 64}).status_code == 400

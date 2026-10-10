@@ -9,7 +9,7 @@ Referrer-Policy; T-14a).
 import hmac
 import secrets
 
-from flask import abort, request, session
+from flask import abort, current_app, request, session
 
 CLAVE_SESION = "csrf_token"
 CAMPO_FORMULARIO = "csrf_token"
@@ -91,9 +91,31 @@ def agregar_cabeceras_de_seguridad(respuesta):
     return respuesta
 
 
+MENSAJE_PROXY_SIN_CONFIGURAR = (
+    "Llegó una petición con X-Forwarded-For o X-Real-IP, pero TRUSTED_PROXY_COUNT no está "
+    "configurada: la aplicación ignora esas cabeceras y el límite de intentos ve a todos los "
+    "clientes como la dirección del proxy ({remota}). Si hay un proxy propio delante, define "
+    "TRUSTED_PROXY_COUNT (por ejemplo 1); mientras no, 20 intentos fallidos de cualquiera "
+    "bloquean el acceso de todos durante 15 minutos."
+)
+_aviso_de_proxy = {"dado": False}  # una vez por proceso (R-02)
+
+
+def avisar_si_hay_proxy_sin_configurar():
+    """Avisa en el log, una sola vez por proceso, si hay cabeceras de proxy y `TRUSTED_PROXY_COUNT` es 0."""
+    if _aviso_de_proxy["dado"] or current_app.config.get("TRUSTED_PROXY_COUNT"):
+        return
+    if "X-Forwarded-For" in request.headers or "X-Real-IP" in request.headers:
+        _aviso_de_proxy["dado"] = True
+        current_app.logger.warning(
+            MENSAJE_PROXY_SIN_CONFIGURAR.format(remota=request.remote_addr or "desconocida")
+        )
+
+
 def init_app(app):
     # Debe registrarse después de la exigencia de SECRET_KEY (D-008), que así
     # se ejecuta primero: sin clave no hay sesión que firmar.
+    app.before_request(avisar_si_hay_proxy_sin_configurar)
     app.before_request(verificar_csrf)
     app.after_request(no_almacenar_paginas_de_sesion)
     app.after_request(agregar_cabeceras_de_seguridad)

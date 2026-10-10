@@ -8,7 +8,13 @@ import time
 import click
 import pytest
 
-from app import MENSAJE_SIN_SECRET_KEY, create_app
+from app import (
+    MENSAJE_DEBUG_EN_SERVIDOR,
+    MENSAJE_DEBUG_SIN_CLAVE,
+    MENSAJE_SIN_SECRET_KEY,
+    SECRET_KEY_DESARROLLO,
+    create_app,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -90,11 +96,79 @@ def test_con_secret_key_funciona_sin_testing_ni_debug(tmp_path, monkeypatch):
     assert not app.debug and not app.testing
 
 
-def test_flask_debug_funciona_sin_secret_key(tmp_path, monkeypatch):
+def _comando(nombre):
+    return click.Context(click.Command(nombre), info_name=nombre)
+
+
+@pytest.mark.parametrize("comando", ["run", "init-db", "create-professional", "send-reminders"])
+def test_flask_debug_funciona_sin_secret_key_bajo_comandos_de_flask(tmp_path, monkeypatch, comando):
+    """`flask run --debug` en local (D-043) y los comandos de mantenimiento (D-008) siguen igual."""
     monkeypatch.setenv("FLASK_DEBUG", "1")
-    app = create_app(_config(tmp_path))
+    with _comando(comando):
+        app = create_app(_config(tmp_path))
     assert app.debug
-    assert app.config["SECRET_KEY"]
+    assert app.config["SECRET_KEY"] == SECRET_KEY_DESARROLLO
+
+
+@pytest.mark.parametrize("valor", ["1", "true", "yes", "on", "off", "OFF", "x"])
+@pytest.mark.parametrize("clave", [None, "", "   "])
+def test_r01_servidor_wsgi_con_debug_y_sin_secret_key_se_niega_a_servir(tmp_path, monkeypatch, valor, clave):
+    """R-01: sin contexto de click (gunicorn, uWSGI) la clave pública de desarrollo no se usa.
+
+    `off` cuenta como debug fuera de `flask run`; antes la app servía con la clave pública y
+    una cookie forjada daba acceso al profesional.
+    """
+    monkeypatch.setenv("FLASK_DEBUG", valor)
+    if clave is not None:
+        monkeypatch.setenv("SECRET_KEY", clave)
+    with pytest.raises(RuntimeError) as error:
+        create_app(_config(tmp_path))
+    mensaje = str(error.value)
+    assert mensaje == MENSAJE_DEBUG_SIN_CLAVE
+    assert "SECRET_KEY" in mensaje and "FLASK_DEBUG" in mensaje and "off" in mensaje
+
+
+def test_r01_tambien_con_debug_pedido_por_configuracion(tmp_path):
+    with pytest.raises(RuntimeError, match="Me niego a servir"):
+        create_app(_config(tmp_path, DEBUG=True))
+
+
+@pytest.mark.parametrize("valor", ["0", "false", "no"])
+def test_r01_con_debug_apagado_sigue_la_regla_de_siempre(tmp_path, monkeypatch, valor):
+    """Sin debug la app se crea (D-008) y falla cerrada en cada petición."""
+    monkeypatch.setenv("FLASK_DEBUG", valor)
+    app = create_app(_config(tmp_path))
+    assert not app.debug and app.config["SECRET_KEY"] is None
+
+
+def test_r01_con_clave_propia_y_debug_fuera_de_flask_run_solo_avisa_y_sin_mentir(tmp_path, monkeypatch, caplog):
+    monkeypatch.setenv("FLASK_DEBUG", "off")
+    monkeypatch.setenv("SECRET_KEY", "una-clave-propia-larga")
+    with caplog.at_level(logging.WARNING):
+        app = create_app(_config(tmp_path))
+    assert app.debug and app.config["SECRET_KEY"] == "una-clave-propia-larga"
+    avisos = [r.getMessage() for r in caplog.records if r.getMessage() == MENSAJE_DEBUG_EN_SERVIDOR]
+    assert len(avisos) == 1
+    # Con clave propia la clave NO es pública: el aviso no debe decirlo.
+    assert "públic" not in avisos[0] and "falsific" not in avisos[0]
+
+
+def test_r01_la_cookie_forjada_con_la_clave_publica_ya_no_entra(tmp_path, monkeypatch):
+    """Reproducción de R-01 como prueba: con la clave pública no hay app que sirva."""
+    monkeypatch.setenv("FLASK_DEBUG", "off")
+    with pytest.raises(RuntimeError):
+        create_app(_config(tmp_path))
+    # Y bajo `flask run` en local sí se crea, pero con otra clave la cookie forjada no vale.
+    with _comando("run"):
+        app = create_app(_config(tmp_path, SECRET_KEY="clave-real-larga"))
+    from flask.sessions import SecureCookieSessionInterface
+
+    forjada = SecureCookieSessionInterface().get_signing_serializer(
+        create_app(_config(tmp_path, TESTING=True))  # clave pública de desarrollo
+    ).dumps({"usuario_id": 1, "sesion_version": 0})
+    cliente = app.test_client()
+    cliente.set_cookie("session", forjada)
+    assert cliente.get("/profesional").status_code in (302, 403)
 
 
 # --- T-02d #3: la exigencia de SECRET_KEY cubre todo tipo de ruta ---------------

@@ -100,8 +100,12 @@ y `create-professional` no lo muestran.
 > Click lee `FLASK_DEBUG` como booleano (`0`, `false`, `no` y `off` lo apagan; un
 > valor que no es booleano, como `banana`, da error); en cambio, con gunicorn u otro
 > servidor, `Flask` solo trata `0`, `false` y `no` como falso y **`off` cuenta como
-> verdadero**. Fuera de `flask run` el host no se conoce, así que ahí solo se avisa en
-> el log.
+> verdadero**. Por eso, **fuera de `flask run` (gunicorn, uWSGI...) con debug activo y
+> sin `SECRET_KEY` la aplicación no se crea**: falla con «Me niego a servir…» en vez de
+> usar la clave pública (D-047, ampliación de la ronda 2). Con una `SECRET_KEY` propia
+> solo avisa en el log (el host no se conoce ahí). Los comandos de mantenimiento
+> (`init-db`, `create-professional`, `send-reminders`) siguen funcionando sin
+> `SECRET_KEY`, incluso con `FLASK_DEBUG` definida.
 
 ### Crear la cuenta del profesional
 
@@ -131,13 +135,19 @@ La cookie de sesión es `HttpOnly` y `SameSite=Lax`. Con HTTPS, actívale `Secur
 
 | Variable | Valores | Efecto |
 |---|---|---|
-| `SESSION_COOKIE_SECURE` | `1`, `true`, `yes`, `on`, `si` activan; `0`, `false`, `no`, `off` o vacía desactivan (sin importar mayúsculas) | La cookie solo viaja por HTTPS. Otro valor (`maybe`, `2`...) **aborta el arranque** con un mensaje: no se interpreta en silencio como falso. |
+| `SESSION_COOKIE_SECURE` | `1`, `true`, `yes`, `on`, `si`, `sí` activan; `0`, `false`, `no`, `off` o vacía desactivan (sin importar mayúsculas) | La cookie solo viaja por HTTPS. Otro valor (`maybe`, `2`...) **aborta el arranque** con un mensaje: no se interpreta en silencio como falso. |
 | `TRUSTED_PROXY_COUNT` | entero 0 a 10 (por defecto `0`) | Cuántos proxies **propios** hay delante de la app. Con `1`, la dirección del cliente es la última de `X-Forwarded-For`; lo que el cliente antepone no cuenta. Con `0` la cabecera se ignora. |
 
 Desactivada por defecto para poder probar en `http://localhost`. Si se sirve la app
 (`flask run` sin debug, gunicorn...) sin ella, el log avisa al arrancar. Si la app está
-detrás de un proxy, configura `TRUSTED_PROXY_COUNT`: sin él, el límite de intentos
-(abajo) vería a todos los clientes como la dirección del proxy.
+detrás de un proxy, **configura `TRUSTED_PROXY_COUNT`**. Consecuencia de no hacerlo: la
+aplicación ignora `X-Forwarded-For`/`X-Real-IP` y el límite de intentos (abajo) ve a todos
+los clientes como la dirección del proxy, así que **20 intentos fallidos de cualquiera
+bloquean el acceso de todos, incluido el profesional con su contraseña correcta, durante
+15 minutos**, y un atacante lo sostiene con 20 peticiones cada 15 minutos. Si llegan esas
+cabeceras sin la variable, el log lo avisa una vez por proceso. Al revés, un valor mayor
+que los proxies reales deja a un cliente falsificar su dirección: usa exactamente la
+cantidad de proxies propios (el proxy debe sobrescribir `X-Forwarded-For`, no solo añadirle).
 
 ### Límite de intentos de login y registro
 

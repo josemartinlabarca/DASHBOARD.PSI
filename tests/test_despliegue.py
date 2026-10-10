@@ -335,3 +335,45 @@ def test_flask_run_real_con_un_flask_debug_que_no_es_booleano_ni_arranca(tmp_pat
     finally:
         _terminar(proceso)
     assert proceso.returncode == 2 and "Running on" not in error + salida
+
+
+# ------------------------------- R-01 con procesos reales (servidor WSGI sin contexto de click)
+
+
+def _python(codigo, tmp_path, **entorno):
+    return subprocess.run(
+        [sys.executable, "-c", codigo], env=_entorno(tmp_path, **entorno),
+        capture_output=True, text=True, timeout=60, cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+
+
+@pytest.mark.parametrize("debug", ["1", "off"])
+def test_r01_proceso_wsgi_con_debug_y_sin_clave_no_crea_la_app(tmp_path, debug):
+    """Como `gunicorn 'app:create_app()'`: proceso sin click, FLASK_DEBUG activo (incluido `off`), sin SECRET_KEY."""
+    r = _python("from app import create_app; create_app()", tmp_path, FLASK_DEBUG=debug)
+    assert r.returncode != 0
+    assert "RuntimeError: Me niego a servir" in r.stderr and "SECRET_KEY" in r.stderr
+
+
+def test_r01_proceso_wsgi_con_clave_propia_crea_la_app(tmp_path):
+    r = _python("from app import create_app; a = create_app(); print(a.config['SECRET_KEY'])", tmp_path,
+                FLASK_DEBUG="off", SECRET_KEY=CLAVE_VALIDA)
+    assert r.returncode == 0 and CLAVE_VALIDA in r.stdout
+
+
+@pytest.mark.parametrize("debug", ["1", "off"])
+@pytest.mark.parametrize("comando", [["init-db"], ["send-reminders"]])
+def test_r01_los_comandos_de_mantenimiento_funcionan_con_debug_y_sin_clave(tmp_path, debug, comando):
+    """D-008: sin SECRET_KEY, con FLASK_DEBUG definida, los comandos CLI siguen funcionando."""
+    if comando != ["init-db"]:
+        assert _flask_cli(tmp_path, ["init-db"], debug).returncode == 0
+    r = _flask_cli(tmp_path, comando, debug)
+    assert r.returncode == 0, r.stderr
+
+
+def _flask_cli(tmp_path, comando, debug):
+    return subprocess.run(
+        [sys.executable, "-m", "flask", "--app", "app", *comando], env=_entorno(tmp_path, FLASK_DEBUG=debug),
+        capture_output=True, text=True, timeout=60,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
