@@ -305,6 +305,12 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 - **Qué:** (1) marcar D-048, D-050, D-051, D-052 y D-054 como resueltas por el humano (2026-10-10, ~13:10) sin borrar su texto; (2) B1: U+13441 y U+13442 a `RELLENOS_RECHAZADOS`; (3) C2: login tolerante (`correo.normalizar_email_login`), con el registro igual de estricto y fallos idénticos con un solo hash; (4) agregar a `ARCHITECTURE.md` solo lo pendiente (D-052 / T-13 R-08) y cambiar «Python 3.11+» en `CLAUDE.md`; (5) ver D-055.
 - **Término:** suite verde 3 veces, pruebas que fallan sin el cambio, nombres de `ARCHITECTURE.md` comprobados con `grep`.
 
+### T-16b — Clave del límite con la normalización de la búsqueda (S3 de la revisión de T-16)
+- **Estado:** IMPLEMENTADA, pendiente de verificación (2026-10-10 13:22).
+- **Depende de:** T-16
+- **Qué:** la clave de `par`/`correo` usa `normalizar_email_login`, acotada a `EMAIL_MAX`, normalizada una sola vez por petición; ver D-056. Sin cambios de esquema ni de topes.
+- **Término:** suite verde 3 veces; pruebas de cuenta legacy, variantes y clave sobredimensionada que fallan sin el arreglo.
+
 ---
 
 ## Backlog de baja prioridad (no bloquea nada; recoger cuando se toque la zona)

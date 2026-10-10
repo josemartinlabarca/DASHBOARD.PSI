@@ -571,6 +571,15 @@ Autorizas a que se modifique `ARCHITECTURE.md` (que `CLAUDE.md` reserva al human
 - **Alternativas descartadas:** relajar `normalizar_email` con un parámetro (mezcla dos políticas en una función); usar la tolerante también en la clave del límite (ver arriba).
 - **Archivos:** sin archivos nuevos fuera de las pruebas agregadas a `tests/test_correo.py` y `tests/test_login.py`; sin dependencias ni cambios de esquema. `SPEC.md` no se tocó.
 
+## D-056 — La clave del límite usa la misma normalización que la búsqueda de la cuenta (T-16b, hallazgo S3 de la revisión de T-16)
+- **Fecha:** 2026-10-10 13:22
+- **Decisión:** la clave de `par` y `correo` (D-045) se saca de `correo.normalizar_email_login`, la misma que busca la cuenta (D-048 C2). El login la calcula UNA vez por petición y la reutiliza para la clave y para la búsqueda (`buscar_usuario_por_credenciales(..., email_login)`). Si el resultado es vacío, no es `str` o supera `EMAIL_MAX` (254), la clave es `""` y solo cuenta la IP. Sin cambios de esquema ni de topes (par 5, ip 20, correo 30, ventana 15 min).
+- **Por qué:** con la clave estricta, una cuenta guardada con un carácter hoy rechazado (p. ej. `m·ia@x.cl`) quedaba solo con el tope por IP: la revisión midió 276 fallos aceptados con 300 IPs. D-055 lo había dejado así por una prueba, no por una razón de seguridad.
+- **Cambio de la prueba `test_un_correo_inaceptable_solo_cuenta_para_la_direccion`:** fijaba que todo correo «inaceptable» solo cuenta para la IP. Sigue siendo cierto para la basura realmente inutilizable (vacío, no-str, sustituto suelto, más largo que `EMAIL_MAX`), cubierta por `test_una_basura_inutilizable_solo_cuenta_para_la_direccion` y `test_clave_de_correo_*`. Lo que cambia es el caso «carácter hoy rechazado pero con forma de correo»: ahora cuenta por par y correo, porque es una cuenta que puede existir y debe estar protegida. Un correo con espacio interno o ancho cero (que no coincide con ninguna cuenta) también genera clave.
+- **Riesgo aceptado:** un atacante puede crear claves nuevas variando el correo, pero cada intento ya cuenta en el tope por IP (20 por /64), la clave mide como máximo 254 caracteres y la entrada está acotada por `MAX_CONTENT_LENGTH` (16 KiB); las filas vencidas se limpian (D-050).
+- **Alternativas descartadas:** dejarlo y auditar con SQL si existen cuentas legacy (no hay forma de saberlo en cada instalación); dar clave solo si existe la cuenta (revelaría por tiempo/conteo si existe, D-010).
+- **Archivos:** `app/auth.py`, `tests/test_limite.py`. Sin archivos nuevos.
+
 ## Plantilla para nuevas decisiones
 
 ```

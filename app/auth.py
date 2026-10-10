@@ -206,17 +206,17 @@ def _respuesta_de_limite(plantilla, problema, **contexto):
     return cuerpo, estado, {"Retry-After": str(espera)}
 
 
-def _correo_para_limite(email_bruto):
-    """Correo normalizado para la clave del límite, o `""` si no es aceptable (solo cuenta la IP).
+def _correo_para_limite(email_login):
+    """Clave de correo del límite a partir del correo YA normalizado con `normalizar_email_login`.
 
-    Sigue siendo la normalización ESTRICTA (D-048 C2 solo cambia la búsqueda de la cuenta): así
-    un correo con caracteres raros no crea claves nuevas en `intentos_acceso`.
+    Es la misma normalización con que se busca la cuenta (D-056): variantes del mismo correo y
+    cuentas guardadas con un carácter hoy rechazado cuentan en los topes de par y de correo.
+    Vacío, más largo que `EMAIL_MAX` o no-str dan `""` y solo cuenta la IP (así nadie crea claves
+    enormes en `intentos_acceso`).
     """
-    try:
-        email = normalizar_email(email_bruto)
-    except ValueError:
+    if not isinstance(email_login, str) or not email_login or len(email_login) > EMAIL_MAX:
         return ""
-    return email if len(email) <= EMAIL_MAX else ""
+    return email_login
 
 
 # ---------------------------------------------------------------- login ----
@@ -262,7 +262,7 @@ def hash_falso():
     return current_app.extensions["hash_falso"].obtener()
 
 
-def buscar_usuario_por_credenciales(email_bruto, password):
+def buscar_usuario_por_credenciales(email_bruto, password, email_login=None):
     """Devuelve la fila del usuario si las credenciales son correctas; si no, `None`.
 
     Siempre se ejecuta exactamente un `check_password_hash`, exista o no el
@@ -273,7 +273,8 @@ def buscar_usuario_por_credenciales(email_bruto, password):
     """
     # D-048 C2: el login no aplica la política de caracteres (solo el registro); un correo con
     # espacios internos o ancho cero simplemente no coincide con ninguna cuenta.
-    email = normalizar_email_login(email_bruto)
+    # `email_login` permite reutilizar la normalización ya hecha por la petición (una sola vez).
+    email = normalizar_email_login(email_bruto) if email_login is None else email_login
     fila = None
     if email and len(email) <= EMAIL_MAX:
         fila = get_db().execute(
@@ -326,7 +327,8 @@ def login():
 
     email_bruto = request.form.get("email", "")
     password = request.form.get("password", "")  # sin recortar
-    email_limite = _correo_para_limite(email_bruto)
+    email_login = normalizar_email_login(email_bruto)  # una sola vez: sirve al límite y a la búsqueda
+    email_limite = _correo_para_limite(email_login)
     # D-045: el intento se anota ANTES de verificar la contraseña (así dos peticiones a la
     # vez no se cuelan) y un acierto lo devuelve. Un bloqueo rechaza sin pagar el scrypt y
     # sin mirar si la cuenta existe, así que es idéntico para un correo real y uno inventado.
@@ -334,7 +336,7 @@ def login():
         anotados = limite.reservar("login", email_limite)
     except (limite.Bloqueado, limite.BaseOcupada) as problema:
         return _respuesta_de_limite("login.html", problema, email=email_bruto.strip())
-    usuario = buscar_usuario_por_credenciales(email_bruto, password)
+    usuario = buscar_usuario_por_credenciales(email_bruto, password, email_login)
     if usuario is not None:
         limite.absolver("login", anotados, email_limite)
         # T-08d R-04: la contraseña tarda en verificarse (scrypt); un cierre de sesión en otro
