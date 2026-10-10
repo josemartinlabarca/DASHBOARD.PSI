@@ -860,3 +860,39 @@ def test_el_convertidor_de_ids_rechaza_lo_que_no_es_un_entero_canonico_de_sqlite
     with pytest.raises(ValidationError):
         convertidor.to_python(str(ID_MAX + 1))
     assert convertidor.to_url(5) == "5"
+
+
+@pytest.mark.parametrize("metodo", ["get", "post"])
+@pytest.mark.parametrize("accion", ["/horas/{}/reservar", "/horas/{}/cancelar"])
+@pytest.mark.parametrize("numero", [2**63, 2**63 + 1, 93 * 10**17, 10**19, 10**30])
+def test_un_id_sobre_el_maximo_de_sqlite_es_404_con_cualquier_metodo(app, ana, metodo, accion, numero):
+    """T-14c (f), T-14b R-10: antes el GET daba 405 (la ruta «existía» para otro método)."""
+    token = extraer_token(ana.get("/paciente").text)
+    ruta = accion.format(numero)
+    r = ana.get(ruta) if metodo == "get" else ana.post(ruta, data={"csrf_token": token})
+    assert r.status_code == 404, (ruta, r.status_code)
+
+
+def test_el_id_maximo_si_es_una_ruta_y_un_id_valido_sigue_dando_405_en_get(app, ana):
+    from app.db import ID_MAX
+
+    token = extraer_token(ana.get("/paciente").text)
+    assert ana.get(f"/horas/{ID_MAX}/reservar").status_code == 405  # la ruta existe: solo POST
+    assert ana.get("/horas/1/reservar").status_code == 405
+    r = ana.post(f"/horas/{ID_MAX}/reservar", data={"csrf_token": token})
+    assert r.status_code == 302  # «esa hora ya no está disponible»
+    assert ana.post(f"/horas/{ID_MAX + 1}/reservar", data={"csrf_token": token}).status_code == 404
+
+
+def test_la_expresion_de_ids_coincide_exactamente_con_1_a_el_maximo():
+    import random
+    import re as _re
+
+    from app.db import ID_MAX, regex_de_ids_hasta
+
+    for maximo in (1, 9, 10, 57, 100, 1234, ID_MAX):
+        patron = _re.compile(regex_de_ids_hasta(maximo))
+        casos = set(range(0, min(3 * maximo, 3000))) | {maximo - 1, maximo, maximo + 1, maximo * 10, 10 ** len(str(maximo))}
+        casos |= {random.randrange(0, 2**64) for _ in range(300)} if maximo == ID_MAX else set()
+        for n in casos:
+            assert (patron.fullmatch(str(n)) is not None) == (1 <= n <= maximo), (maximo, n)

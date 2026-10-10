@@ -660,6 +660,69 @@ def test_la_carpeta_que_crea_la_aplicacion_es_solo_del_dueno(app, tmp_path):
 
 
 @posix
+def test_todas_las_carpetas_que_crea_la_aplicacion_son_0700_y_las_que_existian_no_se_tocan(app, tmp_path):
+    """T-14c (f), T-14b R-08: `os.makedirs(mode=...)` solo aplicaba el modo a la última carpeta."""
+    existente = tmp_path / "existente"
+    existente.mkdir()
+    os.chmod(existente, 0o755)
+    app.config["OUTBOX_PATH"] = str(existente / "a" / "b" / "c" / "outbox.log")
+    anterior = os.umask(0)
+    try:
+        assert _escribir(app)
+    finally:
+        os.umask(anterior)
+    for parte in ("a", "a/b", "a/b/c"):
+        assert _modo(existente / parte) == 0o700, parte
+    assert _modo(existente) == 0o755  # la que ya estaba, intacta
+    assert _modo(existente / "a" / "b" / "c" / "outbox.log") == 0o600
+    assert _escribir(app)  # con todo creado vuelve a funcionar
+
+
+@posix
+def test_una_carpeta_intermedia_que_es_un_archivo_se_informa_sin_romper(app, tmp_path, caplog):
+    (tmp_path / "archivo").write_text("x")
+    app.config["OUTBOX_PATH"] = str(tmp_path / "archivo" / "sub" / "outbox.log")
+    with caplog.at_level("ERROR"):
+        assert _escribir(app) is False
+    assert any("No se pudo escribir en el outbox" in m for m in caplog.messages)
+
+
+@posix
+def test_un_fifo_sin_lector_no_bloquea_la_peticion(app, tmp_path, caplog):
+    """T-14c (f), T-14b R-08: `open` de un FIFO sin lector espera para siempre salvo con O_NONBLOCK."""
+    import threading
+
+    fifo = tmp_path / "tuberia"
+    os.mkfifo(fifo)
+    app.config["OUTBOX_PATH"] = str(fifo)
+    resultado = []
+    hilo = threading.Thread(target=lambda: resultado.append(_escribir(app)), daemon=True)
+    with caplog.at_level("ERROR"):
+        hilo.start()
+        hilo.join(5)
+    if hilo.is_alive():  # el código bloquea: se libera el hilo abriendo el otro extremo y se falla
+        lector = os.open(fifo, os.O_RDONLY | os.O_NONBLOCK)
+        hilo.join(5)
+        os.close(lector)
+        pytest.fail("escribir_outbox se quedó esperando un lector en el FIFO")
+    assert resultado == [False]
+    assert any("No se pudo escribir en el outbox" in m for m in caplog.messages)
+
+
+@posix
+def test_un_fifo_con_lector_recibe_las_lineas(app, tmp_path):
+    fifo = tmp_path / "tuberia"
+    os.mkfifo(fifo)
+    app.config["OUTBOX_PATH"] = str(fifo)
+    lector = os.open(fifo, os.O_RDONLY | os.O_NONBLOCK)
+    try:
+        assert _escribir(app, _aviso("por la tubería"))
+        assert "por la tubería" in os.read(lector, 4096).decode("utf-8")
+    finally:
+        os.close(lector)
+
+
+@posix
 def test_un_outbox_que_ya_existia_con_permisos_amplios_no_se_cambia_pero_se_avisa_una_vez(app, tmp_path, caplog):
     ruta = tmp_path / "viejo.log"
     ruta.write_text("linea anterior\n")

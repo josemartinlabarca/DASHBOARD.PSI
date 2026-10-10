@@ -5,9 +5,11 @@ y anota la versión del esquema en `PRAGMA user_version`; nunca borra ni reescri
 reconstruye una tabla existente. Lo que no puede arreglar sin reconstruir (restricciones nuevas
 de tablas antiguas) lo avisa, sin tocarlo. Detalle en D-050.
 """
+import contextlib
 import os
 import re
 import sqlite3
+from pathlib import Path
 
 import click
 from flask import current_app, g
@@ -60,6 +62,27 @@ def close_db(error=None):
         db.close()
 
 
+def regex_de_ids_hasta(maximo):
+    """Expresión regular de los enteros decimales de 1 a `maximo`, sin ceros a la izquierda.
+
+    Sin grupos de captura (Werkzeug la envuelve en uno propio). Se construye cifra a cifra: los
+    números con menos cifras que `maximo`, y los de igual largo que se separan de `maximo` en la
+    primera cifra menor, más `maximo` mismo. Así un id mayor al máximo ni siquiera coincide con la
+    ruta (404 para cualquier método) y no hace falta rechazarlo después (T-14b R-10: la validación
+    en `to_python` dejaba el GET de una ruta solo-POST en 405).
+    """
+    cifras = str(maximo)
+    alternativas = [rf"[1-9][0-9]{{0,{len(cifras) - 2}}}"] if len(cifras) > 1 else []
+    for i, cifra in enumerate(cifras):
+        minima = "1" if i == 0 else "0"
+        if cifra > minima:
+            alternativas.append(
+                f"{cifras[:i]}[{minima}-{int(cifra) - 1}][0-9]{{{len(cifras) - i - 1}}}"
+            )
+    alternativas.append(cifras)
+    return "|".join(alternativas)
+
+
 class ConvertidorId(BaseConverter):
     """Id de ruta: solo dígitos ASCII, sin ceros a la izquierda, de 1 a `ID_MAX` (T-05 R-06).
 
@@ -68,11 +91,11 @@ class ConvertidorId(BaseConverter):
     distintas llegaban a la misma hora. Aquí cada hora tiene UNA dirección; el resto es 404.
     """
 
-    regex = r"[1-9][0-9]{0,18}"
+    regex = regex_de_ids_hasta(ID_MAX)
 
     def to_python(self, valor):
         numero = int(valor)
-        if numero > ID_MAX:
+        if numero > ID_MAX:  # no debería ocurrir: la expresión ya lo excluye
             raise ValidationError()
         return numero
 
@@ -136,6 +159,7 @@ class Informe:
 
     def __init__(self):
         self.base_nueva = False
+        self.sin_cambios = False  # base de una versión más nueva: no se tocó
         self.acciones = []
         self.avisos = []
 
@@ -212,16 +236,66 @@ MENSAJE_TABLA_ANTIGUA = (
     "protecciones. init-db no reconstruye tablas existentes (D-006). Si no necesitas sus datos, "
     "borra el archivo de la base y vuelve a ejecutar init-db (ver README)."
 )
+# T-14c (a), R-01 de la revisión de T-14b: la FK `notificaciones.hora_id` sin `ON DELETE SET NULL`
+# (D-016) NO es inocua: eliminar una hora libre que tuvo avisos (reservar -> cancelar -> eliminar)
+# falla. `init-db` no puede arreglarla sin reconstruir la tabla (D-006), así que da el
+# procedimiento. Lo ve cada vez que se ejecuta `init-db`, también con `user_version` ya anotado.
+MENSAJE_FK_SIN_SET_NULL = (
+    "La tabla notificaciones es de un esquema anterior a D-016: su clave foránea hora_id no tiene "
+    "ON DELETE SET NULL. Consecuencia: el profesional NO podrá eliminar una hora que alguna vez "
+    "tuvo avisos (por ejemplo una reserva que se canceló): la aplicación responderá con un "
+    "mensaje de error y la hora seguirá en la agenda. Reservar, cancelar y el resto funcionan, y no "
+    "se perderá ningún dato. init-db no reconstruye tablas, así que no cambió nada. Para corregirlo: "
+    "1) detén el servidor y guarda una copia: cp {ruta} {ruta}.respaldo ; 2) si es una base de "
+    "práctica y no necesitas sus datos, borra {ruta} y vuelve a ejecutar «flask --app app "
+    "init-db» (se pierden usuarios, horas y avisos); 3) si necesitas los datos, déjala como está y "
+    "evita eliminar horas que ya tuvieron reservas hasta que se decida cómo reconstruir la tabla "
+    "(ver README, «Bases creadas por versiones antiguas», y D-052)."
+)
+MENSAJE_FK_SIN_SET_NULL_LOG = (
+    "La base {ruta} tiene notificaciones.hora_id sin ON DELETE SET NULL (esquema anterior a "
+    "D-016): eliminar una hora que tuvo avisos fallará. Ejecuta `flask --app app init-db` para ver "
+    "el procedimiento (README, «Bases creadas por versiones antiguas»)."
+)
 MENSAJE_BASE_MAS_NUEVA = (
     "Esta base la preparó una versión más nueva de la aplicación (user_version {version}, esta "
-    "versión conoce {conocida}). No se cambió su número."
+    "versión conoce {conocida}). No se cambió nada: ni su número ni sus tablas ni sus índices."
 )
+
+
+def fk_de_avisos_sin_set_null(db):
+    """True si `notificaciones.hora_id` tiene una FK hacia `horas` SIN `ON DELETE SET NULL`.
+
+    Es el caso de las bases creadas con los esquemas `748f18e` y `cd9f209` (antes de T-02f/D-016).
+    `PRAGMA foreign_key_list` devuelve (id, seq, tabla, desde, hasta, on_update, on_delete, match).
+    Sin tabla, sin la columna o sin FK no hay nada que avisar (False): sin FK no hay error al borrar.
+    """
+    for fila in db.execute("PRAGMA foreign_key_list(notificaciones)"):
+        if fila[2] == "horas" and fila[3] == "hora_id":
+            return str(fila[6]).upper() != "SET NULL"
+    return False
+
+
+def _sentencias(texto):
+    """Las sentencias de un script SQL, una por una (`executescript` haría COMMIT por su cuenta)."""
+    pendiente = ""
+    for linea in texto.splitlines(keepends=True):
+        pendiente += linea
+        if sqlite3.complete_statement(pendiente):
+            yield pendiente.strip()
+            pendiente = ""
+    resto = "\n".join(l for l in pendiente.splitlines() if l.strip() and not l.strip().startswith("--"))
+    if resto.strip():
+        yield pendiente.strip()
 
 
 def inicializar(db):
     """Deja la base con todo lo que `schema.sql` define y que se puede agregar sin destruir nada.
 
-    Pasos, en una sola transacción (si algo falla no queda nada a medias):
+    TODO el estado se lee y se decide DENTRO de `BEGIN IMMEDIATE` (T-14b R-02: dos `init-db`
+    simultáneos decidían con datos viejos y el segundo repetía el `ALTER TABLE`). Pasos, en una sola
+    transacción (si algo falla no queda nada a medias):
+    0. Si la base es de una versión MÁS NUEVA (`user_version` mayor y con tablas), no toca nada: avisa.
     1. Si hay más de un profesional, se detiene SIN cambiar nada (`ClickException`): el índice
        `un_solo_profesional` no se puede crear y seguir sería dejar una base a medias.
     2. Si `usuarios` existe sin `sesion_version`, la agrega (`ALTER TABLE ... ADD COLUMN`, con valor
@@ -232,24 +306,31 @@ def inicializar(db):
     (no las toca). Devuelve un `Informe`.
     """
     informe = Informe()
-    tablas_antes, indices_antes = _tablas(db), _indices(db)
-    informe.base_nueva = not tablas_antes
-    texto = _texto_del_esquema()
-    if "usuarios" in tablas_antes:
-        cantidad = _profesionales_de_mas(db)
-        if cantidad > 1:
-            raise click.ClickException(MENSAJE_DOS_PROFESIONALES.format(cantidad=cantidad))
-    version = version_esquema(db)
-    pasos = ["BEGIN IMMEDIATE;"]
-    if "usuarios" in tablas_antes and "sesion_version" not in _columnas(db, "usuarios"):
-        pasos.append("ALTER TABLE usuarios ADD COLUMN sesion_version INTEGER NOT NULL DEFAULT 0;")
-        informe.acciones.append("se agregó la columna usuarios.sesion_version")
-    pasos.append(texto)
-    if version < VERSION_ESQUEMA:
-        pasos.append(f"PRAGMA user_version = {int(VERSION_ESQUEMA)};")
-    pasos.append("COMMIT;")
+    db.execute("BEGIN IMMEDIATE")
     try:
-        db.executescript("\n".join(pasos))
+        tablas_antes, indices_antes = _tablas(db), _indices(db)
+        informe.base_nueva = not tablas_antes
+        version = version_esquema(db)
+        if tablas_antes and version > VERSION_ESQUEMA:
+            db.rollback()
+            informe.sin_cambios = True
+            informe.avisos.append(
+                MENSAJE_BASE_MAS_NUEVA.format(version=version, conocida=VERSION_ESQUEMA)
+            )
+            return informe
+        if "usuarios" in tablas_antes:
+            cantidad = _profesionales_de_mas(db)
+            if cantidad > 1:
+                raise click.ClickException(MENSAJE_DOS_PROFESIONALES.format(cantidad=cantidad))
+        texto = _texto_del_esquema()
+        if "usuarios" in tablas_antes and "sesion_version" not in _columnas(db, "usuarios"):
+            db.execute("ALTER TABLE usuarios ADD COLUMN sesion_version INTEGER NOT NULL DEFAULT 0")
+            informe.acciones.append("se agregó la columna usuarios.sesion_version")
+        for sentencia in _sentencias(texto):
+            db.execute(sentencia)
+        if version < VERSION_ESQUEMA:
+            db.execute(f"PRAGMA user_version = {int(VERSION_ESQUEMA)}")
+        db.commit()
     except BaseException:
         if db.in_transaction:
             db.rollback()
@@ -259,12 +340,15 @@ def inicializar(db):
             informe.acciones.append(f"se creó la tabla {tabla}")
         for indice in sorted(_indices(db) - indices_antes):
             informe.acciones.append(f"se creó el índice {indice}")
+        sin_set_null = fk_de_avisos_sin_set_null(db)
         for tabla in _tablas_distintas_del_esquema(db, texto):
+            if tabla == "notificaciones" and sin_set_null:
+                continue  # lo dice el aviso específico, que es el que importa
             informe.avisos.append(MENSAJE_TABLA_ANTIGUA.format(tabla=tabla))
-    if version > VERSION_ESQUEMA:
-        informe.avisos.append(
-            MENSAJE_BASE_MAS_NUEVA.format(version=version, conocida=VERSION_ESQUEMA)
-        )
+        if sin_set_null:
+            informe.avisos.append(
+                MENSAJE_FK_SIN_SET_NULL.format(ruta=current_app.config["DATABASE"])
+            )
     return informe
 
 
@@ -276,9 +360,19 @@ def init_db():
 @click.command("init-db")
 @with_appcontext
 def init_db_command():
-    """Crea las tablas de la base de datos o completa las que faltan (sin borrar datos)."""
-    informe = inicializar(get_db())
-    if informe.acciones:
+    """Crea las tablas de la base de datos o completa las que faltan (sin borrar datos).
+
+    Ante un problema con el archivo (no es SQLite, está dañado, es una carpeta, la carpeta no
+    existe, es de solo lectura, está bloqueado) responde con un mensaje en español, sin traza y
+    con código 1 (T-14c, R-03 de la revisión de T-14b).
+    """
+    ruta = current_app.config["DATABASE"]
+    comprobar_ruta(ruta, debe_existir=False)
+    with errores_de_sqlite_como_mensaje(ruta):
+        informe = inicializar(get_db())
+    if informe.sin_cambios:
+        click.echo("Base de datos sin cambios.")
+    elif informe.acciones:
         click.echo("Base de datos actualizada: " + "; ".join(informe.acciones) + ".")
     else:
         click.echo("Base de datos inicializada.")
@@ -309,6 +403,78 @@ MENSAJE_COMANDO_BASE_OCUPADA = (
 )
 
 
+MENSAJE_BASE_SOLO_LECTURA = (
+    "No se puede escribir en la base de datos {ruta}: es de solo lectura o está en un lugar sin "
+    "permiso de escritura. No se cambió nada. Revisa los permisos del archivo y de su carpeta "
+    "(el usuario que ejecuta el comando debe poder escribir en ambos)."
+)
+MENSAJE_BASE_DANADA = (
+    "La base de datos {ruta} está dañada ({error}). No se cambió nada. Restaura una copia de "
+    "respaldo del archivo (si no tienes una, guarda este archivo antes de intentar rescatarlo)."
+)
+MENSAJE_BASE_NO_SE_ABRE = (
+    "No se pudo abrir la base de datos {ruta} ({error}). Revisa que la carpeta exista y que tengas "
+    "permiso para usarla."
+)
+MENSAJE_BASE_ERROR = "Error de la base de datos: {error}"
+
+# Códigos primarios de SQLite (`sqlite3.SQLITE_*`; el código extendido se corta con `& 0xFF`).
+_READONLY, _CORRUPT, _NOTADB, _CANTOPEN = 8, 11, 26, 14
+
+
+def mensaje_de_error_sqlite(error, ruta):
+    """El texto en español, sin traza, para un `sqlite3.Error` ante un archivo de base inservible.
+
+    Usa el código de SQLite (`sqlite_errorcode`, Python 3.11+) y, si falta, el texto del error.
+    Cubre: base ocupada, solo lectura, no es SQLite, dañada y no se puede abrir; todo lo demás
+    se informa tal cual, también sin traza.
+    """
+    codigo = getattr(error, "sqlite_errorcode", None)
+    primario = None if codigo is None else codigo & 0xFF
+    texto = str(error).lower()
+    if esta_ocupada(error):
+        return MENSAJE_COMANDO_BASE_OCUPADA
+    if primario == _READONLY or "readonly" in texto:
+        return MENSAJE_BASE_SOLO_LECTURA.format(ruta=ruta)
+    if primario == _NOTADB or "not a database" in texto:
+        return MENSAJE_BASE_ILEGIBLE.format(ruta=ruta, error=error)
+    if primario == _CORRUPT or "malformed" in texto:
+        return MENSAJE_BASE_DANADA.format(ruta=ruta, error=error)
+    if primario == _CANTOPEN or "unable to open" in texto:
+        return MENSAJE_BASE_NO_SE_ABRE.format(ruta=ruta, error=error)
+    return MENSAJE_BASE_ERROR.format(error=error)
+
+
+@contextlib.contextmanager
+def errores_de_sqlite_como_mensaje(ruta):
+    """Dentro del bloque, un `sqlite3.Error` se vuelve `ClickException` (mensaje claro, código 1).
+
+    Un `IntegrityError` NO se traduce: es un fallo del programa (una restricción que el código debió
+    respetar), no del archivo, y se deja subir con su traza para no disfrazarlo.
+    """
+    try:
+        yield
+    except sqlite3.IntegrityError:
+        raise
+    except sqlite3.Error as error:
+        raise click.ClickException(mensaje_de_error_sqlite(error, ruta)) from error
+
+
+def comprobar_ruta(ruta, debe_existir):
+    """Falla con un mensaje claro si `ruta` es una carpeta o está en una carpeta inexistente.
+
+    Con `debe_existir` también falla si el archivo no existe (comandos que no deben crear la
+    base: `sqlite3.connect` crearía un archivo vacío ante un error de tipeo, T-10 R-01).
+    """
+    if os.path.isdir(ruta):
+        raise click.ClickException(MENSAJE_BASE_ES_CARPETA.format(ruta=ruta))
+    carpeta = os.path.dirname(os.path.abspath(ruta))
+    if not os.path.isdir(carpeta):
+        raise click.ClickException(MENSAJE_SIN_CARPETA.format(carpeta=carpeta, ruta=ruta))
+    if debe_existir and not os.path.isfile(ruta):
+        raise click.ClickException(MENSAJE_SIN_BASE.format(ruta=ruta))
+
+
 def abrir_base_existente():
     """Conexión a una base que YA existe y tiene sus tablas; si no, `ClickException` sin traza.
 
@@ -317,24 +483,51 @@ def abrir_base_existente():
     `DATABASE`. Aquí se comprueba el archivo ANTES de conectar (T-10 R-01).
     """
     ruta = current_app.config["DATABASE"]
-    if os.path.isdir(ruta):
-        raise click.ClickException(MENSAJE_BASE_ES_CARPETA.format(ruta=ruta))
-    if not os.path.isfile(ruta):
-        carpeta = os.path.dirname(os.path.abspath(ruta))
-        if not os.path.isdir(carpeta):
-            raise click.ClickException(MENSAJE_SIN_CARPETA.format(carpeta=carpeta, ruta=ruta))
-        raise click.ClickException(MENSAJE_SIN_BASE.format(ruta=ruta))
-    db = get_db()
-    try:
+    comprobar_ruta(ruta, debe_existir=True)
+    with errores_de_sqlite_como_mensaje(ruta):
+        db = get_db()
         presentes = _tablas(db)
-    except sqlite3.Error as error:
-        if esta_ocupada(error):
-            raise click.ClickException(MENSAJE_COMANDO_BASE_OCUPADA) from error
-        raise click.ClickException(MENSAJE_BASE_ILEGIBLE.format(ruta=ruta, error=error)) from error
     faltan = sorted(TABLAS_REQUERIDAS - presentes)
     if faltan:
         raise click.ClickException(MENSAJE_SIN_TABLAS.format(ruta=ruta, faltan=", ".join(faltan)))
     return db
+
+
+def comprobar_que_se_puede_escribir():
+    """Falla ya, con un mensaje claro, si la base está bloqueada o es de solo lectura.
+
+    `BEGIN IMMEDIATE` + `ROLLBACK` no cambia nada. Sirve para avisar ANTES de pedir una contraseña
+    (`create-professional`); la escritura real vuelve a manejar los mismos errores.
+    """
+    ruta = current_app.config["DATABASE"]
+    db = get_db()
+    with errores_de_sqlite_como_mensaje(ruta):
+        db.execute("BEGIN IMMEDIATE")
+        db.rollback()
+
+
+# ------------------------------------------- aviso al arrancar el servidor ----
+
+
+def avisar_si_la_base_es_antigua(app):
+    """Al servir, avisa en el log si `notificaciones.hora_id` no tiene `ON DELETE SET NULL`.
+
+    Abre la base SOLO LECTURA y nunca falla ni crea nada: sin archivo, sin tablas o con cualquier
+    error de SQLite no dice nada (ya lo dirán `init-db` y las páginas). Ver `fk_de_avisos_sin_set_null`.
+    """
+    ruta = app.config["DATABASE"]
+    try:
+        if not os.path.isfile(ruta):
+            return
+        conexion = sqlite3.connect(Path(os.path.abspath(ruta)).as_uri() + "?mode=ro", uri=True, timeout=0.5)
+        try:
+            sin_set_null = fk_de_avisos_sin_set_null(conexion)
+        finally:
+            conexion.close()
+    except (sqlite3.Error, OSError, ValueError):
+        return
+    if sin_set_null:
+        app.logger.warning(MENSAJE_FK_SIN_SET_NULL_LOG.format(ruta=ruta))
 
 
 def init_app(app):

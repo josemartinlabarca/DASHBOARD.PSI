@@ -306,8 +306,11 @@ def test_una_tabla_de_un_esquema_anterior_se_avisa_y_no_se_toca(app):
     ).fetchone()
     r = app.test_cli_runner().invoke(args=["init-db"])
     assert r.exit_code == 0
-    for tabla in ("usuarios", "horas", "notificaciones"):
+    for tabla in ("usuarios", "horas"):
         assert f"Aviso: La tabla {tabla} se creó con un esquema anterior" in r.output
+    # `notificaciones` de este esquema no tiene ON DELETE SET NULL: la cubre el aviso específico
+    # (T-14c, ver tests/test_init_db_errores.py), no el genérico.
+    assert "Aviso: La tabla notificaciones es de un esquema anterior a D-016" in r.output
     assert "intentos_acceso se creó" not in r.output  # la que se creó ahora está al día
     assert "no reconstruye tablas existentes (D-006)" in r.output
     despues = sqlite3.connect(app.config["DATABASE"]).execute("SELECT sql FROM sqlite_master WHERE name = 'horas'").fetchone()

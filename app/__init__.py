@@ -92,6 +92,8 @@ def create_app(test_config=None):
     from . import db
 
     db.init_app(app)
+    if _se_va_a_servir() and not app.testing:
+        db.avisar_si_la_base_es_antigua(app)  # T-14c (a): solo lee, nunca falla
     # Antes de registrar los blueprints: sus reglas usan `<id_hora:...>` (T-05 R-06).
     app.url_map.converters["id_hora"] = db.ConvertidorId
 

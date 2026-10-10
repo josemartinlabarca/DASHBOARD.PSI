@@ -431,7 +431,7 @@ def lanzar_dos_create_professional(tmp_path, ronda):
     ]
     for proceso in procesos:  # la contraseña a los dos antes de esperar a ninguno: si no, se serializan
         proceso.stdin.write("clave-segura-1\nclave-segura-1\n")
-        proceso.stdin.close()
+        proceso.stdin.flush()  # `communicate` lo cierra: cerrarlo aquí hacía fallar a Python 3.11/3.12 (flush sobre un archivo cerrado)
     resultados = []
     for proceso in procesos:
         out, err = proceso.communicate(timeout=60)

@@ -10,6 +10,7 @@ from datetime import datetime, time, timedelta, timezone
 from flask import (
     Blueprint,
     abort,
+    current_app,
     flash,
     redirect,
     render_template,
@@ -20,7 +21,13 @@ from flask import (
 from . import errores as paginas_de_error
 from . import notificaciones, paciente, tiempo
 from .auth import solo_profesional, usuario_actual, zona_chile
-from .db import MENSAJE_BASE_OCUPADA, esta_ocupada, get_db
+from .db import (
+    MENSAJE_BASE_OCUPADA,
+    MENSAJE_FK_SIN_SET_NULL_LOG,
+    esta_ocupada,
+    fk_de_avisos_sin_set_null,
+    get_db,
+)
 from .tiempo import FORMATO_GUARDADO, mostrar_inicio
 
 bp = Blueprint("profesional", __name__)
@@ -56,6 +63,13 @@ MENSAJE_YA_PUBLICADA = "Esa hora ya está publicada."
 MENSAJE_NO_GUARDADA = "No pudimos guardar la hora. Revisa los datos e inténtalo de nuevo."
 MENSAJE_RESERVADA = (
     "No se puede eliminar una hora reservada. Primero debe cancelarse la reserva."
+)
+# T-14c (a): base creada antes de D-016. No se cambia ningún dato; el procedimiento está en el log,
+# en `init-db` y en el README.
+MENSAJE_NO_SE_PUEDE_ELIMINAR_BASE_ANTIGUA = (
+    "No se pudo eliminar esta hora porque ya tuvo avisos y la base de datos es de una versión "
+    "antigua que no lo permite. No se cambió nada. Avisa a quien administra el sistema: debe "
+    "seguir el procedimiento de «Bases creadas por versiones antiguas» del README."
 )
 
 
@@ -426,10 +440,21 @@ def eliminar_hora(hora_id):
     """
     db = get_db()
     profesional_id = usuario_actual()["id"]
-    borradas = db.execute(
-        "DELETE FROM horas WHERE id = ? AND profesional_id = ? AND estado = 'libre'",
-        (hora_id, profesional_id),
-    ).rowcount
+    try:
+        borradas = db.execute(
+            "DELETE FROM horas WHERE id = ? AND profesional_id = ? AND estado = 'libre'",
+            (hora_id, profesional_id),
+        ).rowcount
+    except sqlite3.IntegrityError:
+        # T-14c (a): en una base creada con un esquema anterior a D-016 la FK de los avisos no tiene
+        # ON DELETE SET NULL y no se puede eliminar una hora que tuvo avisos. Se explica en
+        # español SOLO si esa es la causa comprobada; cualquier otra IntegrityError es un bug (500).
+        db.rollback()
+        if not fk_de_avisos_sin_set_null(db):
+            raise
+        current_app.logger.error(MENSAJE_FK_SIN_SET_NULL_LOG.format(ruta=current_app.config["DATABASE"]))
+        flash(MENSAJE_NO_SE_PUEDE_ELIMINAR_BASE_ANTIGUA, "error")
+        return redirect(url_for("profesional.dashboard"))
     db.commit()
     if borradas:
         flash("La hora se eliminó correctamente.", "exito")

@@ -203,6 +203,48 @@ def test_esta_ocupada_distingue_el_bloqueo_de_otros_errores():
     assert not modulo_db.esta_ocupada(ValueError("locked"))
 
 
+def test_sqlite_locked_real_cuenta_como_ocupada_y_se_ve_por_su_codigo(app):
+    """T-14c (e): `SQLITE_LOCKED` (6) es una rama de `esta_ocupada` distinta de `SQLITE_BUSY` (5).
+
+    Se provoca de verdad: dropear una tabla con un cursor abierto sobre ella en la MISMA conexión da
+    «database table is locked». La decisión (D-050) es tratarlo como base ocupada (503, reintentar):
+    el 503 no filtra el texto de SQLite. Quitar `SQLITE_LOCKED` de la tupla deja esta prueba en rojo
+    (el error real lleva `sqlite_errorcode`, así que no entra por la comparación de texto).
+    """
+    con = sqlite3.connect(":memory:")
+    con.execute("CREATE TABLE t (x)")
+    con.executemany("INSERT INTO t VALUES (?)", [(1,), (2,)])
+    cursor = con.execute("SELECT * FROM t")
+    cursor.fetchone()
+    with pytest.raises(sqlite3.OperationalError) as dentro:
+        con.execute("DROP TABLE t")
+    error = dentro.value
+    assert error.sqlite_errorcode == sqlite3.SQLITE_LOCKED != sqlite3.SQLITE_BUSY
+    assert modulo_db.esta_ocupada(error)
+    # También con el código extendido (SQLITE_LOCKED_SHAREDCACHE = 6 | 1 << 8)...
+    extendido = sqlite3.OperationalError("database table is locked: t")
+    extendido.sqlite_errorcode = sqlite3.SQLITE_LOCKED | (1 << 8)
+    assert modulo_db.esta_ocupada(extendido)
+    # ...y un código que no es de bloqueo NO cuenta aunque el texto diga «locked» (manda el código).
+    otro = sqlite3.OperationalError("database is locked")
+    otro.sqlite_errorcode = sqlite3.SQLITE_IOERR
+    assert not modulo_db.esta_ocupada(otro)
+
+
+def test_un_locked_dentro_de_una_peticion_responde_503_sin_filtrar_el_texto(app, pro_id, ana, monkeypatch):
+    from app import paciente
+
+    def falla(*a, **k):
+        error = sqlite3.OperationalError("database table is locked: horas")
+        error.sqlite_errorcode = sqlite3.SQLITE_LOCKED
+        raise error
+
+    monkeypatch.setattr(paciente, "reservar_hora", falla)
+    hora = insertar(app, pro_id, "2026-10-12T10:00:00")
+    token = extraer_token(ana.get("/paciente/horas").text)
+    ocupada(ana.post(f"/horas/{hora}/reservar", data={"csrf_token": token}), "/paciente/horas")
+
+
 def test_el_login_con_la_base_ocupada_sigue_igual_que_antes(app, client):
     crear(app)
     token = extraer_token(client.get("/login").text)

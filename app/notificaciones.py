@@ -349,6 +349,28 @@ def ruta_outbox(app=None):
     return os.path.join(os.path.dirname(os.path.abspath(app.config["DATABASE"])), NOMBRE_OUTBOX)
 
 
+def _crear_carpetas(carpeta):
+    """Crea `carpeta` y las intermedias que falten, TODAS con modo 0700 (menos lo que quite el umask).
+
+    `os.makedirs(mode=...)` solo aplica el modo a la última: las intermedias quedaban con el
+    permiso por defecto, normalmente 0755 (T-14b R-08). Las carpetas que ya existen no se tocan.
+    """
+    faltan = []
+    actual = os.path.abspath(carpeta)
+    while not os.path.isdir(actual):
+        faltan.append(actual)
+        padre = os.path.dirname(actual)
+        if padre == actual:
+            break
+        actual = padre
+    for nueva in reversed(faltan):
+        try:
+            os.mkdir(nueva, MODO_CARPETA_OUTBOX)
+        except FileExistsError:
+            if not os.path.isdir(nueva):  # otro proceso la creó, pero como archivo
+                raise
+
+
 def _escribir_completo(descriptor, datos):
     while datos:
         escritos = os.write(descriptor, datos)
@@ -395,8 +417,13 @@ def escribir_outbox(avisos):
         ruta = ruta_outbox()
         carpeta = os.path.dirname(ruta)
         if carpeta:
-            os.makedirs(carpeta, mode=MODO_CARPETA_OUTBOX, exist_ok=True)
-        descriptor = os.open(ruta, os.O_WRONLY | os.O_APPEND | os.O_CREAT, MODO_OUTBOX)
+            _crear_carpetas(carpeta)
+        # O_NONBLOCK: si `OUTBOX_PATH` es un FIFO sin lector, `open` bloquearía la petición para
+        # siempre; así falla con ENXIO, se registra y la reserva sigue (T-14b R-08). En un archivo
+        # normal no tiene ningún efecto.
+        descriptor = os.open(
+            ruta, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NONBLOCK, MODO_OUTBOX
+        )
         try:
             _avisar_si_es_legible_por_otros(descriptor, ruta)
             for aviso in avisos:
