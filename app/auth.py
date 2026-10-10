@@ -26,7 +26,7 @@ from flask.cli import with_appcontext
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from . import limite
-from .correo import normalizar_email
+from .correo import normalizar_email, normalizar_email_login
 from .db import (
     abrir_base_existente,
     comprobar_que_se_puede_escribir,
@@ -207,7 +207,11 @@ def _respuesta_de_limite(plantilla, problema, **contexto):
 
 
 def _correo_para_limite(email_bruto):
-    """Correo normalizado para la clave del límite, o `""` si no es aceptable (solo cuenta la IP)."""
+    """Correo normalizado para la clave del límite, o `""` si no es aceptable (solo cuenta la IP).
+
+    Sigue siendo la normalización ESTRICTA (D-048 C2 solo cambia la búsqueda de la cuenta): así
+    un correo con caracteres raros no crea claves nuevas en `intentos_acceso`.
+    """
     try:
         email = normalizar_email(email_bruto)
     except ValueError:
@@ -267,10 +271,9 @@ def buscar_usuario_por_credenciales(email_bruto, password):
     (el registro no las admite): se verifica una cadena vacía para no pagar el
     costo de hashear texto arbitrariamente largo, y se rechaza igualmente.
     """
-    try:
-        email = normalizar_email(email_bruto)
-    except ValueError:
-        email = ""
+    # D-048 C2: el login no aplica la política de caracteres (solo el registro); un correo con
+    # espacios internos o ancho cero simplemente no coincide con ninguna cuenta.
+    email = normalizar_email_login(email_bruto)
     fila = None
     if email and len(email) <= EMAIL_MAX:
         fila = get_db().execute(

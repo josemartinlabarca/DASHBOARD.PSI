@@ -912,3 +912,77 @@ def test_t15b_una_ruta_protegida_no_oculta_el_error_de_base(app, client):
     _sesion_con_tabla_usuarios_ausente(app, client)
     app.config["PROPAGATE_EXCEPTIONS"] = False
     assert client.get("/paciente").status_code == 500
+
+
+# --- D-048 C2: el login no aplica la política de caracteres (solo el registro) -----------------
+
+DATOS_REGISTRO = {"nombre": "Ana Pérez", "password": CLAVE}
+
+
+def guardar_cuenta_antigua(app, email):
+    """Una cuenta como la que el registro habría guardado cuando ese carácter aún era válido."""
+    from app.correo import normalizar_email_login
+
+    crear(app, email=normalizar_email_login(email))
+
+
+@pytest.mark.parametrize(
+    "email",
+    ["ana\U00013441@example.cl", "ana\U00013442@example.cl", "col\u00b7legi@example.cl", "ana\u00bd@example.cl"],
+    ids=["U+13441", "U+13442", "punto-medio", "fraccion"],
+)
+def test_c2_una_cuenta_con_un_caracter_hoy_rechazado_puede_iniciar_sesion(app, client, email):
+    guardar_cuenta_antigua(app, email)
+    r = iniciar(client, email, CLAVE)
+    assert r.status_code == 302
+    assert sesion(client).get("usuario_id")
+    # y con otra escritura equivalente (mayúsculas y espacios en los bordes)
+    client.post("/logout", data={"csrf_token": extraer_token(client.get("/paciente").text)})
+    r = iniciar(client, f"  {email.upper()} ", CLAVE)
+    assert r.status_code == 302
+
+
+def test_c2_la_contrasena_incorrecta_de_esa_cuenta_falla_igual(app, client):
+    guardar_cuenta_antigua(app, "ana\U00013441@example.cl")
+    r = iniciar(client, "ana\U00013441@example.cl", "otra-clave-9")
+    assert r.status_code == 200 and auth.MENSAJE_LOGIN_INVALIDO in r.text
+    assert "usuario_id" not in sesion(client)
+
+
+def test_c2_los_fallos_siguen_identicos_con_correos_raros(app, client):
+    guardar_cuenta_antigua(app, "ana\U00013441@example.cl")
+    cuerpos = set()
+    for email, password in [
+        ("nadie@example.cl", CLAVE),
+        ("ana\U00013441@example.cl", "otra-clave-9"),  # cuenta real, clave mala
+        ("ana\U00013441x@example.cl", CLAVE),  # carácter rechazado, sin cuenta
+        ("ana\u200b@example.cl", CLAVE),  # ancho cero
+        ("a na@example.cl", CLAVE),  # espacio interno
+        ("ana\ud800@example.cl", CLAVE) if False else ("ana\ufffd@example.cl", CLAVE),
+        ("", CLAVE),
+    ]:
+        r = iniciar(client, email, password)
+        assert r.status_code == 200
+        cuerpos.add(sin_token(re.sub(r'(name="email" value=")[^"]*"', r'\1"', r.text)))
+    assert len(cuerpos) == 1
+
+
+@pytest.mark.parametrize(
+    "email",
+    ["ana\U00013441@example.cl", "ana\u200b@example.cl", "a na@example.cl", "nadie@example.cl", "ana\U00013441x@example.cl"],
+)
+def test_c2_se_verifica_exactamente_un_hash_con_correos_raros(app, client, monkeypatch, email):
+    guardar_cuenta_antigua(app, "ana\U00013441@example.cl")
+    llamadas = contar_verificaciones(monkeypatch)
+    iniciar(client, email, CLAVE)
+    assert len(llamadas) == 1
+
+
+def test_c2_el_registro_sigue_rechazando_esos_caracteres(app, client):
+    for email in ("ana\U00013441@example.cl", "ana\U00013442@example.cl", "col\u00b7legi@example.cl", "ana\u00bd@example.cl", "ana\u200b@example.cl"):
+        token = extraer_token(client.get("/registro").text)
+        r = client.post("/registro", data={**DATOS_REGISTRO, "email": email, "csrf_token": token})
+        assert r.status_code == 200, email
+        assert auth.MENSAJE_EMAIL_INVALIDO in r.text, email
+    with app.app_context():
+        assert auth.get_db().execute("SELECT COUNT(*) FROM usuarios").fetchone()[0] == 0
