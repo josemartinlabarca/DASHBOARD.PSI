@@ -260,7 +260,7 @@ Cada tarea tiene un **criterio de término** verificable. Un agente solo marca
 ## Fase 6 — Cierre
 
 ### T-14a — Seguridad de acceso (D-041, D-042, D-043 aprobadas) y cabeceras
-- **Estado:** PENDIENTE
+- **Estado:** HECHA (2026-10-09 21:23)
 - **Depende de:** T-13c
 - **Qué:** (1) **D-041:** límite de intentos de login y registro con bloqueo temporal (tabla nueva, autorizada solo para esto; ver D-041); (2) **D-042:** `SESSION_COOKIE_SECURE` por variable de entorno y aviso; (3) **D-043:** negarse a arrancar con debug en un host no local; (4) cabeceras de seguridad: `X-Frame-Options`/`frame-ancestors`, `X-Content-Type-Options: nosniff`, `Referrer-Policy` y una CSP que no rompa la hoja ni las páginas (sin `style=` en línea ni scripts: `default-src 'self'`), y revisar que el CSRF no se acepte también por `X-CSRFToken` si no hace falta (T-11b R-04); (5) T-08d R-04 (login simultáneo a un logout puede nacer ya revocado) y T-03c R-12 (versión mínima de Python/Unicode: fijarla en README y `requirements`/`pytest` o probar el login con un correo ya registrado); (6) T-03 #8 (revisar de nuevo el mensaje de duplicado de D-010) y T-08e R-04/R-05 (letras en blanco U+13441/U+13442 y cuenta ya guardada con un carácter hoy rechazado) como **propuestas** a la decisión humana si exigen política: no inventar.
 - **Término:** pruebas por cada punto con mutaciones que fallan al quitarlos; `python3 -m pytest` pasa 3 veces seguidas; verificación con navegador (Chromium+Playwright) de que login, registro, paneles y errores siguen funcionando con la CSP y el bloqueo (incluido el mensaje al bloquear).
@@ -290,26 +290,26 @@ en qué tarea conviene absorberlo.
 
 | Origen | Hallazgo | Absorber en |
 |---|---|---|
-| T-02d #1 | `FLASK_DEBUG=1` heredado en un servidor real usa la clave pública de desarrollo sin aviso | T-14 (revisión final de seguridad) |
-| T-02d #6 | README: aclarar "solo en tu máquina" junto a `--debug`; `FLASK_DEBUG=off` cuenta como verdadero en Flask | T-14 |
+| T-02d #1 | ~~`FLASK_DEBUG=1` heredado en un servidor real usa la clave pública de desarrollo sin aviso~~ — resuelto por T-14a (D-047: `flask run` se niega con debug en un host no local; fuera de `flask run` avisa en el log) | — |
+| T-02d #6 | ~~README: aclarar "solo en tu máquina" junto a `--debug`; `FLASK_DEBUG=off` cuenta como verdadero en Flask~~ — resuelto por T-14a (README: «solo en tu máquina» y el matiz medido de `FLASK_DEBUG=off`, D-047) | — |
 | T-01 #3–4 | `base.html` aún no enlaza `style.css` | T-13 |
-| T-03 #2 | Cookie de sesión sin `Secure` (hace falta HTTPS para activarla) | T-14 |
-| T-03 #4 | `/registro` sin límite de frecuencia: cada registro cuesta ~0,12 s de CPU por scrypt | T-14 |
+| T-03 #2 | ~~Cookie de sesión sin `Secure` (hace falta HTTPS para activarla)~~ — resuelto por T-14a (`SESSION_COOKIE_SECURE`, D-042/D-047) | — |
+| T-03 #4 | ~~`/registro` sin límite de frecuencia: cada registro cuesta ~0,12 s de CPU por scrypt~~ — resuelto por T-14a (10 registros por dirección y 15 minutos, D-045) | — |
 | T-03 #6 | La página de error 400 de CSRF es la genérica de Werkzeug, en inglés y sin enlace para volver: añadir `errorhandler(400)` con plantilla en español | T-13 |
-| T-03 #8 | El mensaje de duplicado casi confirma que el correo existe (aceptado en D-010) | T-14 (revisar de nuevo) |
+| T-03 #8 | El mensaje de duplicado casi confirma que el correo existe (aceptado en D-010) | pendiente del humano: D-048 (A) |
 | T-03 #9 | Los límites de longitud cuentan caracteres, no bytes (inocuo) | — |
 | T-02c #4 | `init-db` sobre una base con esquema antiguo termina con éxito y sin aviso, dejando las tablas sin las restricciones nuevas; avisar con `PRAGMA user_version` o comparando `sqlite_master` con `schema.sql` | T-14 |
 | T-02f #9 | `README.md:39`: la nota sobre borrar `agenda.db` es exacta pero la línea quedó demasiado larga | cuando se toque el README |
 | T-02g R-03 | Pruebas redundantes en `tests/test_esquema.py`: `solo_prefijo_y_nul` duplica `nul_al_final`; tres casos de comodín y el del espacio salen también de las sustituciones por posición; `0000-00-00T00:00:00` se prueba tres veces | cuando se toque ese archivo |
 | T-02g R-06 | Restos menores en `PROGRESS.md`: la entrada histórica de T-02f remite a una duda ya resuelta y la duda sobre «aceptar el espacio» quedó obsoleta tras `9e5e2d2` | cuando se toque PROGRESS |
 | T-02e R-02 | Las pruebas de SQL exacto fallan con reformateos inocuos (minúsculas en `not null`, comentario dentro de un `CREATE TABLE`, `IN ('a','b')` sin espacio) y las `CHECK_*` dependen del texto del mensaje de SQLite 3.45.1; no está escrito | cuando se toque `tests/test_esquema.py` (añadir un comentario que lo explique) |
-| T-02e R-06 | Un cambio legítimo del esquema obliga a tocar `SQL_ESPERADO`, `FK_ESPERADAS`, las `CHECK_*` y la lista de columnas de `tests/test_db.py`; el comentario del código solo menciona la primera | cuando un cambio de esquema lo exija (T-05/T-10/T-14) |
+| T-02e R-06 | Un cambio legítimo del esquema obliga a tocar `SQL_ESPERADO`, `FK_ESPERADAS`, las `CHECK_*` y la lista de columnas de `tests/test_db.py`; el comentario del código solo menciona la primera; T-14a, al agregar una tabla, tuvo además que tocar `SQL_ESPERADO_INDICES` (ahora con la tabla de cada índice), `test_no_hay_otros_objetos_en_la_base` y `test_init_db_crea_el_indice_un_solo_profesional` | cuando un cambio de esquema lo exija (T-05/T-10/T-14) |
 | T-02e R-05 | Quedan 4 pruebas de rechazo con `IntegrityError` desnudo (2 en `test_esquema.py`, 2 en `test_db.py`), duplicadas por otras que sí exigen el CHECK | cuando se toque ese archivo |
 | T-03c R-11 | La suite no quedó más rápida (≈11 s): `test_esquema.py` gasta ~4 s en crear la base de cada prueba y la prueba exhaustiva de idempotencia 2,4 s. Fixture de módulo/sesión para la base de solo lectura | cuando la suite pase de ~15 s |
-| T-03c R-12 | Los puntos no asignados (Cn) dependen de la versión de Unicode de Python: un Python más antiguo podría rechazar en el login un correo ya registrado | T-14 (fijar versión mínima de Python o revisar) |
+| T-03c R-12 | Los puntos no asignados (Cn) dependen de la versión de Unicode de Python: un Python más antiguo podría rechazar en el login un correo ya registrado | T-14a dejó el aviso en el log y el README (D-047); la solución de fondo es D-048 (C), pendiente del humano |
 | T-04 R-09 | Mensajes de Click (contraseñas que no coinciden) y la página 400 en inglés; accesibilidad del login sin pruebas | T-14 (reasignada en T-13c: los mensajes de Click son del comando CLI, no de la hoja; la página 400 ya está en español desde T-13) |
-| T-04 R-08 | Con la clave de desarrollo pública (`FLASK_DEBUG=1`) cualquiera puede forjar una cookie y entrar al panel del profesional (ya anotado en T-02d #1) | T-14 |
-| T-04 | Sin límite de intentos de login ni bloqueo | T-14 |
+| T-04 R-08 | ~~Con la clave de desarrollo pública (`FLASK_DEBUG=1`) cualquiera puede forjar una cookie y entrar al panel del profesional (ya anotado en T-02d #1)~~ — resuelto por T-14a (D-043/D-047) | — |
+| T-04 | ~~Sin límite de intentos de login ni bloqueo~~ — resuelto por T-14a (D-045) | — |
 | T-04b R-01 | Sobreviven 3 mutaciones del CSRF: aceptar un prefijo del token, eximir `/login` si el cuerpo es JSON y con cuerpo vacío | cuando se toque `tests/test_seguridad.py` |
 | T-04b R-02 | Las pruebas de `no-store` no cubren 405, 413, 500, HEAD ni OPTIONS (con servidor real sí llevan la cabecera); el hook sobrescribe `Cache-Control` y una vista no puede salirse | cuando se toque ese archivo |
 | T-04b R-05 | ZWJ/ZWNJ rechazados en el nombre: afecta a nombres persas y algunos devanagari, no a Chile; decisión humana de baja prioridad | junto a D-020 |
@@ -331,14 +331,14 @@ en qué tarea conviene absorberlo.
 | T-08b R-05 | La caché de URL de las pruebas usa API privada de Werkzeug y la plantilla no es segura entre hilos | si se actualiza Werkzeug |
 | T-08b | `pytest-xdist` funciona (1135 OK en 17,7 s) pero emite avisos de `fork`; no se adopta sin decisión (dependencia nueva) | si la suite vuelve a pasar de 60 s |
 | T-08d R-02 | Con una base antigua (sin `sesion_version`) `init-db` dice «OK», crea el índice pero no la columna y luego `POST /login` da 500; con 2+ profesionales `init-db` revienta con traceback. Aviso claro o migración (`PRAGMA user_version`) | T-14 |
-| T-08d R-04 | Un login simultáneo a un logout en otro navegador puede nacer ya revocado | T-14 |
+| T-08d R-04 | ~~Un login simultáneo a un logout en otro navegador puede nacer ya revocado~~ — resuelto por T-14a (D-047: la sesión nueva usa la `sesion_version` leída tras verificar la contraseña) | — |
 | T-08d R-08 | T-09 debe notificar usando `horas.profesional_id`, no «el profesional» por rol; el futuro cambio de contraseña deberá incrementar `sesion_version` | T-09 / cuando exista |
 | T-08e R-02 | La suite tarda ~34 s (el criterio firme de D-031 es 31,5 s): dos recorridos de 1,1 M de puntos de código (≈3,7 s), la prueba de dos procesos (1,5 s) y cientos de pruebas que montan app y base; revisar cuando pase de 45 s | cuando pase de 45 s |
 | T-08e R-03 | Un POST forzado a una hora oculta distingue «libre» de «ocupada» (el estado se comprueba antes que la anticipación); ya pasaba con las horas pasadas | T-14 |
-| T-08e R-04/R-05 | Letras en blanco U+13441/U+13442 aceptadas; una cuenta guardada con un carácter hoy rechazado ya no puede iniciar sesión (sin migración); rechazados nuevos: punto medio catalán (`col·legi`) y fracciones | T-14 |
+| T-08e R-04/R-05 | Letras en blanco U+13441/U+13442 aceptadas; una cuenta guardada con un carácter hoy rechazado ya no puede iniciar sesión (sin migración); rechazados nuevos: punto medio catalán (`col·legi`) y fracciones | pendiente del humano: D-048 (B y C) |
 | T-08e R-11 | Mensaje a las 24 h exactas dice «menos» (decir «no más de»); el mensaje de solape sugiere cancelar algo que a veces no se puede; README sin la regla 7 | T-14 (reasignada en T-13c: son textos de reglas de negocio y del README, fuera de los 6 puntos) |
 | T-09 R-02 | `outbox.log` queda con los permisos del umask (0644) y contiene nombres y correos | T-14 |
-| T-09 R-03 | `outbox.log` y `notificaciones` crecen sin límite; un paciente puede repetir reservar y cancelar sin freno | T-14 (junto al límite de frecuencia) |
+| T-09 R-03 | `outbox.log` y `notificaciones` crecen sin límite; un paciente puede repetir reservar y cancelar sin freno | T-14b/T-14c: D-045 limita login y registro, no reservar/cancelar; decidir si hace falta |
 | T-09 R-04 | `OUTBOX_PATH` sigue enlaces simbólicos y una ruta relativa depende del directorio de trabajo; documentar en el README | T-14 |
 | T-09 R-06 | En la hora repetida de abril el límite de cancelación del texto es ambiguo (conservador) | T-14 |
 | T-09 R-07 | Pruebas débiles: la de contraseña es casi tautológica, la de «no escriben en el proyecto» solo mira la configuración, los permisos 0o644 no tienen prueba (la mutación a 0o666 sobrevive) y el único test multiproceso usa horas distintas por proceso | cuando se toque `tests/test_notificaciones.py` |
@@ -347,7 +347,7 @@ en qué tarea conviene absorberlo.
 | T-10 R-03/R-09 | Mutantes equivalentes que sobreviven: quitar el filtro `recordatorio_enviado = 0` del `SELECT` o del `UPDATE` por separado (se respaldan; juntas fallan 4 pruebas), quitar el `rowcount`, `desde = ahora`; faltan pruebas de `fold=1`, del comando con base inexistente y de la ventana inferior | cuando se toque `tests/test_recordatorios.py` |
 | T-11b R-01 | «Marcar todas» marca también una notificación que llegó después de cargar el panel y que el usuario no vio (efecto: pierde el estado «nueva»); arreglarlo exige un `hasta_id`, que choca con «ignora ids» de D-035 | decisión humana si se quiere; sin urgencia |
 | T-11b R-02 | Con la base bloqueada más de 5 s, cualquier POST lanza `database is locked` (500); es de toda la app, no solo de esta ruta | T-14 |
-| T-11b R-04 | Sin `X-Frame-Options` ni CSP en ninguna respuesta; el CSRF también se acepta por la cabecera `X-CSRFToken` | T-14 |
+| T-11b R-04 | ~~Sin `X-Frame-Options` ni CSP en ninguna respuesta; el CSRF también se acepta por la cabecera `X-CSRFToken`~~ — resuelto por T-14a (D-046: CSP, `X-Frame-Options`, `nosniff`, `Referrer-Policy` y CSRF solo por formulario) | — |
 | T-12 R-01 | «Ver la reserva» es engañoso en avisos viejos: si Ana reserva, cancela y Beto reserva la misma hora, los avisos del profesional (incluido «La hora quedó libre») enlazan a la fila de Beto | T-13 (rotular el enlace o quitarlo en cancelaciones) |
 | T-12 R-02 | Las mutaciones que quitan el `sort` de libres/agenda o su desempate por id sobreviven: el orden sale del índice `UNIQUE(profesional_id, inicio)`, no del código ni de las pruebas | cuando se toque `tests/test_dashboard_profesional.py` |
 | T-12 R-04 | D-036 dice «función única» para las 24 h, pero `reservar_hora` (`app/paciente.py`) conserva su propia comparación en vez de `es_reservable` | T-14 (unificar) |

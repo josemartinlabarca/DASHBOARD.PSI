@@ -502,14 +502,16 @@ def test_el_token_anterior_al_login_ya_no_sirve_para_volver_a_iniciar_sesion(app
     assert client.post("/logout", data={"csrf_token": token_viejo}).status_code == 400
 
 
-def test_login_con_token_correcto_por_cabecera_funciona(app, client):
+def test_login_con_token_correcto_solo_por_cabecera_ya_no_se_acepta(app, client):
+    """T-14a (D-046): el token se acepta únicamente como campo del formulario."""
     crear(app)
     token = extraer_token(client.get("/login").text)
     r = client.post(
         "/login", data={"email": "ana@example.cl", "password": CLAVE},
         headers={"X-CSRFToken": token},
     )
-    assert r.status_code == 302
+    assert r.status_code == 400
+    assert "usuario_id" not in sesion(client)
 
 
 # ------------------------------------------- fallos de login: cabeceras iguales

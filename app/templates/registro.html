@@ -5,6 +5,7 @@
   <h1>Crear cuenta</h1>
   <form method="post" action="{{ url_for('auth.registro') }}" novalidate>
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
 
     <p>
       <label for="nombre">Nombre</label><br>

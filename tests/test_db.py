@@ -26,11 +26,13 @@ def crear_usuario(db, email="a@example.cl", rol="paciente"):
     return cur.lastrowid
 
 
-def test_init_db_crea_las_tres_tablas(db):
+def test_init_db_crea_las_cuatro_tablas(db):
     filas = db.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
     ).fetchall()
-    assert {f["name"] for f in filas} == {"usuarios", "horas", "notificaciones"}
+    assert {f["name"] for f in filas} == {
+        "usuarios", "horas", "notificaciones", "intentos_acceso",
+    }
 
 
 def test_rol_invalido_rechazado(db):
@@ -113,6 +115,13 @@ COLUMNAS_ESPERADAS = {
         ("leida", "INTEGER", 1, "0", 0),
         ("creada_en", "TEXT", 1, None, 0),
     ],
+    "intentos_acceso": [
+        ("id", "INTEGER", 0, None, 1),
+        ("accion", "TEXT", 1, None, 0),
+        ("ambito", "TEXT", 1, None, 0),
+        ("clave", "TEXT", 1, None, 0),
+        ("instante", "INTEGER", 1, None, 0),
+    ],
 }
 
 
@@ -155,7 +164,10 @@ def test_init_db_crea_el_indice_un_solo_profesional(db):
     filas = db.execute(
         "SELECT name, tbl_name FROM sqlite_master WHERE type='index' AND name NOT LIKE 'sqlite_%'"
     ).fetchall()
-    assert [(f["name"], f["tbl_name"]) for f in filas] == [("un_solo_profesional", "usuarios")]
+    assert sorted((f["name"], f["tbl_name"]) for f in filas) == [
+        ("intentos_acceso_clave", "intentos_acceso"),
+        ("un_solo_profesional", "usuarios"),
+    ]
 
 
 def test_init_db_dos_veces_no_falla_por_el_indice(app):

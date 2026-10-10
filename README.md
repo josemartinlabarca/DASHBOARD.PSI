@@ -16,7 +16,7 @@ El detalle está en `SPEC.md`.
 
 ## Stack (liviano a propósito)
 
-- Python 3.11+ con **Flask**
+- Python 3.11+ con **Flask** (se probó con Python 3.13; ver «Versión de Python» más abajo)
 - **SQLite** (un solo archivo, sin servidor)
 - Plantillas **Jinja2** + CSS simple (sin frameworks de frontend)
 - **pytest** para pruebas
@@ -46,6 +46,14 @@ flask --app app init-db
 ```
 
 Esto borra todos sus datos; no lo hagas con datos que quieras conservar.
+
+**Actualizar una base creada antes de T-14a (límite de intentos, D-045):** la
+tabla nueva `intentos_acceso` **no exige borrar nada**. Basta volver a ejecutar
+`flask --app app init-db`: como solo crea lo que falta, agrega la tabla y su
+índice y deja intactos los usuarios, horas y notificaciones. Sin ese paso, el
+login y el registro responden 500 (`no such table: intentos_acceso`). Las demás
+tablas siguen necesitando el borrado de arriba si son anteriores a T-02c, T-02f,
+T-02g o T-08d.
 
 **Importante tras T-08d (D-022 y D-023):** la tabla `usuarios` ganó la columna
 `sesion_version` (cierre de sesión que invalida las cookies copiadas) y el índice
@@ -82,10 +90,18 @@ cada una responde error 500 y el log indica qué falta. Con `flask run` (o un
 servidor WSGI) sin clave, el log muestra además un aviso al arrancar; `init-db`
 y `create-professional` no lo muestran.
 
-> **Advertencia:** no actives `FLASK_DEBUG` (ni `--debug`) en un entorno
-> expuesto. En debug la clave es un valor público fijo (está en el código), así
-> que cualquiera podría falsificar sesiones y tokens CSRF; además el modo debug
-> expone un depurador interactivo.
+> **Advertencia:** `--debug` y `FLASK_DEBUG` son **solo para tu máquina**. En debug
+> la clave es un valor público fijo (está en el código), así que cualquiera podría
+> falsificar sesiones y tokens CSRF; además el modo debug expone un depurador
+> interactivo. Por eso `flask run` **se niega a arrancar** con debug (o con
+> `--debugger`) si el host no es local (`127.0.0.1`, `localhost`, `::1`): por ejemplo
+> `flask run --host 0.0.0.0 --debug` o `FLASK_DEBUG=1 flask run --host 0.0.0.0` terminan
+> con un mensaje y sin abrir el puerto (D-043). Matices medidos: bajo `flask run`,
+> Click lee `FLASK_DEBUG` como booleano (`0`, `false`, `no` y `off` lo apagan; un
+> valor que no es booleano, como `banana`, da error); en cambio, con gunicorn u otro
+> servidor, `Flask` solo trata `0`, `false` y `no` como falso y **`off` cuenta como
+> verdadero**. Fuera de `flask run` el host no se conoce, así que ahí solo se avisa en
+> el log.
 
 ### Crear la cuenta del profesional
 
@@ -108,11 +124,40 @@ un profesional; en esta versión solo puede haber uno.» y termina con código 1
 (la base de datos también lo impide con un índice único; D-023). Si dos
 ejecuciones coinciden, una crea la cuenta y la otra recibe ese mensaje.
 
-### Cookie de sesión
+### Cookie de sesión y variables de despliegue
 
-La cookie de sesión es `HttpOnly` y `SameSite=Lax`. No lleva `Secure` porque
-eso exige HTTPS; se activará con `SESSION_COOKIE_SECURE=True` al desplegar
-(tarea T-14).
+La cookie de sesión es `HttpOnly` y `SameSite=Lax`. Con HTTPS, actívale `Secure`
+(D-042):
+
+| Variable | Valores | Efecto |
+|---|---|---|
+| `SESSION_COOKIE_SECURE` | `1`, `true`, `yes`, `on`, `si` activan; `0`, `false`, `no`, `off` o vacía desactivan (sin importar mayúsculas) | La cookie solo viaja por HTTPS. Otro valor (`maybe`, `2`...) **aborta el arranque** con un mensaje: no se interpreta en silencio como falso. |
+| `TRUSTED_PROXY_COUNT` | entero 0 a 10 (por defecto `0`) | Cuántos proxies **propios** hay delante de la app. Con `1`, la dirección del cliente es la última de `X-Forwarded-For`; lo que el cliente antepone no cuenta. Con `0` la cabecera se ignora. |
+
+Desactivada por defecto para poder probar en `http://localhost`. Si se sirve la app
+(`flask run` sin debug, gunicorn...) sin ella, el log avisa al arrancar. Si la app está
+detrás de un proxy, configura `TRUSTED_PROXY_COUNT`: sin él, el límite de intentos
+(abajo) vería a todos los clientes como la dirección del proxy.
+
+### Límite de intentos de login y registro
+
+Para frenar la fuerza bruta y el costo de CPU del hash, los intentos se cuentan en la
+tabla `intentos_acceso` de la misma base de datos (funciona con varios procesos). Ventana
+de **15 minutos**: login, **5 fallos** por dirección y correo, **20** por dirección (con
+cualquier correo) y **30** por correo (desde cualquier dirección); registro, **10** por
+dirección. Al superarlo la respuesta es 429 con «Demasiados intentos… espera N minutos»,
+igual para un correo que existe y uno que no, y sin probar ninguna contraseña. Un login
+correcto no cuenta. El detalle, y el riesgo de que alguien bloquee a un tercero, están en
+`DECISIONS.md` (D-045). Para levantar un bloqueo antes de tiempo (solo el administrador):
+`DELETE FROM intentos_acceso;` en la base.
+
+### Versión de Python
+
+El proyecto pide Python 3.11+, pero se probó con **3.13** (Unicode 15.1). La política de
+caracteres del correo juzga cada letra por la versión de Unicode de Python: con una
+versión más antigua, un correo con una letra añadida después podría rechazarse al iniciar
+sesión. Si la app se sirve con un Python con Unicode anterior al 15.1, el log avisa. Mantén
+la misma versión (o una más nueva) que la que creó las cuentas.
 
 > Estos comandos se vuelven reales a medida que los agentes completan las
 > tareas de `TASKS.md`. Si algo no existe todavía, mira `PROGRESS.md`.

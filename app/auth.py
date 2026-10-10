@@ -25,6 +25,7 @@ from flask import (
 from flask.cli import with_appcontext
 from werkzeug.security import check_password_hash, generate_password_hash
 
+from . import limite
 from .correo import normalizar_email
 from .db import get_db
 from .seguridad import generar_token
@@ -162,6 +163,14 @@ def registro():
         errores["email"] = MENSAJE_EMAIL_INVALIDO
 
     if not errores:
+        # D-045: cada registro que llegaría a hashear la contraseña cuenta, salga bien o sea un
+        # duplicado (frena el costo de CPU y el sondeo de correos). Los rechazos de validación no.
+        try:
+            limite.reservar("registro")
+        except (limite.Bloqueado, limite.BaseOcupada) as problema:
+            return _respuesta_de_limite(
+                "registro.html", problema, nombre=nombre, email=email, errores={}
+            )
         db = get_db()
         try:
             crear_usuario(db, nombre, email, password, "paciente")
@@ -175,6 +184,28 @@ def registro():
             return redirect(url_for("inicio"))
 
     return render_template("registro.html", nombre=nombre, email=email, errores=errores)
+
+
+def _respuesta_de_limite(plantilla, problema, **contexto):
+    """Página del formulario con el aviso de bloqueo (429) o de base ocupada (503).
+
+    El texto del bloqueo es el mismo para cualquier correo (D-010, D-045).
+    """
+    if isinstance(problema, limite.Bloqueado):
+        mensaje, estado, espera = limite.mensaje_bloqueo(problema.espera_s), 429, problema.espera_s
+    else:
+        mensaje, estado, espera = limite.MENSAJE_BASE_OCUPADA, 503, 5
+    cuerpo = render_template(plantilla, error=mensaje, **contexto)
+    return cuerpo, estado, {"Retry-After": str(espera)}
+
+
+def _correo_para_limite(email_bruto):
+    """Correo normalizado para la clave del límite, o `""` si no es aceptable (solo cuenta la IP)."""
+    try:
+        email = normalizar_email(email_bruto)
+    except ValueError:
+        return ""
+    return email if len(email) <= EMAIL_MAX else ""
 
 
 # ---------------------------------------------------------------- login ----
@@ -283,13 +314,34 @@ def login():
 
     email_bruto = request.form.get("email", "")
     password = request.form.get("password", "")  # sin recortar
+    email_limite = _correo_para_limite(email_bruto)
+    # D-045: el intento se anota ANTES de verificar la contraseña (así dos peticiones a la
+    # vez no se cuelan) y un acierto lo devuelve. Un bloqueo rechaza sin pagar el scrypt y
+    # sin mirar si la cuenta existe, así que es idéntico para un correo real y uno inventado.
+    try:
+        anotados = limite.reservar("login", email_limite)
+    except (limite.Bloqueado, limite.BaseOcupada) as problema:
+        return _respuesta_de_limite("login.html", problema, email=email_bruto.strip())
     usuario = buscar_usuario_por_credenciales(email_bruto, password)
+    if usuario is not None:
+        limite.absolver("login", anotados, email_limite)
+        # T-08d R-04: la contraseña tarda en verificarse (scrypt); un cierre de sesión en otro
+        # navegador durante ese rato sube `sesion_version`. La sesión nueva debe nacer con la
+        # versión vigente AHORA, no con la que se leyó antes del hash (nacería ya revocada).
+        usuario = _usuario_vigente(get_db(), usuario["id"])
     if usuario is None:
         return render_template(
             "login.html", email=email_bruto.strip(), error=MENSAJE_LOGIN_INVALIDO
         )
     iniciar_sesion(usuario["id"], usuario["sesion_version"])
     return redirect(url_for(f"{usuario['rol']}.dashboard"))
+
+
+def _usuario_vigente(db, usuario_id):
+    """Fila (id, rol, sesion_version) tal como está en la base en este instante, o `None`."""
+    return db.execute(
+        "SELECT id, rol, sesion_version FROM usuarios WHERE id = ?", (usuario_id,)
+    ).fetchone()
 
 
 # ----------------------------------------------------------- decoradores ----

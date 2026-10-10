@@ -36,9 +36,8 @@ def test_post_a_cualquier_ruta_exige_token(app):
     assert client.post("/ruta-futura").status_code == 400
     token = extraer_token(client.get("/registro").text)
     assert client.post("/ruta-futura", data={"csrf_token": token}).status_code == 200
-    assert (
-        client.post("/ruta-futura", headers={"X-CSRFToken": token}).status_code == 200
-    )
+    # T-14a (D-046): la cabecera X-CSRFToken ya no es un canal válido.
+    assert client.post("/ruta-futura", headers={"X-CSRFToken": token}).status_code == 400
 
 
 @pytest.mark.parametrize("metodo", ["put", "patch", "delete"])
@@ -54,7 +53,7 @@ def test_put_patch_delete_exigen_token(app, metodo):
     enviar = getattr(client, metodo)
     assert enviar("/recurso-futuro").status_code == 400
     assert enviar("/recurso-futuro", headers={"X-CSRFToken": "0" * 64}).status_code == 400
-    assert enviar("/recurso-futuro", headers={"X-CSRFToken": token}).status_code == 200
+    assert enviar("/recurso-futuro", headers={"X-CSRFToken": token}).status_code == 400
     assert enviar("/recurso-futuro", data={"csrf_token": token}).status_code == 200
 
 

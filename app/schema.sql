@@ -38,3 +38,18 @@ CREATE TABLE IF NOT EXISTS notificaciones (
     leida INTEGER NOT NULL DEFAULT 0 CHECK (leida IN (0, 1)),
     creada_en TEXT NOT NULL
 );
+
+-- Límite de intentos de login y registro (D-041, D-045). Una fila por intento; `ambito`
+-- dice qué se cuenta: la dirección ('ip'), la dirección con el correo ('par') o el correo
+-- ('correo'). `instante` son segundos desde 1970 (UTC). Las filas vencidas se borran al
+-- anotar un intento nuevo. Una base creada antes de esta tabla la recibe con `init-db`
+-- (CREATE TABLE IF NOT EXISTS no toca las demás tablas ni borra datos).
+CREATE TABLE IF NOT EXISTS intentos_acceso (
+    id INTEGER PRIMARY KEY,
+    accion TEXT NOT NULL CHECK (accion IN ('login', 'registro')),
+    ambito TEXT NOT NULL CHECK (ambito IN ('ip', 'par', 'correo')),
+    clave TEXT NOT NULL CHECK (typeof(clave) = 'text' AND length(clave) > 0),
+    instante INTEGER NOT NULL CHECK (typeof(instante) = 'integer' AND instante > 0)
+);
+
+CREATE INDEX IF NOT EXISTS intentos_acceso_clave ON intentos_acceso (accion, ambito, clave, instante);

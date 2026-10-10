@@ -840,6 +840,14 @@ SQL_ESPERADO = {
         " leida INTEGER NOT NULL DEFAULT 0 CHECK (leida IN (0, 1)),"
         " creada_en TEXT NOT NULL )"
     ),
+    # D-041/D-045 (T-14a): tabla del límite de intentos de acceso.
+    "intentos_acceso": (
+        "CREATE TABLE intentos_acceso ( id INTEGER PRIMARY KEY,"
+        " accion TEXT NOT NULL CHECK (accion IN ('login', 'registro')),"
+        " ambito TEXT NOT NULL CHECK (ambito IN ('ip', 'par', 'correo')),"
+        " clave TEXT NOT NULL CHECK (typeof(clave) = 'text' AND length(clave) > 0),"
+        " instante INTEGER NOT NULL CHECK (typeof(instante) = 'integer' AND instante > 0) )"
+    ),
 }
 
 
@@ -854,7 +862,12 @@ def test_el_sql_de_cada_tabla_es_exactamente_el_aprobado(db, tabla):
 # (`sqlite_autoindex_*`) no tienen SQL y no cuentan.
 SQL_ESPERADO_INDICES = {
     "un_solo_profesional": (
-        "CREATE UNIQUE INDEX un_solo_profesional ON usuarios (rol) WHERE rol = 'profesional'"
+        "CREATE UNIQUE INDEX un_solo_profesional ON usuarios (rol) WHERE rol = 'profesional'",
+        "usuarios",
+    ),
+    "intentos_acceso_clave": (
+        "CREATE INDEX intentos_acceso_clave ON intentos_acceso (accion, ambito, clave, instante)",
+        "intentos_acceso",
     ),
 }
 
@@ -866,19 +879,21 @@ def test_el_sql_de_cada_indice_es_exactamente_el_aprobado(db, indice):
         "SELECT sql, tbl_name FROM sqlite_master WHERE type='index' AND name=?", (indice,)
     ).fetchone()
     assert fila is not None
-    assert " ".join(fila["sql"].split()) == SQL_ESPERADO_INDICES[indice]
-    assert fila["tbl_name"] == "usuarios"
+    sql, tabla = SQL_ESPERADO_INDICES[indice]
+    assert " ".join(fila["sql"].split()) == sql
+    assert fila["tbl_name"] == tabla
 
 
 @pytest.mark.base_real
 def test_no_hay_otros_objetos_en_la_base(db):
-    """Sin triggers ni vistas, y el único índice declarado es el de D-023."""
+    """Sin triggers ni vistas; los únicos índices declarados son el de D-023 y el de D-045."""
     filas = db.execute(
         "SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'"
     ).fetchall()
     assert {(f["type"], f["name"]) for f in filas} == {
         ("table", "usuarios"), ("table", "horas"), ("table", "notificaciones"),
-        ("index", "un_solo_profesional"),
+        ("table", "intentos_acceso"),
+        ("index", "un_solo_profesional"), ("index", "intentos_acceso_clave"),
     }
 
 
@@ -964,6 +979,7 @@ FK_ESPERADAS = {
         ("usuarios", "usuario_id", "id", "NO ACTION", "NO ACTION", "NONE"),
     ],
     "usuarios": [],
+    "intentos_acceso": [],
 }
 
 
@@ -1017,3 +1033,94 @@ def test_duracion_sin_tope_superior(db, ids, duracion):
 def test_duracion_por_defecto_es_50(db, ids):
     hora = insertar_hora(db, profesional_id=ids["prof"])
     assert db.execute("SELECT duracion_min FROM horas WHERE id=?", (hora,)).fetchone()[0] == 50
+
+
+# --- D-041 / D-045 (T-14a): tabla `intentos_acceso` --------------------------------------
+
+def insertar_intento(db, **campos):
+    valores = {"accion": "login", "ambito": "ip", "clave": "203.0.113.5", "instante": 1_800_000_000}
+    valores.update(campos)
+    columnas = ", ".join(valores)
+    marcas = ", ".join("?" for _ in valores)
+    return db.execute(
+        f"INSERT INTO intentos_acceso ({columnas}) VALUES ({marcas})", tuple(valores.values())
+    ).lastrowid
+
+
+@pytest.mark.parametrize("accion", ["login", "registro"])
+@pytest.mark.parametrize("ambito", ["ip", "par", "correo"])
+def test_intento_valido_aceptado(db, accion, ambito):
+    insertar_intento(db, accion=accion, ambito=ambito)
+
+
+@pytest.mark.parametrize("accion", ["Login", "logout", "", "registro "])
+def test_accion_fuera_de_la_lista_rechazada(db, accion):
+    rechazada(lambda: insertar_intento(db, accion=accion), "CHECK constraint failed: accion IN")
+
+
+@pytest.mark.parametrize("ambito", ["IP", "cuenta", "", "ip "])
+def test_ambito_fuera_de_la_lista_rechazado(db, ambito):
+    rechazada(lambda: insertar_intento(db, ambito=ambito), "CHECK constraint failed: ambito IN")
+
+
+@pytest.mark.parametrize("clave", ["", b"bytes"])  # un entero se guarda como texto (afinidad TEXT)
+def test_clave_vacia_o_que_no_es_texto_rechazada(db, clave):
+    rechazada(lambda: insertar_intento(db, clave=clave), "CHECK constraint failed: typeof(clave)")
+
+
+@pytest.mark.parametrize("instante", [0, -1, "1800000000x", 1.5, "texto", b"x"])
+def test_instante_que_no_es_entero_positivo_rechazado(db, instante):
+    rechazada(
+        lambda: insertar_intento(db, instante=instante), "CHECK constraint failed: typeof(instante)"
+    )
+
+
+@pytest.mark.parametrize("columna", ["accion", "ambito", "clave", "instante"])
+def test_intentos_acceso_no_acepta_null(db, columna):
+    rechazada(
+        lambda: insertar_intento(db, **{columna: None}),
+        f"NOT NULL constraint failed: intentos_acceso.{columna}",
+    )
+
+
+def test_el_indice_de_intentos_se_usa_en_el_conteo(db):
+    plan = " ".join(
+        str(f[3])
+        for f in db.execute(
+            "EXPLAIN QUERY PLAN SELECT instante FROM intentos_acceso"
+            " WHERE accion = ? AND ambito = ? AND clave = ? AND instante > ? ORDER BY instante",
+            ("login", "ip", "x", 1),
+        )
+    )
+    assert "intentos_acceso_clave" in plan and "TEMP B-TREE" not in plan
+
+
+@pytest.mark.base_real
+def test_init_db_agrega_la_tabla_a_una_base_anterior_sin_borrar_datos(app, tmp_path):
+    """Cómo se actualiza una base ya creada (README): basta volver a ejecutar `init-db`.
+
+    Se parte de una base con el esquema de antes de T-14a (todo menos `intentos_acceso`),
+    con un usuario guardado: `CREATE TABLE IF NOT EXISTS` solo agrega lo que falta.
+    """
+    import re
+
+    with app.app_context():
+        from flask import current_app
+
+        completo = current_app.open_resource("schema.sql").read().decode("utf-8")
+    antiguo = re.split(r"-- Límite de intentos de login y registro", completo)[0]
+    assert "intentos_acceso" not in antiguo
+    conexion = sqlite3.connect(app.config["DATABASE"])
+    conexion.executescript(antiguo)
+    conexion.execute(
+        "INSERT INTO usuarios (nombre, email, password_hash, rol, creado_en)"
+        " VALUES ('Ana', 'ana@example.cl', 'h', 'paciente', ?)",
+        (AHORA,),
+    )
+    conexion.commit()
+    conexion.close()
+    assert app.test_cli_runner().invoke(args=["init-db"]).exit_code == 0
+    with sqlite3.connect(app.config["DATABASE"]) as nueva:
+        tablas = {f[0] for f in nueva.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert "intentos_acceso" in tablas
+        assert nueva.execute("SELECT email FROM usuarios").fetchall() == [("ana@example.cl",)]
