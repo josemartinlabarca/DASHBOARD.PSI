@@ -269,6 +269,12 @@ Aquí el ciclo ya es rutina: implementador → mi verificación → revisor → 
 - **Verificación mía:** 2273 pruebas ×3 y con variables de producción; mutación propia (cambiar el `except`) detectada por la prueba nueva.
 - **Lección:** *corregir de la mejor forma no es corregir todo.* Un arreglo que obliga a tocar el esquema o a romper pruebas es una decisión del humano, no del implementador.
 
+### Vuelta 37 — T-16 y T-16b Tus decisiones y un hueco que apareció al aplicarlas
+- **Qué se hizo:** no sabías cómo decidir los pendientes, así que te los expliqué en simple con una recomendación para cada uno y aceptaste todas. T-16 las dejó registradas (D-048 B1+C2, D-050 confirmada, D-051/D-052/D-054 sin cambios), actualizó `ARCHITECTURE.md` y `CLAUDE.md` con tu permiso y mantuvo `SPEC.md` intacto.
+- **El hallazgo:** al hacer el login tolerante (C2), el revisor probó un ataque y encontró que una cuenta antigua con un carácter raro quedaba **sin los topes de intentos por correo y por par**: con 300 IPs se aceptaron 276 fallos. El implementador había avisado de ese riesgo en D-055, pero lo aceptó para no debilitar una prueba.
+- **T-16b lo cerró:** la clave del límite usa ahora la misma normalización que la búsqueda de la cuenta (con tope de largo). Mi reproducción del ataque: 5 fallos desde una IP y 30 en total con 300 IPs, igual que una cuenta normal.
+- **Lección:** *un riesgo aceptado por el implementador es una pregunta para el revisor, no una respuesta.* Y: *cuando un cambio toca el login, prueba el ataque, no solo las pruebas.*
+
 ### Historial git resultante
 
 ```
@@ -299,9 +305,9 @@ docs: documentación base del proyecto Agenda Psi
 
 ## 4. Estado actual y qué sigue
 
-- Hecho: **T-01 a T-15b** (2273 pruebas pasando): el plan original está completo y la revisión final aprobó.
+- Hecho: **T-01 a T-16b** (2316 pruebas pasando): el plan original está completo y la revisión final aprobó.
 - **Decisiones tuyas ya tomadas (D-035 incluida):** D-007 (esquema), D-015 (correo), D-016 (borrar horas), D-017 (formato de fecha), D-018 (carácter nulo). Pendientes: **D-020** (caracteres invisibles en el correo), **D-022** (revocar la cookie al cerrar sesión), **D-023** (un solo profesional) y **D-029** (reservar con menos de 24 h; conviene antes de T-09).
-- Siguiente: no hay tareas pendientes de código; quedan las decisiones tuyas (D-048, D-050, D-051, D-052) y subir el proyecto a GitHub.
+- Siguiente: no hay tareas pendientes de código ni decisiones abiertas; solo tildar la «Definición de terminado» del SPEC con la evidencia de `REVIEW.md`.
 - Pendiente solo tuyo: autorizar (o no) que `app/correo.py` figure en `ARCHITECTURE.md`; es una línea de documentación.
 
 **Tu primer ejercicio:** lanza tú mismo la vuelta de T-14c con el prompt del Paso B y revisa el resultado con la lista del Paso C. Antes de dar por buena cualquier tarea, haz cinco preguntas extra: *¿rompió algo documentado?*, *¿las pruebas fallarían si quitara la protección?*, *¿el reporte afirma algo que no ejecutó?*, *¿cómo interactúa esto con las tareas futuras?* y *¿el arreglo propuesto realmente funciona?*
@@ -357,6 +363,8 @@ docs: documentación base del proyecto Agenda Psi
 
 47. **Acota la revisión al riesgo, y haz que guarde avance.** Un revisor «de todo» que muere por un límite de uso no entrega nada; uno acotado que escribe por secciones entrega algo siempre.
 48. **Un plan terminado no es un proyecto terminado.** Los hallazgos menores del cierre se juntan en una tarea nueva (T-15) en lugar de quedar flotando.
+
+49. **Un riesgo «aceptado» por el implementador se le pasa al revisor.** Y si toca el login, el revisor lo ataca con un script, no solo lee el código.
 
 ## 6. Trampas de principiante que ya viste en acción
 
