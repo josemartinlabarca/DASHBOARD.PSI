@@ -4,6 +4,24 @@ Proyecto de práctica para aprender a trabajar con múltiples agentes de IA.
 Aplicación web liviana donde un **profesional** publica horas disponibles y los
 **pacientes** las reservan.
 
+![Python](https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white)
+![Flask](https://img.shields.io/badge/Flask-3.1-000000?logo=flask&logoColor=white)
+![SQLite](https://img.shields.io/badge/SQLite-003B57?logo=sqlite&logoColor=white)
+![pytest](https://img.shields.io/badge/tests-2.300%2B-0A9EDC?logo=pytest&logoColor=white)
+
+| Panel del profesional | Horas disponibles para el paciente |
+|---|---|
+| ![Panel del profesional con próximas reservas y horas libres](docs/capturas/01-panel-profesional.png) | ![Lista de horas disponibles con botón Reservar](docs/capturas/02-horas-libres.png) |
+
+<sub>Capturas con datos de demostración: los nombres son ficticios.</sub>
+
+## En resumen
+
+- **Producto:** agenda online para un psicólogo. Publica horas, los pacientes reservan y cancelan con 24 horas de anticipación, y ambos reciben avisos.
+- **Seguridad:** contraseñas con hash, CSRF en todos los formularios, SQL parametrizado, cabeceras de seguridad (CSP, anti-frame, nosniff) y límite de intentos de login y registro.
+- **Calidad:** más de 2.300 pruebas automatizadas con pytest, incluidas zonas horarias, reservas simultáneas y entradas maliciosas.
+- **Proceso:** desarrollado con un flujo de varios agentes de IA con roles separados (implementador, revisor, verificador y orquestador). Cada cambio queda trazado en [`TASKS.md`](TASKS.md), [`PROGRESS.md`](PROGRESS.md) y más de 50 decisiones documentadas en [`DECISIONS.md`](DECISIONS.md).
+
 ## Qué hace (resumen)
 
 - Registro e inicio de sesión (roles: `paciente`, `profesional`).

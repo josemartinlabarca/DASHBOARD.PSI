@@ -580,6 +580,14 @@ Autorizas a que se modifique `ARCHITECTURE.md` (que `CLAUDE.md` reserva al human
 - **Alternativas descartadas:** dejarlo y auditar con SQL si existen cuentas legacy (no hay forma de saberlo en cada instalación); dar clave solo si existe la cuenta (revelaría por tiempo/conteo si existe, D-010).
 - **Archivos:** `app/auth.py`, `tests/test_limite.py`. Sin archivos nuevos.
 
+## D-057 — Capturas y resumen de portafolio en el README
+- **Fecha:** 2026-11-07 22:31
+- **Decisión:** se agrega `docs/capturas/` con dos capturas de la app (panel del profesional y horas disponibles) y un bloque «En resumen» al inicio del README. No cambia código, esquema, dependencias, `SPEC.md` ni `ARCHITECTURE.md`.
+- **Por qué:** el repositorio es público y se usará como pieza de portafolio; quien llega por primera vez necesita ver la app y entender el alcance sin leer el README completo.
+- **Cómo se hicieron las capturas:** base nueva en una carpeta temporal (`init-db`, `create-professional`), datos de demostración con nombres ficticios cargados desde la interfaz (7 horas, 2 pacientes, 3 reservas) y captura con Playwright a 1100×780.
+- **Alternativas descartadas:** un GIF del recorrido (pesa más y no aporta para una vista rápida).
+- **Archivos:** `README.md`, `docs/capturas/01-panel-profesional.png`, `docs/capturas/02-horas-libres.png`.
+
 ## Plantilla para nuevas decisiones
 
 ```
